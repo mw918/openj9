@@ -94,6 +94,7 @@ public:
 	MM_HookInterface hookInterface;
 
 	bool collectStringConstants;
+	bool disableInlineAllocation;
 
 	MM_MarkJavaStats markJavaStats;
 #if defined(J9VM_GC_MODRON_SCAVENGER)
@@ -274,6 +275,7 @@ public:
 		, finalizeCycleInterval(J9_FINALIZABLE_INTERVAL)  /* 1/2 second */
 		, finalizeCycleLimit(0)  /* 0 seconds (i.e. no time limit) */
 #endif /* J9VM_GC_FINALIZATION */
+		, disableInlineAllocation(false)
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 		, dynamicClassUnloadingSet(false)
 		, dynamicClassUnloadingKickoffThresholdForced(false)

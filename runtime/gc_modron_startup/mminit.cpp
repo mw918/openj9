@@ -210,6 +210,8 @@ initializeMutatorModelJava(J9VMThread* vmThread)
 		vmThread->activeCardTableBase = extensions->cardTable->getCardTableStart();
 #endif /* J9VM_GC_HEAP_CARD_TABLE */
 	}
+	IDATA const key = extensions->_TLHAsyncCallbackKey;
+	memoryManagerTLHAsyncCallbackHandler(vmThread, key, (void*)vmThread->javaVM);
 	return 0;
 }
 
@@ -3132,6 +3134,8 @@ triggerGCInitialized(J9VMThread* vmThread)
 		regionCount,
 		arrayletLeafSize);
 
+	j9gc_allocation_cache_properties_changed(vmThread);
+
 	return J9VMDLLMAIN_OK;
 }
 
@@ -3160,7 +3164,7 @@ hookVMRegistrationEvent(J9HookInterface** hook, UDATA eventNum, void* voidEventD
 			J9JavaVM* vm = (J9JavaVM*)userData;
 			J9VMThread * currentThread = vm->internalVMFunctions->currentVMThread(vm);
 			if (currentThread != NULL) {
-				j9gc_allocation_threshold_changed(currentThread);
+				j9gc_allocation_cache_properties_changed(currentThread);
 			}
 		}
 	}

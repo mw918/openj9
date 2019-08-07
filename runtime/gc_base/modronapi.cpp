@@ -767,23 +767,50 @@ j9gc_get_object_total_footprint_in_bytes(J9JavaVM *javaVM, j9object_t objectPtr)
 	return MM_GCExtensions::getExtensions(javaVM)->objectModel.getTotalFootprintInBytes(objectPtr);
 }
 
-/**
- * Called whenever the allocation threshold values or enablement state changes.
- * 
- * @parm[in] currentThread The current VM Thread
- */
 void
-j9gc_allocation_threshold_changed(J9VMThread *currentThread)
+j9gc_allocation_cache_properties_changed(J9VMThread *vmThread)
 {
+	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
+	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(env);
+	J9JavaVM * vm = vmThread->javaVM;
+	bool disableInlineAllocation = extensions->disableInlineAllocation;
+	bool instrumentableAllocateHookEnabled = (0 != J9_EVENT_IS_HOOKED(vm->hookInterface, J9HOOK_VM_OBJECT_ALLOCATE_INSTRUMENTABLE));
+	bool disableInlineCacheForAllocationThreshold = false;
+	if (J9_EVENT_IS_HOOKED(vm->hookInterface, J9HOOK_VM_OBJECT_ALLOCATE_WITHIN_THRESHOLD))  {
+		if (extensions->isStandardGC() || extensions->isVLHGC()) {
+#if defined(J9VM_GC_THREAD_LOCAL_HEAP)
+			disableInlineCacheForAllocationThreshold = (extensions->lowAllocationThreshold < (extensions->tlhMaximumSize + extensions->tlhMinimumSize));
+#endif /* defined(J9VM_GC_THREAD_LOCAL_HEAP) */
+		} else if (extensions->isSegregatedHeap()) {
+#if defined(J9VM_GC_SEGREGATED_HEAP)
+			disableInlineCacheForAllocationThreshold = (extensions->lowAllocationThreshold <= J9VMGC_SIZECLASSES_MAX_SMALL_SIZE_BYTES);
+#endif /* defined(J9VM_GC_SEGREGATED_HEAP) */
+		}
+	}
+	bool disableInlineCacheForOutOfLineTrace = false;
+	if (extensions->doOutOfLineAllocationTrace) {
+		if (extensions->isStandardGC() || extensions->isVLHGC()) {
+#if defined(J9VM_GC_THREAD_LOCAL_HEAP)
+			disableInlineCacheForOutOfLineTrace = (extensions->oolObjectSamplingBytesGranularity < (extensions->tlhMaximumSize + extensions->tlhMinimumSize));
+#endif /* defined(J9VM_GC_THREAD_LOCAL_HEAP) */
+		} else if (extensions->isSegregatedHeap()) {
+#if defined(J9VM_GC_SEGREGATED_HEAP)
+			disableInlineCacheForOutOfLineTrace = (extensions->oolObjectSamplingBytesGranularity <= J9VMGC_SIZECLASSES_MAX_SMALL_SIZE_BYTES);
+#endif /* defined(J9VM_GC_SEGREGATED_HEAP) */
+		}
+	}
+
+	extensions->disableInlineAllocation = instrumentableAllocateHookEnabled | disableInlineCacheForAllocationThreshold | disableInlineCacheForOutOfLineTrace;
+
+	if (disableInlineAllocation != extensions->disableInlineAllocation) {
 #if defined(J9VM_GC_THREAD_LOCAL_HEAP) || defined(J9VM_GC_SEGREGATED_HEAP)
-	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(currentThread);
-	J9JavaVM *vm = currentThread->javaVM;
-	J9InternalVMFunctions const * const vmFuncs = vm->internalVMFunctions;
-	IDATA const key = extensions->_TLHAsyncCallbackKey;
-	vmFuncs->J9SignalAsyncEvent(vm, NULL, key);
-	vmFuncs->J9CancelAsyncEvent(vm, currentThread, key);
-	memoryManagerTLHAsyncCallbackHandler(currentThread, key, (void*)vm);
+		J9InternalVMFunctions const * const vmFuncs = vm->internalVMFunctions;
+		IDATA const key = extensions->_TLHAsyncCallbackKey;
+		vmFuncs->J9SignalAsyncEvent(vm, NULL, key);
+		vmFuncs->J9CancelAsyncEvent(vm, vmThread, key);
+		memoryManagerTLHAsyncCallbackHandler(vmThread, key, (void*)vm);
 #endif /* defined(J9VM_GC_THREAD_LOCAL_HEAP) || defined(J9VM_GC_SEGREGATED_HEAP) */
+	}
 }
 
 /**
@@ -802,14 +829,17 @@ j9gc_allocation_threshold_changed(J9VMThread *currentThread)
  * @parm[in] samplingInterval The allocation sampling interval.
  */
 void 
-j9gc_set_allocation_sampling_interval(J9VMThread *vmThread, UDATA samplingInterval)
+j9gc_set_allocation_sampling_interval(J9VMThread *currentThread, UDATA samplingInterval)
 {
-	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(vmThread->javaVM);
+	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(currentThread->javaVM);
 	if (0 == samplingInterval) {
 		/* avoid (env->_oolTraceAllocationBytes) % 0 which could be undefined. */
 		samplingInterval = 1;
 	}
+	//extensions->doOutOfLineAllocationTrace = true;
 	extensions->oolObjectSamplingBytesGranularity = samplingInterval;
+
+	j9gc_allocation_cache_properties_changed(currentThread);
 }
 
 /**
@@ -840,7 +870,7 @@ j9gc_set_allocation_threshold(J9VMThread *vmThread, UDATA low, UDATA high)
 	
 	ext->lowAllocationThreshold = low;
 	ext->highAllocationThreshold = high;
-	j9gc_allocation_threshold_changed(vmThread);
+	j9gc_allocation_cache_properties_changed(vmThread);
 
 	Trc_MM_AllocationThreshold_setAllocationThreshold_Exit(vmThread);
 }
