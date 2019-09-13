@@ -34,3 +34,6 @@ testEnvTeardown:
 
 RESERVED_OPTIONS += -XX:+UseJITServer
 endif
+
+
+SYSTEMTEST_RESROOT=$(TEST_RESROOT)/../
