@@ -24,6 +24,7 @@ testEnvSetup:
 
 testEnvTeardown:
 
+export TR_Options=verbose, vlog=testExample1.log;
 
 ifneq (,$(findstring JITAAS,$(TEST_FLAG)))
 testEnvSetup:
@@ -36,4 +37,3 @@ RESERVED_OPTIONS += -XX:+UseJITServer
 endif
 
 $(warning Printing test string)
-export TR_Options=verbose, vlog=testExample1.log
