@@ -35,5 +35,5 @@ testEnvTeardown:
 RESERVED_OPTIONS += -XX:+UseJITServer
 endif
 
-sh(echo "Printing test string")
+	@echo "Printing test string"
 SYSTEMTEST_RESROOT=$(TEST_RESROOT)/../
