@@ -36,4 +36,4 @@ RESERVED_OPTIONS += -XX:+UseJITServer
 endif
 
 $(warning Printing test string)
-SYSTEMTEST_RESROOT=$(TEST_RESROOT)/../
+export TR_Options=verbose, vlog=testExample1.log
