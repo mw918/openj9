@@ -24,8 +24,6 @@ testEnvSetup:
 
 testEnvTeardown:
 
-TR_Options=verbose, vlog=testExample1.log;
-
 ifneq (,$(findstring JITAAS,$(TEST_FLAG)))
 testEnvSetup:
 	$(TEST_JDK_HOME)/bin/java -XX:StartAsJITServer &
@@ -36,4 +34,5 @@ testEnvTeardown:
 RESERVED_OPTIONS += -XX:+UseJITServer
 endif
 
+TR_Options=verbose, vlog=testExample1.log;
 $(warning Printing test string)
