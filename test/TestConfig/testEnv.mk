@@ -24,7 +24,7 @@ testEnvSetup:
 
 testEnvTeardown:
 
-export TR_Options=verbose, vlog=testExample1.log;
+TR_Options=verbose, vlog=testExample1.log;
 
 ifneq (,$(findstring JITAAS,$(TEST_FLAG)))
 testEnvSetup:
