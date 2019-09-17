@@ -34,5 +34,6 @@ testEnvTeardown:
 RESERVED_OPTIONS += -XX:+UseJITServer
 endif
 
-export TR_Options=verbose, vlog=testExample1.log;
+
 $(warning Printing test string)
+export TR_Options=verbose, vlog=testExample1.log;
