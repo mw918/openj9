@@ -24,7 +24,7 @@
 
 #include <ctype.h>
 #include <stddef.h>
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "env/KnownObjectTable.hpp"
 #include "env/PersistentCHTable.hpp"
 #include "env/VMJ9.h"
@@ -40,9 +40,9 @@
 #include "il/DataTypes.hpp"
 #include "il/ILOps.hpp"
 #include "il/Node.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "ilgen/IlGenRequest.hpp"
 #include "ilgen/IlGeneratorMethodDetails.hpp"
 #include "optimizer/Optimization_inlines.hpp"

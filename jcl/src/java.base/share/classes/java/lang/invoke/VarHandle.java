@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar19-SE]*/
 /*******************************************************************************
- * Copyright (c) 2017, 2019 IBM Corp. and others
+ * Copyright (c) 2017, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -28,6 +28,7 @@ import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.ArrayList;
 /*[IF Java12]*/
 import java.util.Optional;
 /*[ENDIF]*/
@@ -45,6 +46,14 @@ import java.lang.constant.DirectMethodHandleDesc;
 import java.lang.constant.DynamicConstantDesc;
 import java.util.Objects;
 /*[ENDIF] Java12 */
+
+import java.util.Map;
+import java.util.HashMap;
+
+/*[IF Java14]*/
+import java.util.function.BiFunction;
+import java.lang.reflect.Method;
+/*[ENDIF] Java14 */
 
 /**
  * Dynamically typed reference to a field, allowing read and write operations, 
@@ -66,165 +75,173 @@ public abstract class VarHandle extends VarHandleInternal
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#get(Object...) get(Object...)}.
 		 */
-		GET("get", SignatureType.getter, false), //$NON-NLS-1$
+		GET("get", AccessType.GET, false), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#set(Object...) set(Object...)}.
 		 */
-		SET("set", SignatureType.setter, true), //$NON-NLS-1$
+		SET("set", AccessType.SET, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getVolatile(Object...) getVolatile(Object...)}.
 		 */
-		GET_VOLATILE("getVolatile", SignatureType.getter, false), //$NON-NLS-1$
+		GET_VOLATILE("getVolatile", AccessType.GET, false), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#setVolatile(Object...) setVolatile(Object...)}.
 		 */
-		SET_VOLATILE("setVolatile", SignatureType.setter, true), //$NON-NLS-1$
+		SET_VOLATILE("setVolatile", AccessType.SET, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getOpaque(Object...) getOpaque(Object...)}.
 		 */
-		GET_OPAQUE("getOpaque", SignatureType.getter, false), //$NON-NLS-1$
+		GET_OPAQUE("getOpaque", AccessType.GET, false), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#setOpaque(Object...) setOpaque(Object...)}.
 		 */
-		SET_OPAQUE("setOpaque", SignatureType.setter, true), //$NON-NLS-1$
+		SET_OPAQUE("setOpaque", AccessType.SET, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAcquire(Object...) getAcquire(Object...)}.
 		 */
-		GET_ACQUIRE("getAcquire", SignatureType.getter, false), //$NON-NLS-1$
+		GET_ACQUIRE("getAcquire", AccessType.GET, false), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#setRelease(Object...) setRelease(Object...)}.
 		 */
-		SET_RELEASE("setRelease", SignatureType.setter, true), //$NON-NLS-1$
+		SET_RELEASE("setRelease", AccessType.SET, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#compareAndSet(Object...) compareAndSet(Object...)}.
 		 */
-		COMPARE_AND_SET("compareAndSet", SignatureType.compareAndSet, true), //$NON-NLS-1$
+		COMPARE_AND_SET("compareAndSet", AccessType.COMPARE_AND_SET, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#compareAndExchange(Object...) compareAndExchange(Object...)}.
 		 */
-		COMPARE_AND_EXCHANGE("compareAndExchange", SignatureType.compareAndExchange, true), //$NON-NLS-1$
+		COMPARE_AND_EXCHANGE("compareAndExchange", AccessType.COMPARE_AND_EXCHANGE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#compareAndExchangeAcquire(Object...) compareAndExchangeAcquire(Object...)}.
 		 */
-		COMPARE_AND_EXCHANGE_ACQUIRE("compareAndExchangeAcquire", SignatureType.compareAndExchange, true), //$NON-NLS-1$
+		COMPARE_AND_EXCHANGE_ACQUIRE("compareAndExchangeAcquire", AccessType.COMPARE_AND_EXCHANGE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#compareAndExchangeRelease(Object...) compareAndExchangeRelease(Object...)}.
 		 */
-		COMPARE_AND_EXCHANGE_RELEASE("compareAndExchangeRelease", SignatureType.compareAndExchange, true), //$NON-NLS-1$
+		COMPARE_AND_EXCHANGE_RELEASE("compareAndExchangeRelease", AccessType.COMPARE_AND_EXCHANGE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#weakCompareAndSet(Object...) weakCompareAndSet(Object...)}.
 		 */
-		WEAK_COMPARE_AND_SET("weakCompareAndSet", SignatureType.compareAndSet, true), //$NON-NLS-1$
+		WEAK_COMPARE_AND_SET("weakCompareAndSet", AccessType.COMPARE_AND_SET, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#weakCompareAndSetAcquire(Object...) weakCompareAndSetAcquire(Object...)}.
 		 */
-		WEAK_COMPARE_AND_SET_ACQUIRE("weakCompareAndSetAcquire", SignatureType.compareAndSet, true), //$NON-NLS-1$
+		WEAK_COMPARE_AND_SET_ACQUIRE("weakCompareAndSetAcquire", AccessType.COMPARE_AND_SET, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#weakCompareAndSetRelease(Object...) weakCompareAndSetRelease(Object...)}.
 		 */
-		WEAK_COMPARE_AND_SET_RELEASE("weakCompareAndSetRelease", SignatureType.compareAndSet, true), //$NON-NLS-1$
+		WEAK_COMPARE_AND_SET_RELEASE("weakCompareAndSetRelease", AccessType.COMPARE_AND_SET, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#weakCompareAndSetPlain(Object...) weakCompareAndSetPlain(Object...)}.
 		 */
-		WEAK_COMPARE_AND_SET_PLAIN("weakCompareAndSetPlain", SignatureType.compareAndSet, true), //$NON-NLS-1$
+		WEAK_COMPARE_AND_SET_PLAIN("weakCompareAndSetPlain", AccessType.COMPARE_AND_SET, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndSet(Object...) getAndSet(Object...)}.
 		 */
-		GET_AND_SET("getAndSet", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_SET("getAndSet", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndSetAcquire(Object...) getAndSetAcquire(Object...)}.
 		 */
-		GET_AND_SET_ACQUIRE("getAndSetAcquire", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_SET_ACQUIRE("getAndSetAcquire", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndSetRelease(Object...) getAndSetRelease(Object...)}.
 		 */
-		GET_AND_SET_RELEASE("getAndSetRelease", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_SET_RELEASE("getAndSetRelease", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndAdd(Object...) getAndAdd(Object...)}.
 		 */
-		GET_AND_ADD("getAndAdd", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_ADD("getAndAdd", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndAddAcquire(Object...) getAndAddAcquire(Object...)}.
 		 */
-		GET_AND_ADD_ACQUIRE("getAndAddAcquire", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_ADD_ACQUIRE("getAndAddAcquire", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndAddRelease(Object...) getAndAddRelease(Object...)}.
 		 */
-		GET_AND_ADD_RELEASE("getAndAddRelease", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_ADD_RELEASE("getAndAddRelease", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndBitwiseAnd(Object...) getAndBitwiseAnd(Object...)}.
 		 */
-		GET_AND_BITWISE_AND("getAndBitwiseAnd", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_BITWISE_AND("getAndBitwiseAnd", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndBitwiseAndAcquire(Object...) getAndBitwiseAndAcquire(Object...)}.
 		 */
-		GET_AND_BITWISE_AND_ACQUIRE("getAndBitwiseAndAcquire", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_BITWISE_AND_ACQUIRE("getAndBitwiseAndAcquire", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndBitwiseAndRelease(Object...) getAndBitwiseAndRelease(Object...)}.
 		 */
-		GET_AND_BITWISE_AND_RELEASE("getAndBitwiseAndRelease", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_BITWISE_AND_RELEASE("getAndBitwiseAndRelease", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndBitwiseOr(Object...) getAndBitwiseOr(Object...)}.
 		 */
-		GET_AND_BITWISE_OR("getAndBitwiseOr", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_BITWISE_OR("getAndBitwiseOr", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndBitwiseOrAcquire(Object...) getAndBitwiseOrAcquire(Object...)}.
 		 */
-		GET_AND_BITWISE_OR_ACQUIRE("getAndBitwiseOrAcquire", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_BITWISE_OR_ACQUIRE("getAndBitwiseOrAcquire", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndBitwiseOrRelease(Object...) getAndBitwiseOrRelease(Object...)}.
 		 */
-		GET_AND_BITWISE_OR_RELEASE("getAndBitwiseOrRelease", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_BITWISE_OR_RELEASE("getAndBitwiseOrRelease", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndBitwiseXor(Object...) getAndBitwiseXor(Object...)}.
 		 */
-		GET_AND_BITWISE_XOR("getAndBitwiseXor", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_BITWISE_XOR("getAndBitwiseXor", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndBitwiseXorAcquire(Object...) getAndBitwiseXorAcquire(Object...)}.
 		 */
-		GET_AND_BITWISE_XOR_ACQUIRE("getAndBitwiseXorAcquire", SignatureType.getAndSet, true), //$NON-NLS-1$
+		GET_AND_BITWISE_XOR_ACQUIRE("getAndBitwiseXorAcquire", AccessType.GET_AND_UPDATE, true), //$NON-NLS-1$
 		
 		/**
 		 * The {@link AccessMode} corresponding to {@link VarHandle#getAndBitwiseXorRelease(Object...) getAndBitwiseXorRelease(Object...)}.
 		 */
-		GET_AND_BITWISE_XOR_RELEASE("getAndBitwiseXorRelease", SignatureType.getAndSet, true); //$NON-NLS-1$
+		GET_AND_BITWISE_XOR_RELEASE("getAndBitwiseXorRelease", AccessType.GET_AND_UPDATE, true); //$NON-NLS-1$
 		
-		SignatureType signatureType;
+		AccessType at;
 		boolean isSetter;
 		private String methodName;
-		
-		AccessMode(String methodName, SignatureType signatureType, boolean isSetter) {
+
+		static final Map<String, AccessMode> methodNameToAccessMode;
+		static {
+			methodNameToAccessMode = new HashMap<>();
+			for (AccessMode accessMode : values()) {
+				methodNameToAccessMode.put(accessMode.methodName, accessMode);
+			}
+		}
+
+		AccessMode(String methodName, AccessType signatureType, boolean isSetter) {
 			this.methodName = methodName;
-			this.signatureType = signatureType;
+			this.at = signatureType;
 			this.isSetter = isSetter;
 		}
 		
@@ -242,10 +259,9 @@ public abstract class VarHandle extends VarHandleInternal
 		 * @return The AccessMode associated with the provided method name.
 		 */
 		public static AccessMode valueFromMethodName(String methodName) {
-			for (AccessMode m : values()) {
-				if (m.methodName.equals(methodName)) {
-					return m;
-				}
+			AccessMode accessMode = methodNameToAccessMode.get(methodName);
+			if (accessMode != null) {
+				return accessMode;
 			}
 
 			/*[MSG "K0633", "{0} is not a valid AccessMode."]*/
@@ -253,17 +269,73 @@ public abstract class VarHandle extends VarHandleInternal
 		}
 	}
 	
-	enum SignatureType {
-		getter,
-		setter,
-		compareAndSet,
-		compareAndExchange,
-		getAndSet,
-		invalid;
+	enum AccessType {
+		GET,
+		SET,
+		COMPARE_AND_SET,
+		COMPARE_AND_EXCHANGE,
+		GET_AND_UPDATE;
+
+		/**
+		 * Gets the MethodType associated with the AccessType.
+		 * 
+		 * This method gets invoked by the derived VarHandle classes through accessModeTypeUncached.
+		 * 
+		 * OpenJ9 only uses it to retrieve the receiver class, which is not available from VarForm.
+		 * 
+		 * @param receiver class of the derived VarHandle.
+		 * @param type is the field type or value type.
+		 * @param args is the list of intermediate argument classes in the derived VarHandle's
+		 * AccessMode methods.
+		 * @return the MethodType for the corresponding AccessType.
+		 */
+		MethodType accessModeType(Class<?> receiver, Class<?> type, Class<?>... args) {
+			List<Class<?>> paramList = new ArrayList<>();
+			Class<?> returnType = null;
+			switch (this) {
+			case GET:
+				returnType = type;
+				paramList.add(receiver);
+				Collections.addAll(paramList, args);
+				break;
+			case SET:
+				returnType = void.class;
+				paramList.add(receiver);
+				Collections.addAll(paramList, args);
+				paramList.add(type);
+				break;
+			case COMPARE_AND_SET:
+				returnType = boolean.class;
+				paramList.add(receiver);
+				Collections.addAll(paramList, args);
+				Collections.addAll(paramList, type, type);
+				break;
+			case COMPARE_AND_EXCHANGE:
+				returnType = type;
+				paramList.add(receiver);
+				Collections.addAll(paramList, args);
+				Collections.addAll(paramList, type, type);
+				break;
+			case GET_AND_UPDATE:
+				returnType = type;
+				paramList.add(receiver);
+				Collections.addAll(paramList, args);
+				paramList.add(type);
+				break;
+			default:
+				throw new InternalError("Invalid AccessType.");
+			}
+			return MethodType.methodType(returnType, paramList);
+		}
 	}
 	
 	static final Unsafe _unsafe = Unsafe.getUnsafe();
 	static final Lookup _lookup = Lookup.internalPrivilegedLookup;
+
+/*[IF Java14]*/
+	static final BiFunction<String, List<Integer>, ArrayIndexOutOfBoundsException> AIOOBE_SUPPLIER = null;
+	private boolean varFormUsed = false;
+/*[ENDIF] Java14 */
 	
 	private final MethodHandle[] handleTable;
 	final Class<?> fieldType;
@@ -287,7 +359,151 @@ public abstract class VarHandle extends VarHandleInternal
 		this.handleTable = handleTable;
 		this.modifiers = modifiers;
 	}
-	
+
+/*[IF Java14]*/
+	/**
+	 * Constructs a generic VarHandle instance.
+	 *
+	 * @param varForm an instance of VarForm.
+	 */
+	VarHandle(VarForm varForm) {
+		AccessMode[] accessModes = AccessMode.values();
+		int numAccessModes = accessModes.length;
+
+		/* The first argument in AccessType.GET MethodType is the receiver class. */
+		Class<?> receiverActual = accessModeTypeUncached(AccessMode.GET).parameterType(0);
+		Class<?> receiverVarForm = varForm.methodType_table[AccessType.GET.ordinal()].parameterType(0);
+		
+		/* Specify the exact operation method types if the actual receiver doesn't match the
+		 * receiver derived from VarForm.
+		 */
+		MethodType[] operationMTsExact = null;
+		if (receiverActual != receiverVarForm) {
+			operationMTsExact = new MethodType[numAccessModes];
+		}
+		
+		MethodType[] operationMTs = new MethodType[numAccessModes];
+		Class<?> operationsClass = null;
+
+		for (int i = 0; i < numAccessModes; i++) {
+			MemberName memberName = varForm.memberName_table[i];
+			if (memberName != null) {
+				Method method = memberName.method;
+				if (method != null) {
+					operationMTs[i] = MethodType.methodType(method.getReturnType(), method.getParameterTypes());
+					if (operationMTsExact != null) {
+						/* Replace with the actual receiver, which is expected when the operation method
+						 * is invoked. The receiver is the second argument. 
+						 */
+						operationMTsExact[i] = operationMTs[i].changeParameterType(1, receiverActual);
+					}
+					if (operationsClass == null) {
+						operationsClass = method.getDeclaringClass();
+					}
+				}
+			}
+		}
+
+		MethodType getter = operationMTs[AccessMode.GET.ordinal()];
+		MethodType setter = operationMTs[AccessMode.SET.ordinal()];
+		
+		if (operationMTsExact != null) {
+			getter = operationMTsExact[AccessMode.GET.ordinal()];
+			setter = operationMTsExact[AccessMode.SET.ordinal()];
+		}
+
+		this.fieldType = setter.parameterType(setter.parameterCount() - 1);
+		
+		/* The first VarHandle parameter type should be removed from the getter in order to derive
+		 * the coordinate types. 
+		 */
+		Class<?>[] getterParams = getter.parameterArray();
+		this.coordinateTypes = Arrays.copyOfRange(getterParams, 1, getterParams.length);
+		
+		if (operationMTsExact != null) {
+			this.handleTable = populateMHsJEP370(operationsClass, operationMTs, operationMTsExact);
+		} else {
+			this.handleTable = populateMHsJEP370(operationsClass, operationMTs, operationMTs);
+		}
+		
+		this.modifiers = 0;
+		this.varFormUsed = true;
+	}
+
+	/**
+	 * This is derived from populateMHs in order to support the OpenJDK VarHandle operations classes, which
+	 * don't extend the VarHandleOperations class. 
+	 *
+	 * @param operationsClass the class which has all AccessMode methods defined.
+	 * @param lookupTypes the method types for the AccessMode methods in the operationsClass.
+	 * @param exactType the exact method types to be expected when VarHandle AccessMode methods are invoked.
+	 * @return a MethodHandle array which is used to initialize the handleTable.
+	 */
+	static MethodHandle[] populateMHsJEP370(Class<?> operationsClass, MethodType[] lookupTypes, MethodType[] exactTypes) {
+		MethodHandle[] operationMHs = new MethodHandle[AccessMode.values().length];
+
+		try {
+			/* Lookup the MethodHandles corresponding to access modes. */
+			for (AccessMode accessMode : AccessMode.values()) {
+				MethodType lookupType = lookupTypes[accessMode.ordinal()];
+				if (lookupType != null) {
+					operationMHs[accessMode.ordinal()] = _lookup.findStatic(operationsClass, accessMode.methodName(), lookupType);
+					if (lookupTypes == exactTypes) {
+						operationMHs[accessMode.ordinal()] = permuateHandleJEP370(operationMHs[accessMode.ordinal()]);
+					} else {
+						/* Clone the MethodHandles with the exact types if different set of exactTypes are provided. */
+						MethodType exactType = exactTypes[accessMode.ordinal()];
+						if (exactType != null) {
+							operationMHs[accessMode.ordinal()] = operationMHs[accessMode.ordinal()].cloneWithNewType(exactType);
+						}
+						operationMHs[accessMode.ordinal()] = permuateHandleJEP370(operationMHs[accessMode.ordinal()]);
+					}
+				}
+			}
+		} catch (IllegalAccessException | NoSuchMethodException e) {
+			/* [MSG "K0623", "Unable to create MethodHandle to VarHandle operation."] */
+			InternalError error = new InternalError(com.ibm.oti.util.Msg.getString("K0623")); //$NON-NLS-1$
+			error.initCause(e);
+			throw error;
+		}
+
+		return operationMHs;
+	}
+
+	/**
+	 * Generate a MethodHandle which translates:
+	 *     FROM {Receiver, Intermediate ..., Value, VarHandle}ReturnType
+	 *     TO   {VarHandle, Receiver, Intermediate ..., Value}ReturnType
+	 *     
+	 * @param methodHandle to be permuted.
+	 * @return the adapter MethodHandle which performs the translation.
+	 */
+	static MethodHandle permuateHandleJEP370(MethodHandle methodHandle) {
+		/* HandleType = {VarHandle, Receiver, Intermediate ..., Value}
+		 * PermuteType = {Receiver, Intermediate ..., Value, VarHandle}
+		 */
+		MethodType permuteMethodType = methodHandle.type;
+		int parameterCount = permuteMethodType.parameterCount();
+		Class<?> firstParameter = permuteMethodType.parameterType(0);
+		permuteMethodType = permuteMethodType.dropFirstParameterType();
+		permuteMethodType = permuteMethodType.appendParameterTypes(firstParameter);
+
+		/* reorder specifies the mapping between PermuteType and HandleType
+		 * reorder = {parameterCount - 1, 0, 1, 2, ..., parameterCount - 2}
+		 */
+		int[] reorder = new int[parameterCount];
+		for (int i = 0; i < parameterCount; i++) {
+			if (i == 0) {
+				reorder[i] = parameterCount - 1;
+			} else {
+				reorder[i] = i - 1;
+			}
+		}
+
+		return MethodHandles.permuteArguments(methodHandle, permuteMethodType, reorder);
+	}
+/*[ENDIF] Java14 */
+
 	Class<?> getDefiningClass() {
 		/*[MSG "K0627", "Expected override of this method."]*/
 		throw new InternalError(com.ibm.oti.util.Msg.getString("K0627")); //$NON-NLS-1$
@@ -425,12 +641,17 @@ public abstract class VarHandle extends VarHandleInternal
 	 * @return The {@link MethodType} corresponding to the provided {@link AccessMode}.
 	 */
 	public final MethodType accessModeType(AccessMode accessMode) {
-		MethodType internalType = handleTable[accessMode.ordinal()].type;
-		int numOfArguments = internalType.arguments.length;
-		
-		// Drop the internal VarHandle argument
-		MethodType modifiedType = internalType.dropParameterTypes(numOfArguments - 1, numOfArguments);
-		
+		MethodType modifiedType = null;
+		MethodHandle internalHandle = handleTable[accessMode.ordinal()];
+		if (internalHandle == null) {
+			modifiedType = accessModeTypeUncached(accessMode);
+		} else {
+			MethodType internalType = internalHandle.type;
+			int numOfArguments = internalType.arguments.length;
+
+			/* Drop the internal VarHandle argument. */
+			modifiedType = internalType.dropParameterTypes(numOfArguments - 1, numOfArguments);
+		}
 		return modifiedType;
 	}
 	
@@ -442,6 +663,12 @@ public abstract class VarHandle extends VarHandleInternal
 	 * @return A boolean value indicating whether the {@link AccessMode} is supported.
 	 */
 	boolean isAccessModeSupportedHelper(AccessMode accessMode) {
+/*[IF Java14]*/
+		if (varFormUsed) {
+			return (handleTable[accessMode.ordinal()] != null);
+		}
+/*[ENDIF] Java14 */
+		
 		switch (accessMode) {
 		case GET:
 		case GET_VOLATILE:
@@ -505,10 +732,24 @@ public abstract class VarHandle extends VarHandleInternal
 	 */
 	public final MethodHandle toMethodHandle(AccessMode accessMode) {
 		MethodHandle mh = handleTable[accessMode.ordinal()];
-		mh = MethodHandles.insertArguments(mh, mh.type.parameterCount() - 1, this);
-		
-		if (!isAccessModeSupported(accessMode)) {
-			MethodType mt = mh.type;
+
+		if (mh != null) {
+			mh = MethodHandles.insertArguments(mh, mh.type.parameterCount() - 1, this);
+		}
+
+		if ((mh == null) || !isAccessModeSupported(accessMode)) {
+			MethodType mt = null;
+
+			if (mh != null) {
+				mt = mh.type;
+			} else {
+				mt = accessModeTypeUncached(accessMode);
+				/* accessModeTypeUncached does not return null. It throws InternalError if the method type
+				 * cannot be determined.
+				 */
+				mt = mt.appendParameterTypes(this.getClass());
+			}
+
 			try {
 				mh = _lookup.findStatic(VarHandle.class, "throwUnsupportedOperationException", MethodType.methodType(void.class)); //$NON-NLS-1$
 			} catch (Throwable e) {
@@ -516,6 +757,7 @@ public abstract class VarHandle extends VarHandleInternal
 				error.initCause(e);
 				throw error;
 			}
+
 			/* The resulting method handle must come with the same signature as the requested access mode method
 			 * so as to throw out UnsupportedOperationException from that method.
 			 */
@@ -1264,4 +1506,6 @@ public abstract class VarHandle extends VarHandleInternal
 		}		
 	}
 /*[ENDIF] Java12 */ 
+
+	abstract MethodType accessModeTypeUncached(AccessMode accessMode);
 }

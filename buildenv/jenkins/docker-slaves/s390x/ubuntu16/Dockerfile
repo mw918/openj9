@@ -1,4 +1,4 @@
-# Copyright (c) 2018, 2019 IBM Corp. and others
+# Copyright (c) 2018, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -79,12 +79,6 @@ RUN apt-get update \
     zip \
   && rm -rf /var/lib/apt/lists/*
 
-# Dependency required by test framework
-RUN wget -O - http://cpanmin.us | perl - --self-upgrade \
-  && cpanm Text::CSV \
-  && cpanm JSON \
-  && cpanm XML::Parser
-
 # Install GCC-7.4
 RUN cd /usr/local \
   && wget -O gcc-7.tar.xz "https://ci.adoptopenjdk.net/userContent/gcc/gcc740+ccache.s390x.tar.xz" \
@@ -98,8 +92,21 @@ RUN ln -s /usr/lib/s390x-linux-gnu /usr/lib64 \
   && ln -s /usr/local/bin/g++-7.4 /usr/bin/g++-7 \
   && ln -s /usr/local/bin/gcc-7.4 /usr/bin/gcc-7
 
+# Install Protobuf 3.7.1
+RUN cd /tmp \
+  && wget https://github.com/protocolbuffers/protobuf/releases/download/v3.7.1/protobuf-cpp-3.7.1.tar.gz \
+  && tar -xzf protobuf-cpp-3.7.1.tar.gz \
+  && rm -f protobuf-cpp-3.7.1.tar.gz \
+  && cd ./protobuf-3.7.1 \
+  && ./configure --disable-shared --with-pic \
+  && make \
+  && make install \
+  && cd .. \
+  && rm -rf /tmp/protobuf-3.7.1
+
 # Edit ldconfig to connect the new libstdc++.so* library
 RUN echo "/usr/local/lib64" >> /etc/ld.so.conf.d/local.conf \
+  && echo "/usr/local/lib" >> /etc/ld.so.conf.d/usr-local.conf \
   && ldconfig
 
 # Install cmake version 3.11.4
@@ -149,7 +156,7 @@ RUN mkdir -p /usr/lib/jvm/adoptojdk-java-11 \
   && mv bootjdk11/* /usr/lib/jvm/adoptojdk-java-11 \
   && rm -rf bootjdk11
 
-# Download and install boot JDK from AdoptOpenJDK for java 13 and higher
+# Download and install boot JDK from AdoptOpenJDK for java 13
 RUN mkdir -p /usr/lib/jvm/adoptojdk-java-12 \
   && cd /usr/lib/jvm/adoptojdk-java-12 \
   && wget -O bootjdk12.tar.gz "https://api.adoptopenjdk.net/v2/binary/releases/openjdk12?openjdk_impl=openj9&os=linux&arch=s390x&release=latest&type=jdk" \
@@ -158,6 +165,16 @@ RUN mkdir -p /usr/lib/jvm/adoptojdk-java-12 \
   && mv $(ls | grep -i jdk-12) bootjdk12 \
   && mv bootjdk12/* /usr/lib/jvm/adoptojdk-java-12 \
   && rm -rf bootjdk12
+
+# Download and install boot JDK from AdoptOpenJDK for java 14 and higher
+RUN mkdir -p /usr/lib/jvm/adoptojdk-java-13 \
+  && cd /usr/lib/jvm/adoptojdk-java-13 \
+  && wget -O bootjdk13.tar.gz "https://api.adoptopenjdk.net/v2/binary/releases/openjdk13?openjdk_impl=openj9&os=linux&arch=s390x&release=latest&type=jdk" \
+  && tar -xzf bootjdk13.tar.gz \
+  && rm -f bootjdk13.tar.gz \
+  && mv $(ls | grep -i jdk-13) bootjdk13 \
+  && mv bootjdk13/* /usr/lib/jvm/adoptojdk-java-13 \
+  && rm -rf bootjdk13
 
 # Set up sshd config
 RUN mkdir /var/run/sshd \
@@ -175,10 +192,10 @@ EXPOSE 22
 RUN mkdir /home/${USER}/openjdk_cache \
   && cd /home/${USER}/openjdk_cache \
   && git init --bare \
-  && git remote add jdk13 https://github.com/ibmruntimes/openj9-openjdk-jdk13.git \
+  && git remote add jdk13 https://github.com/ibmruntimes/openj9-openjdk-jdk14.git \
   && git remote add jdk8 https://github.com/ibmruntimes/openj9-openjdk-jdk8.git \
   && git remote add jdk11 https://github.com/ibmruntimes/openj9-openjdk-jdk11.git \
-  && git remote add jdk12 https://github.com/ibmruntimes/openj9-openjdk-jdk12.git \
+  && git remote add jdk12 https://github.com/ibmruntimes/openj9-openjdk-jdk13.git \
   && git remote add jdk https://github.com/ibmruntimes/openj9-openjdk-jdk.git \
   && git remote add openj9 https://github.com/eclipse/openj9.git \
   && git remote add omr https://github.com/eclipse/openj9-omr.git \

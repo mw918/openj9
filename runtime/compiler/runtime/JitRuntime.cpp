@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -36,7 +36,8 @@
 #include "j9.h"
 #include "jitprotos.h"
 #include "codegen/CodeGenerator.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
+#include "codegen/PrivateLinkage.hpp"
 #include "compile/CompilationTypes.hpp"
 #include "compile/Method.hpp"
 #include "control/CompilationController.hpp"
@@ -244,7 +245,7 @@ J9::Recompilation::induceRecompilation(
       bool *queued,
       TR_OptimizationPlan *optimizationPlan)
    {
-   TR_LinkageInfo              *linkageInfo = TR_LinkageInfo::get(startPC);
+   J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
    TR_PersistentMethodInfo     *methodInfo;
    TR_PersistentJittedBodyInfo *bodyInfo;
 
@@ -345,7 +346,7 @@ void induceRecompilation_unwrapper(void **argsPtr, void **resultPtr)
 extern "C" {
 
 
-void J9FASTCALL _jitProfileParseBuffer(uintptrj_t vmThread)
+void J9FASTCALL _jitProfileParseBuffer(uintptr_t vmThread)
    {
    J9VMThread *currentThread = (J9VMThread *)vmThread;
    J9JITConfig * jitConfg = currentThread->javaVM->jitConfig;
@@ -449,12 +450,12 @@ void J9FASTCALL _jitProfileAddress(uintptr_t value, TR_LinkedListProfilerInfo<ui
 
 extern "C" {
 
-void J9FASTCALL _jProfile32BitValue(uint32_t value, TR_HashTableProfilerInfo<uint32_t> *table)
+void J9FASTCALL jProfile32BitValue(uint32_t value, TR_HashTableProfilerInfo<uint32_t> *table)
    {
    table->addKey(value);
    }
 
-void J9FASTCALL _jProfile64BitValue(uint64_t value, TR_HashTableProfilerInfo<uint64_t> *table)
+void J9FASTCALL jProfile64BitValue(uint64_t value, TR_HashTableProfilerInfo<uint64_t> *table)
    {
    table->addKey(value);
    }
@@ -614,7 +615,7 @@ void J9FASTCALL _jitProfileBigDecimalValue(uintptr_t value, uintptr_t bigdecimal
 
 
 extern "C" {
-void J9FASTCALL _jitProfileStringValue(uintptrj_t value, int32_t charsOffset, int32_t lengthOffset, TR_LinkedListProfilerInfo<TR_ByteInfo> *info, int32_t maxNumValuesProfiled, int32_t *recompilationCounter)
+void J9FASTCALL _jitProfileStringValue(uintptr_t value, int32_t charsOffset, int32_t lengthOffset, TR_LinkedListProfilerInfo<TR_ByteInfo> *info, int32_t maxNumValuesProfiled, int32_t *recompilationCounter)
    {
 
    // charsOffset is the offset to the 'value' field in a String object relative to the start of the object.
@@ -643,21 +644,22 @@ void J9FASTCALL _jitProfileStringValue(uintptrj_t value, int32_t charsOffset, in
       {
       readValues = true;
 
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-      J9JavaVM *jvm = jitConfig->javaVM;
-      if (!jvm)
-         return;
+      if (TR::Compiler->om.compressObjectReferences())
+         {
+         J9JavaVM *jvm = jitConfig->javaVM;
+         if (!jvm)
+            return;
 
-      J9MemoryManagerFunctions * mmf = jvm->memoryManagerFunctions;
-      J9VMThread *vmThread = jvm->internalVMFunctions->currentVMThread(jvm);
-      int32_t result = mmf->j9gc_objaccess_compressedPointersShift(vmThread);
+         J9MemoryManagerFunctions * mmf = jvm->memoryManagerFunctions;
+         J9VMThread *vmThread = jvm->internalVMFunctions->currentVMThread(jvm);
+         int32_t result = mmf->j9gc_objaccess_compressedPointersShift(vmThread);
 
-      chars = (char *) (( (uintptrj_t) (*((uint32_t *) (value + charsOffset)))) << result);
-#else
-      chars = *((char **) (value + charsOffset));
-#endif
+         chars = (char *) (( (uintptr_t) (*((uint32_t *) (value + charsOffset)))) << result);
+         }
+      else
+         chars = *((char **) (value + charsOffset));
 
-      chars = chars + (sizeof(J9IndexableObjectContiguous));
+      chars = chars + (TR::Compiler->om.contiguousArrayHeaderSizeInBytes());
 
       length = *((int32_t *) (value + lengthOffset));
       if (length > 128)
@@ -849,7 +851,7 @@ void dumpInstanceFieldsForClass(::FILE *fp, J9Class *instanceClass, J9VMThread *
 
             if (offset >= 0)
                {
-               fprintf(fp, "%d\n", offset + sizeof(J9Object));
+               fprintf(fp, "%d\n", offset + TR::Compiler->om.objectHeaderSizeInBytes());
                }
             else
                {
@@ -1039,14 +1041,14 @@ extern "C" void _patchJNICallSite(J9Method *method, uint8_t *callPC, uint8_t *ne
 
    // Now patch the call in the jitted code
    //
-   intptrj_t offset = trampoline - callPC - 5;
-   TR_ASSERT((intptrj_t)(int32_t)offset == offset, "trampoline is not reachable!");
+   intptr_t offset = trampoline - callPC - 5;
+   TR_ASSERT((intptr_t)(int32_t)offset == offset, "trampoline is not reachable!");
    *(uint32_t*)(callPC+1) = (uint32_t)offset;
 #else
    // The code in directToJNI would look like
    // 49 bb ?? ?? ?? ?? ?? ?? ?? ??     mov r11, 0xaddress <--we patch here
    // 41 ff d3                          call r11
-   *(uintptrj_t*)(callPC+2) = (uintptrj_t)newAddress;
+   *(uintptr_t*)(callPC+2) = (uintptr_t)newAddress;
 #endif
    }
   #endif
@@ -1064,7 +1066,7 @@ extern "C" void _patchJNICallSite(J9Method *method, uint8_t *pc, uint8_t *newAdd
 #elif defined(TR_HOST_POWER)
 extern "C" void _patchJNICallSite(J9Method *method, uint8_t *pc, uint8_t *newAddress, TR_FrontEnd *fe, int32_t smpFlag)
    {
-   uintptrj_t address = (uintptrj_t) newAddress;
+   uintptr_t address = (uintptr_t) newAddress;
    uint32_t  *cursor = (uint32_t*) pc;
 
 #if defined(TR_HOST_64BIT)
@@ -1103,6 +1105,30 @@ extern "C" void _patchJNICallSite(J9Method *method, uint8_t *pc, uint8_t *newAdd
    // pc corresponds to a slot in the literal pool area.
    // simply patch in the new address
    *(uint8_t**)pc = newAddress;
+   }
+#elif defined(TR_HOST_ARM64)
+extern "C" void _patchJNICallSite(J9Method *method, uint8_t *pc, uint8_t *newAddress, TR_FrontEnd *fe, int32_t smpFlag)
+   {
+   // We expect the following code sequence:
+   // movzx scratchReg, imm16
+   // movkx scratchReg, imm16, LSL16
+   // movkx scratchReg, imm16, LSL32
+   // movkx scratchReg, imm16, LSL48
+   uintptr_t address = reinterpret_cast<uintptr_t>(newAddress);
+   uint32_t *cursor = reinterpret_cast<uint32_t*>(pc);
+
+   TR_ASSERT((*cursor & 0xffe00000) == 0xd2800000, "unexpected JNI call sequence at %p: 0x%08x", cursor, *cursor);
+   *cursor = (*cursor & 0xffe0001f) | ((address & 0x0000ffff) << 5);
+   cursor++;
+   TR_ASSERT((*cursor & 0xffe00000) == 0xf2a00000, "unexpected JNI call sequence at %p: 0x%08x", cursor, *cursor);
+   *cursor = (*cursor & 0xffe0001f) | (((address >> 16) & 0x0000ffff) << 5);
+   cursor++;
+   TR_ASSERT((*cursor & 0xffe00000) == 0xf2c00000, "unexpected JNI call sequence at %p: 0x%08x", cursor, *cursor);
+   *cursor = (*cursor & 0xffe0001f) | (((address >> 32) & 0x0000ffff) << 5);
+   cursor++;
+   TR_ASSERT((*cursor & 0xffe00000) == 0xf2e00000, "unexpected JNI call sequence at %p: 0x%08x", cursor, *cursor);
+   *cursor = (*cursor & 0xffe0001f) | (((address >> 48) & 0x0000ffff) << 5);
+   TR::CodeGenerator::syncCode(pc, 16);
    }
 #endif
 
@@ -1158,7 +1184,11 @@ JIT_HELPER(_jitProfileStringValueX);
 JIT_HELPER(_jitProfileAddressX);
 JIT_HELPER(_induceRecompilation);
 
+#endif
 
+#if defined(TR_HOST_X86) && defined(TR_HOST_64BIT)
+JIT_HELPER(jProfile32BitValueWrapper);
+JIT_HELPER(jProfile64BitValueWrapper);
 #endif
 
 
@@ -1178,8 +1208,8 @@ void initializeJitRuntimeHelperTable(char isSMP)
    SET(TR_jitProfileBigDecimalValue,            (void *)_jitProfileBigDecimalValueWrap,   TR_Helper);
    SET(TR_jitProfileStringValue,                (void *)_jitProfileStringValueWrap,       TR_Helper);
    SET(TR_jitProfileParseBuffer,                (void *)_jitProfileParseBuffer,           TR_Helper);
-   SET_CONST(TR_jProfile32BitValue,             (void *)_jProfile32BitValue);
-   SET_CONST(TR_jProfile64BitValue,             (void *)_jProfile64BitValue);
+   SET_CONST(TR_jProfile32BitValue,             (void *)jProfile32BitValue);
+   SET_CONST(TR_jProfile64BitValue,             (void *)jProfile64BitValue);
 #elif defined(TR_HOST_X86)
    SET(TR_jitProfileWarmCompilePICAddress,      (void *)_jitProfileWarmCompilePICAddress, TR_CHelper);
    SET(TR_jitProfileAddress,                    (void *)_jitProfileAddress,               TR_CHelper);
@@ -1188,8 +1218,13 @@ void initializeJitRuntimeHelperTable(char isSMP)
    SET(TR_jitProfileBigDecimalValue,            (void *)_jitProfileBigDecimalValue,       TR_CHelper);
    SET(TR_jitProfileStringValue,                (void *)_jitProfileStringValue,           TR_CHelper);
    SET(TR_jitProfileParseBuffer,                (void *)_jitProfileParseBuffer,           TR_CHelper);
-   SET(TR_jProfile32BitValue,                   (void *)_jProfile32BitValue,              TR_CHelper);
-   SET(TR_jProfile64BitValue,                   (void *)_jProfile64BitValue,              TR_CHelper);
+#if defined(TR_HOST_64BIT)
+   SET(TR_jProfile32BitValue,                   (void *)jProfile32BitValueWrapper,        TR_CHelper);
+   SET(TR_jProfile64BitValue,                   (void *)jProfile64BitValueWrapper,        TR_CHelper);
+#else
+   SET(TR_jProfile32BitValue,                   (void *)jProfile32BitValue,        TR_CHelper);
+   SET(TR_jProfile64BitValue,                   (void *)jProfile64BitValue,        TR_CHelper);
+#endif
 #else
    SET(TR_jitProfileWarmCompilePICAddress,      (void *)_jitProfileWarmCompilePICAddress, TR_Helper);
    SET(TR_jitProfileAddress,                    (void *)_jitProfileAddress,               TR_Helper);
@@ -1198,8 +1233,8 @@ void initializeJitRuntimeHelperTable(char isSMP)
    SET(TR_jitProfileBigDecimalValue,            (void *)_jitProfileBigDecimalValue,       TR_Helper);
    SET(TR_jitProfileStringValue,                (void *)_jitProfileStringValue,           TR_Helper);
    SET(TR_jitProfileParseBuffer,                (void *)_jitProfileParseBuffer,           TR_Helper);
-   SET(TR_jProfile32BitValue,                   (void *)_jProfile32BitValue,              TR_Helper);
-   SET(TR_jProfile64BitValue,                   (void *)_jProfile64BitValue,              TR_Helper);
+   SET(TR_jProfile32BitValue,                   (void *)jProfile32BitValue,              TR_Helper);
+   SET(TR_jProfile64BitValue,                   (void *)jProfile64BitValue,              TR_Helper);
 #endif
 
 #if defined(J9ZOS390)
@@ -1319,24 +1354,34 @@ void platformUnlock(uint32_t *ptr)
 #if defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM) || defined(TR_HOST_ARM64)
 uint32_t *getLinkageInfo(void *startPC)
    {
-   return (uint32_t *)TR_LinkageInfo::get(startPC);
+   return (uint32_t *)J9::PrivateLinkage::LinkageInfo::get(startPC);
    }
 
 uint32_t isRecompMethBody(void *li)
    {
-   TR_LinkageInfo *linkageInfo = (TR_LinkageInfo *)li;
+   J9::PrivateLinkage::LinkageInfo *linkageInfo = (J9::PrivateLinkage::LinkageInfo *)li;
    return linkageInfo->isRecompMethodBody();
    }
 
 // This method MUST be used only for methods that were AOTed and then relocated
 // It marks the BodyInfo that this is an aoted method.
-void fixPersistentMethodInfo(void *table)
+void fixPersistentMethodInfo(void *table, bool isJITClientAOTLoad)
    {
    J9JITExceptionTable *exceptionTable = (J9JITExceptionTable *)table;
    TR_PersistentJittedBodyInfo *bodyInfo = (TR_PersistentJittedBodyInfo *)exceptionTable->bodyInfo;
    void *vmMethodInfo = (void *)exceptionTable->ramMethod;
-   TR_PersistentMethodInfo *methodInfo = (TR_PersistentMethodInfo *)((char *)bodyInfo + sizeof(TR_PersistentJittedBodyInfo));
-   bodyInfo->setMethodInfo(methodInfo);
+   TR_PersistentMethodInfo *methodInfo;
+
+   if (!isJITClientAOTLoad)
+      {
+      methodInfo = (TR_PersistentMethodInfo *)((char *)bodyInfo + sizeof(TR_PersistentJittedBodyInfo));
+      bodyInfo->setMethodInfo(methodInfo);
+      }
+   else
+      {
+      methodInfo = bodyInfo->getMethodInfo();
+      }
+
    methodInfo->setMethodInfo(vmMethodInfo);
 
    if (TR::Options::getCmdLineOptions()->getOption(TR_EnableHCR))
@@ -1349,7 +1394,11 @@ void fixPersistentMethodInfo(void *table)
    bodyInfo->setHotStartCountDelta(0);
    bodyInfo->setSampleIntervalCount(0);
    bodyInfo->setProfileInfo(NULL);
-   bodyInfo->setIsAotedBody(true);
+
+   if (!isJITClientAOTLoad)
+      {
+      bodyInfo->setIsAotedBody(true);
+      }
    }
 #endif
 
@@ -1381,8 +1430,8 @@ static void printMethodHandleArgs(j9object_t methodHandle, void **stack, J9VMThr
 
    TR_J9VMBase *fej9 = (TR_J9VMBase *)fe;
 
-   uintptrj_t sigObject = fej9->methodType_descriptor(fej9->methodHandle_type((uintptrj_t)methodHandle));
-   intptrj_t  sigLength = fej9->getStringUTF8Length(sigObject);
+   uintptr_t sigObject = fej9->methodType_descriptor(fej9->methodHandle_type((uintptr_t)methodHandle));
+   intptr_t  sigLength = fej9->getStringUTF8Length(sigObject);
    char *sig = (char*)alloca(sigLength+1);
    fej9->getStringUTF8(sigObject, sig, sigLength+1);
 
@@ -1424,7 +1473,7 @@ static void printMethodHandleArgs(j9object_t methodHandle, void **stack, J9VMThr
                   break;
                case 'L':
                case '[':
-                  TR_VerboseLog::writeLine(vlogTag, "%p     arg " POINTER_PRINTF_FORMAT " %.*s", vmThread, (void*)(*(intptrj_t*)stack), nextArg-curArg, curArg);
+                  TR_VerboseLog::writeLine(vlogTag, "%p     arg " POINTER_PRINTF_FORMAT " %.*s", vmThread, (void*)(*(intptr_t*)stack), nextArg-curArg, curArg);
                   stack -= 1;
                   break;
                default:
@@ -1473,10 +1522,21 @@ uint8_t *compileMethodHandleThunk(j9object_t methodHandle, j9object_t arg, J9VMT
       TR_VerboseLog::vlogRelease();
       }
    bool disabled = false;
-   if (flags & TRANSLATE_METHODHANDLE_FLAG_CUSTOM)
-      disabled = cmdLineOptions->getOption(TR_DisableCustomMethodHandleThunks);
+#if defined(J9VM_OPT_JITSERVER)
+   // Do not allow local compilations in JITServer server mode
+   TR::CompilationInfo * compInfo = getCompilationInfo(jitConfig);
+   if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
+      {
+      disabled = true;
+      }
    else
-      disabled = cmdLineOptions->getOption(TR_DisableShareableMethodHandleThunks);
+#endif
+      {
+      if (flags & TRANSLATE_METHODHANDLE_FLAG_CUSTOM)
+         disabled = cmdLineOptions->getOption(TR_DisableCustomMethodHandleThunks);
+      else
+         disabled = cmdLineOptions->getOption(TR_DisableShareableMethodHandleThunks);
+      }
    if (disabled)
       {
       if (verbose)
@@ -1487,7 +1547,7 @@ uint8_t *compileMethodHandleThunk(j9object_t methodHandle, j9object_t arg, J9VMT
       }
 
 
-   TR_OpaqueClassBlock *handleClass = fej9->getObjectClass((uintptrj_t)methodHandle);
+   TR_OpaqueClassBlock *handleClass = fej9->getObjectClass((uintptr_t)methodHandle);
    int32_t classNameLength;
    char *className = fej9->getClassNameChars(handleClass, classNameLength);
 
@@ -1499,9 +1559,9 @@ uint8_t *compileMethodHandleThunk(j9object_t methodHandle, j9object_t arg, J9VMT
       {
       J9MemoryManagerFunctions * mmf = jitConfig->javaVM->memoryManagerFunctions;
       int32_t    hashCode         = mmf->j9gc_objaccess_getObjectHashCode(jitConfig->javaVM, (J9Object*)methodHandle);
-      uintptrj_t methodType       = fej9->methodHandle_type((uintptrj_t)methodHandle);
-      uintptrj_t descriptorObject = fej9->methodType_descriptor(methodType);
-      intptrj_t  descriptorLength = fej9->getStringUTF8Length(descriptorObject);
+      uintptr_t methodType       = fej9->methodHandle_type((uintptr_t)methodHandle);
+      uintptr_t descriptorObject = fej9->methodType_descriptor(methodType);
+      intptr_t  descriptorLength = fej9->getStringUTF8Length(descriptorObject);
       char      *descriptorNTS    = (char*)alloca(descriptorLength+1); // NTS = null-terminated string
       fej9->getStringUTF8(descriptorObject, descriptorNTS, descriptorLength+1);
       TR_VerboseLog::writeLineLocked(TR_Vlog_MHD, "%p   %.*s %p hash %x type %p %s", vmThread, classNameLength, className, methodHandle, hashCode, methodType, descriptorNTS);
@@ -1530,14 +1590,14 @@ uint8_t *compileMethodHandleThunk(j9object_t methodHandle, j9object_t arg, J9VMT
       {
       if (details)
          {
-         uintptrj_t thunkableSignatureString = fej9->methodHandle_thunkableSignature((uintptrj_t)methodHandle);
-         intptrj_t  thunkableSignatureLength = fej9->getStringUTF8Length(thunkableSignatureString);
+         uintptr_t thunkableSignatureString = fej9->methodHandle_thunkableSignature((uintptr_t)methodHandle);
+         intptr_t  thunkableSignatureLength = fej9->getStringUTF8Length(thunkableSignatureString);
          char *thunkSignature = (char*)alloca(thunkableSignatureLength+1);
          fej9->getStringUTF8(thunkableSignatureString, thunkSignature, thunkableSignatureLength+1);
          TR_VerboseLog::writeLineLocked(TR_Vlog_MHD, "%p   Looking up archetype for class %.*s signature %s", vmThread, classNameLength, className, thunkSignature);
          }
 
-      J9Method *invokeExact = (J9Method*)fej9->lookupMethodHandleThunkArchetype((uintptrj_t)methodHandle);
+      J9Method *invokeExact = (J9Method*)fej9->lookupMethodHandleThunkArchetype((uintptr_t)methodHandle);
       if (!invokeExact)
          {
          TR_ASSERT(0, "compileMethodHandleThunk must find an archetype for MethodHandle %p", methodHandle);
@@ -1577,12 +1637,12 @@ uint8_t *compileMethodHandleThunk(j9object_t methodHandle, j9object_t arg, J9VMT
 
          if (isCustom)
             {
-            J9::CustomInvokeExactThunkDetails details(invokeExact, (uintptrj_t*)handleRef, (uintptrj_t*)argRef);
+            J9::CustomInvokeExactThunkDetails details(invokeExact, (uintptr_t*)handleRef, (uintptr_t*)argRef);
             startPC = (uint8_t*)compInfo->compileMethod(vmThread, details, 0, isAsync, NULL, &queued, plan);
             }
          else
             {
-            J9::ShareableInvokeExactThunkDetails details(invokeExact, (uintptrj_t*)handleRef, (uintptrj_t*)argRef);
+            J9::ShareableInvokeExactThunkDetails details(invokeExact, (uintptr_t*)handleRef, (uintptr_t*)argRef);
             startPC = (uint8_t*)compInfo->compileMethod(vmThread, details, 0, isAsync, NULL, &queued, plan);
             }
 
@@ -1623,22 +1683,22 @@ void *initialInvokeExactThunk(j9object_t methodHandle, J9VMThread *vmThread)
    if (verbose)
       TR_VerboseLog::writeLineLocked(TR_Vlog_MH, "%p initialInvokeExactThunk on MethodHandle %p", vmThread, methodHandle);
 
-   uintptrj_t thunkableSignatureString = fej9->methodHandle_thunkableSignature((uintptrj_t)methodHandle);
-   intptrj_t  thunkableSignatureLength = fej9->getStringUTF8Length(thunkableSignatureString);
+   uintptr_t thunkableSignatureString = fej9->methodHandle_thunkableSignature((uintptr_t)methodHandle);
+   intptr_t  thunkableSignatureLength = fej9->getStringUTF8Length(thunkableSignatureString);
    char *thunkSignature = (char*)alloca(thunkableSignatureLength+1);
    fej9->getStringUTF8(thunkableSignatureString, thunkSignature, thunkableSignatureLength+1);
 
-   uintptrj_t thunkTuple = fej9->getReferenceField((uintptrj_t)methodHandle, "thunks", "Ljava/lang/invoke/ThunkTuple;");
+   uintptr_t thunkTuple = fej9->getReferenceField((uintptr_t)methodHandle, "thunks", "Ljava/lang/invoke/ThunkTuple;");
    if (details)
       {
-      TR_OpaqueClassBlock *handleClass = fej9->getObjectClass((uintptrj_t)methodHandle);
+      TR_OpaqueClassBlock *handleClass = fej9->getObjectClass((uintptr_t)methodHandle);
       int32_t classNameLength;
       char *className = fej9->getClassNameChars(handleClass, classNameLength);
       J9MemoryManagerFunctions * mmf = jitConfig->javaVM->memoryManagerFunctions;
       int32_t    hashCode         = mmf->j9gc_objaccess_getObjectHashCode(jitConfig->javaVM, (J9Object*)methodHandle);
-      uintptrj_t methodType       = fej9->methodHandle_type((uintptrj_t)methodHandle);
-      uintptrj_t descriptorObject = fej9->methodType_descriptor(methodType);
-      intptrj_t  descriptorLength = fej9->getStringUTF8Length(descriptorObject);
+      uintptr_t methodType       = fej9->methodHandle_type((uintptr_t)methodHandle);
+      uintptr_t descriptorObject = fej9->methodType_descriptor(methodType);
+      intptr_t  descriptorLength = fej9->getStringUTF8Length(descriptorObject);
       char      *descriptorNTS    = (char*)alloca(descriptorLength+1); // NTS = null-terminated string
       fej9->getStringUTF8(descriptorObject, descriptorNTS, descriptorLength+1);
       TR_VerboseLog::writeLineLocked(TR_Vlog_MHD, "%p   %.*s %p hash %x type %p %s", vmThread, classNameLength, className, methodHandle, hashCode, methodType, descriptorNTS);
@@ -1672,15 +1732,15 @@ void *initialInvokeExactThunk(j9object_t methodHandle, J9VMThread *vmThread)
       }
    else
       {
-      uintptrj_t fieldOffset = fej9->getInstanceFieldOffset(fej9->getObjectClass(thunkTuple), "invokeExactThunk", "J");
+      uintptr_t fieldOffset = fej9->getInstanceFieldOffset(fej9->getObjectClass(thunkTuple), "invokeExactThunk", "J");
 #if defined(TR_HOST_X86)
-      bool success = fej9->compareAndSwapInt64Field(thunkTuple, "invokeExactThunk", (uint64_t)(uintptrj_t)initialInvokeExactThunkGlue, (uint64_t)(uintptrj_t)addressToDispatch);
-      
+      bool success = fej9->compareAndSwapInt64Field(thunkTuple, "invokeExactThunk", (uint64_t)(uintptr_t)initialInvokeExactThunkGlue, (uint64_t)(uintptr_t)addressToDispatch);
+
       if (details)
          TR_VerboseLog::writeLineLocked(TR_Vlog_MHD, "%p   %s updating ThunkTuple %p field %+d from %p to %p",
             vmThread, success? "Succeeded" : "Failed", thunkTuple, (int)fieldOffset, initialInvokeExactThunkGlue, addressToDispatch);
 #else
-      bool success = fej9->compareAndSwapInt64Field(thunkTuple, "invokeExactThunk", (uint64_t)(uintptrj_t)_initialInvokeExactThunkGlue, (uint64_t)(uintptrj_t)addressToDispatch);
+      bool success = fej9->compareAndSwapInt64Field(thunkTuple, "invokeExactThunk", (uint64_t)(uintptr_t)_initialInvokeExactThunkGlue, (uint64_t)(uintptr_t)addressToDispatch);
       // If the CAS fails, we don't care much.  It just means another thread may already have put a MH thunk pointer in there.
 
       if (details)
@@ -1712,7 +1772,7 @@ void methodHandleJ2I(j9object_t methodHandle, void **stack, J9VMThread *vmThread
       {
       TR_VerboseLog::writeLineLocked(TR_Vlog_J2I, "%p J2I mh: %p sp: %p", vmThread, methodHandle, stack);
       // TODO: Adjust "stack" so it points at the MethodHandle.  +1 for return address, +N for n argument slots
-      uintptrj_t methodType = fej9->getReferenceField ((uintptrj_t)methodHandle, "type",     "Ljava/lang/invoke/MethodType;");
+      uintptr_t methodType = fej9->getReferenceField ((uintptr_t)methodHandle, "type",     "Ljava/lang/invoke/MethodType;");
       int32_t    argSlots   = fej9->getInt32Field     (            methodType  , "argSlots");
       void **methodHandleOnStack = stack + argSlots;
       printMethodHandleArgs(methodHandle, methodHandleOnStack, vmThread, TR_Vlog_J2I, fej9);

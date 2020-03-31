@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -54,6 +54,17 @@ namespace TR { class ResolvedMethodSymbol; }
 namespace TR { class SymbolReference; }
 namespace TR { class TreeTop; }
 template <class T> class TR_Array;
+
+typedef TR::typed_allocator<TR::Node *, TR::Region &> NodeDequeAllocator;
+typedef std::deque<TR::Node *, NodeDequeAllocator> NodeDeque;
+
+typedef TR::typed_allocator<std::pair<TR::Node* const, std::pair<TR_BitVector *, NodeDeque*> >, TR::Region&> CallLoadMapAllocator;
+typedef std::less<TR::Node *> CallLoadMapComparator;
+typedef std::map<TR::Node *, std::pair<TR_BitVector *, NodeDeque *>, CallLoadMapComparator, CallLoadMapAllocator> CallLoadMap;
+
+typedef TR::typed_allocator<std::pair<TR::Node *const, int32_t>, TR::Region&> RemainingUseCountMapAllocator;
+typedef std::less<TR::Node *> RemainingUseCountMapComparator;
+typedef std::map<TR::Node *, int32_t, RemainingUseCountMapComparator, RemainingUseCountMapAllocator> RemainingUseCountMap;
 
 // Escape analysis
 //
@@ -464,49 +475,49 @@ class TR_EscapeAnalysis : public TR::Optimization
    bool     checkDefsAndUses(TR::Node *node, Candidate *candidate);
 
    /**
-    * Walk through trees looking for \c aternary operations.  For the
-    * value operands of an \c aternary, populate \ref _nodeUsesThroughAternary
+    * Walk through trees looking for \c aselect operations.  For the
+    * value operands of an \c aselect, populate \ref _nodeUsesThroughAselect
     * with an entry mapping from the operand to a list containing the
-    * \c aternary nodes that refer to it.
+    * \c aselect nodes that refer to it.
     *
-    * \see _nodeUsesThroughAternary
+    * \see _nodeUsesThroughAselect
     */
-   void     gatherUsesThroughAternary(void);
+   void     gatherUsesThroughAselect(void);
 
    /**
-    * Recursive implementation method for \ref gatherUsesThroughAternary
+    * Recursive implementation method for \ref gatherUsesThroughAselect
     *
     * \param[in] node The root of the subtree that is to be processed
     * \param[inout] visited A bit vector indicating whether a node has
     *                       already been visited
     */
-   void     gatherUsesThroughAternaryImpl(TR::Node *node, TR::NodeChecklist& visited);
+   void     gatherUsesThroughAselectImpl(TR::Node *node, TR::NodeChecklist& visited);
 
    /**
-    * Add an entry to \ref _nodeUsesThroughAternary mapping from the child node
-    * of \c aternaryNode at the specified index to the \c aternaryNode itself.
+    * Add an entry to \ref _nodeUsesThroughAselect mapping from the child node
+    * of \c aselectNode at the specified index to the \c aselectNode itself.
     *
-    * \param[in] aternaryNode A node whose opcode is an \c aternary operation
-    * \param[in] idx The index of a child of \c aternaryNode
+    * \param[in] aselectNode A node whose opcode is an \c aselect operation
+    * \param[in] idx The index of a child of \c aselectNode
     */
-   void     associateAternaryWithChild(TR::Node *aternaryNode, int32_t idx);
+   void     associateAselectWithChild(TR::Node *aselectNode, int32_t idx);
 
    /**
-    * Trace contents of \ref _nodeUsesThroughAternary
+    * Trace contents of \ref _nodeUsesThroughAselect
     */
-   void     printUsesThroughAternary(void);
+   void     printUsesThroughAselect(void);
 
    /**
     * Check whether \c node, which is a use of the candidate for stack
     * allocation, \c candidate, is itself used as one of the value operands
-    * in an \c aternary operation, as found in \ref _nodeUsesThroughAternary.
-    * If it is, the value number of any such \c aternary is added to the list
+    * in an \c aselect operation, as found in \ref _nodeUsesThroughAselect.
+    * If it is, the value number of any such \c aselect is added to the list
     * of value numbers associated with the candidate.
     *
     * \param[in] node The use of \c candidate that is under consideration
     * \param[in] candidate A candidate for stack allocation
     */
-   bool     checkUsesThroughAternary(TR::Node *node, Candidate *candidate);
+   bool     checkUsesThroughAselect(TR::Node *node, Candidate *candidate);
    bool     checkOtherDefsOfLoopAllocation(TR::Node *useNode, Candidate *candidate, bool isImmediateUse);
    bool     checkOverlappingLoopAllocation(TR::Node *useNode, Candidate *candidate);
    bool     checkOverlappingLoopAllocation(TR::Node *node, TR::Node *useNode, TR::Node *allocNode, rcount_t &numReferences);
@@ -579,7 +590,23 @@ class TR_EscapeAnalysis : public TR::Optimization
 
    void     makeContiguousLocalAllocation(Candidate *candidate);
    void     makeNonContiguousLocalAllocation(Candidate *candidate);
-   void     heapifyBeforeColdBlocks(Candidate *candidate);
+   void     heapifyForColdBlocks(Candidate *candidate);
+
+   /**
+    * \brief Store the supplied address to the specified temporary
+    *
+    * \param candidate
+    *     The candidate that is being heapified
+    *
+    * \param addr
+    *     The address of the possibly heapified object
+    *
+    * \param symRef
+    *     The \ref TR::SymbolReference for the temporay
+    *
+    * \return A pointer to the \ref TR::TreeTop containing the store
+    */
+   TR::TreeTop *storeHeapifiedToTemp(Candidate *candidate, TR::Node *addr, TR::SymbolReference *symRef);
    bool     inlineCallSites();
    void     scanForExtraCallsToInline();
    bool     alwaysWorthInlining(TR::Node *callNode);
@@ -615,10 +642,14 @@ class TR_EscapeAnalysis : public TR::Optimization
            _totalPeekedBytecodeSize(0)
          {
          _symRefList.setFirst(NULL);
+         _peekableCalls = new (comp->trHeapMemory()) TR_BitVector(0, comp->trMemory(), heapAlloc);
+         _processedCalls = new (comp->trHeapMemory()) TR_BitVector(0, comp->trMemory(), heapAlloc);
          }
 
       int32_t                    _totalInlinedBytecodeSize;
       int32_t                    _totalPeekedBytecodeSize;
+      TR_BitVector              *_peekableCalls;
+      TR_BitVector              *_processedCalls;
       TR_LinkHead<SymRefCache>   _symRefList;
       };
 
@@ -640,6 +671,8 @@ class TR_EscapeAnalysis : public TR::Optimization
    TR_BitVector              *_notOptimizableLocalStringObjectsValueNumbers;
    TR_BitVector              *_blocksWithFlushOnEntry;
    TR_BitVector              *_visitedNodes;
+
+   CallLoadMap               *_callsToProtect;
 
    /**
     * Contains sym refs that are just aliases for a fresh allocation
@@ -704,10 +737,10 @@ class TR_EscapeAnalysis : public TR::Optimization
    typedef std::map<TR::Node*, NodeDeque*, NodeComparator, NodeToNodeDequeMapAllocator> NodeToNodeDequeMap;
 
    /**
-    * A mapping from nodes to a \c deque of \c aternary nodes that directly
+    * A mapping from nodes to a \c deque of \c aselect nodes that directly
     * reference them.
     */
-   NodeToNodeDequeMap *       _nodeUsesThroughAternary;
+   NodeToNodeDequeMap *       _nodeUsesThroughAselect;
 
    friend class TR_FlowSensitiveEscapeAnalysis;
    friend class TR_LocalFlushElimination;

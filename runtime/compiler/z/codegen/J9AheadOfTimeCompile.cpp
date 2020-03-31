@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,7 +26,7 @@
 
 #include "codegen/AheadOfTimeCompile.hpp"
 #include "codegen/CodeGenerator.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "compile/AOTClassInfo.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/ResolvedMethod.hpp"
@@ -37,11 +37,11 @@
 #include "env/SharedCache.hpp"
 #include "env/jittypes.h"
 #include "env/VMJ9.h"
+#include "il/LabelSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/SymbolReference.hpp"
-#include "il/symbol/LabelSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "runtime/RelocationRuntime.hpp"
 #include "runtime/RelocationRecord.hpp"
 
@@ -91,12 +91,12 @@ void J9::Z::AheadOfTimeCompile::processRelocations()
       // in the AOT method header, but that would use space for AOT bodies that
       // don't use the SVM. TODO: Move it once SVM takes over?
       int wellKnownClassesOffsetSize = useSVM ? SIZEPOINTER : 0;
-      uintptrj_t reloBufferSize =
+      uintptr_t reloBufferSize =
          self()->getSizeOfAOTRelocations() + SIZEPOINTER + wellKnownClassesOffsetSize;
       uint8_t *relocationDataCursor = self()->setRelocationData(
          fej9->allocateRelocationData(self()->comp(), reloBufferSize));
       // set up the size for the region
-      *(uintptrj_t *)relocationDataCursor = reloBufferSize;
+      *(uintptr_t *)relocationDataCursor = reloBufferSize;
       relocationDataCursor += SIZEPOINTER;
 
       if (useSVM)
@@ -104,8 +104,8 @@ void J9::Z::AheadOfTimeCompile::processRelocations()
          TR::SymbolValidationManager *svm =
             self()->comp()->getSymbolValidationManager();
          void *offsets = const_cast<void*>(svm->wellKnownClassChainOffsets());
-         *(uintptrj_t *)relocationDataCursor = reinterpret_cast<uintptrj_t>(
-            fej9->sharedCache()->offsetInSharedCacheFromPointer(offsets));
+         *(uintptr_t *)relocationDataCursor =
+            self()->offsetInSharedCacheFromPointer(fej9->sharedCache(), offsets);
          relocationDataCursor += SIZEPOINTER;
          }
 
@@ -170,7 +170,7 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          {
          TR::SymbolReference *tempSR = (TR::SymbolReference *)relocation->getTargetAddress();
 
-         if (TR::Compiler->target.is64Bit())
+         if (comp->target().is64Bit())
             {
 
             // first word is the inlined site index for the constant pool
@@ -179,7 +179,7 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
             cursor += SIZEPOINTER;
 
             // next word is the address of the constant pool
-            *(uint64_t *)cursor = (uint64_t)(uintptrj_t)tempSR->getOwningMethod(self()->comp())->constantPool();
+            *(uint64_t *)cursor = (uint64_t)(uintptr_t)tempSR->getOwningMethod(self()->comp())->constantPool();
             cursor += SIZEPOINTER;
 
             //*(uint64_t *)cursor = (uint64_t)tempSR->getCPIndex();
@@ -187,11 +187,11 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          else
             {
             // first word is the inlined site index for the constant pool
-            *(uint32_t *)cursor = (uint32_t)(uintptrj_t)relocation->getTargetAddress2();
+            *(uint32_t *)cursor = (uint32_t)(uintptr_t)relocation->getTargetAddress2();
             cursor += SIZEPOINTER;
 
             // next word is the address of the constant pool
-            *(uint32_t *)cursor = (uintptrj_t) tempSR->getOwningMethod(self()->comp())->constantPool();
+            *(uint32_t *)cursor = (uintptr_t) tempSR->getOwningMethod(self()->comp())->constantPool();
             cursor += SIZEPOINTER;
 
             //*(uint32_t *)cursor = (uint32_t)tempSR->getCPIndex();
@@ -207,14 +207,14 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
 
          inlinedSiteIndex = self()->findCorrectInlinedSiteIndex(tempSR->getOwningMethod(self()->comp())->constantPool(), inlinedSiteIndex);
 
-         *(uintptrj_t *)cursor = inlinedSiteIndex;  // inlinedSiteIndex
+         *(uintptr_t *)cursor = inlinedSiteIndex;  // inlinedSiteIndex
          cursor += SIZEPOINTER;
 
-         *(uintptrj_t *)cursor = (uintptrj_t)tempSR->getOwningMethod(self()->comp())->constantPool(); // constantPool
+         *(uintptr_t *)cursor = (uintptr_t)tempSR->getOwningMethod(self()->comp())->constantPool(); // constantPool
          cursor += SIZEPOINTER;
 
-         uintptrj_t cpIndex=(uintptrj_t)tempSR->getCPIndex();
-         *(uintptrj_t *)cursor =cpIndex;// cpIndex
+         uintptr_t cpIndex=(uintptr_t)tempSR->getCPIndex();
+         *(uintptr_t *)cursor =cpIndex;// cpIndex
          cursor += SIZEPOINTER;
          }
          break;
@@ -224,14 +224,14 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          uintptr_t inlinedSiteIndex = (uintptr_t)relocation->getTargetAddress2();
          inlinedSiteIndex = self()->findCorrectInlinedSiteIndex(tempSR->getOwningMethod(self()->comp())->constantPool(), inlinedSiteIndex);
 
-         *(uintptrj_t *)cursor = inlinedSiteIndex; // inlinedSiteIndex
+         *(uintptr_t *)cursor = inlinedSiteIndex; // inlinedSiteIndex
          cursor += SIZEPOINTER;
 
-         *(uintptrj_t *)cursor = (uintptrj_t)tempSR->getOwningMethod(self()->comp())->constantPool(); // constantPool
+         *(uintptr_t *)cursor = (uintptr_t)tempSR->getOwningMethod(self()->comp())->constantPool(); // constantPool
          cursor += SIZEPOINTER;
 
-         uintptrj_t cpIndex=(uintptrj_t)tempSR->getCPIndex();
-         *(uintptrj_t *)cursor =cpIndex;// cpIndex
+         uintptr_t cpIndex=(uintptr_t)tempSR->getCPIndex();
+         *(uintptr_t *)cursor =cpIndex;// cpIndex
          cursor += SIZEPOINTER;
          }
          break;
@@ -243,16 +243,16 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          inlinedSiteIndex = self()->findCorrectInlinedSiteIndex(tempSR->getOwningMethod(self()->comp())->constantPool(), inlinedSiteIndex);
 
 
-         *(uintptrj_t *)cursor = inlinedSiteIndex;  // inlinedSiteIndex
+         *(uintptr_t *)cursor = inlinedSiteIndex;  // inlinedSiteIndex
          cursor += SIZEPOINTER;
 
-         *(uintptrj_t *)cursor = (uintptrj_t)tempSR->getOwningMethod(self()->comp())->constantPool(); // constantPool
+         *(uintptr_t *)cursor = (uintptr_t)tempSR->getOwningMethod(self()->comp())->constantPool(); // constantPool
          cursor += SIZEPOINTER;
 
-         *(uintptrj_t *)cursor = tempSR->getCPIndex(); // cpIndex
+         *(uintptr_t *)cursor = tempSR->getCPIndex(); // cpIndex
          cursor += SIZEPOINTER;
 
-         *(uintptrj_t *)cursor = tempSR->getOffset(); // offset
+         *(uintptr_t *)cursor = tempSR->getOffset(); // offset
          cursor += SIZEPOINTER;
 
          break;
@@ -271,20 +271,20 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
       case TR_ConstantPoolOrderedPair:
          {
          // constant pool address is placed as the last word of the header
-         if (TR::Compiler->target.is64Bit())
+         if (comp->target().is64Bit())
             {
-            *(uint64_t *)cursor = (uint64_t)(uintptrj_t)relocation->getTargetAddress2();
+            *(uint64_t *)cursor = (uint64_t)(uintptr_t)relocation->getTargetAddress2();
             cursor += 8;
 
-            *(uint64_t *)cursor = (uint64_t)(uintptrj_t)relocation->getTargetAddress();
+            *(uint64_t *)cursor = (uint64_t)(uintptr_t)relocation->getTargetAddress();
             cursor += 8;
             }
          else
             {
-            *(uint32_t *)cursor = (uint32_t)(uintptrj_t)relocation->getTargetAddress2();
+            *(uint32_t *)cursor = (uint32_t)(uintptr_t)relocation->getTargetAddress2();
             cursor += 4;
 
-            *(uint32_t *)cursor = (uint32_t)(uintptrj_t)relocation->getTargetAddress();
+            *(uint32_t *)cursor = (uint32_t)(uintptr_t)relocation->getTargetAddress();
             cursor += 4;
             }
          }
@@ -294,27 +294,27 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          {
          auto info = (TR_RelocationRecordInformation*)relocation->getTargetAddress();
 
-         *(uintptrj_t *)cursor = (uintptrj_t)info->data2; // inlined site index
+         *(uintptr_t *)cursor = (uintptr_t)info->data2; // inlined site index
          cursor += SIZEPOINTER;
 
-         *(uintptrj_t *)cursor = (uintptrj_t)info->data1; // constantPool
+         *(uintptr_t *)cursor = (uintptr_t)info->data1; // constantPool
          cursor += SIZEPOINTER;
 
-         *(uintptrj_t *)cursor = (uintptrj_t)info->data3; // offset to J2I virtual thunk pointer
+         *(uintptr_t *)cursor = (uintptr_t)info->data3; // offset to J2I virtual thunk pointer
          cursor += SIZEPOINTER;
          }
          break;
 
       case TR_CheckMethodExit:
          {
-         if (TR::Compiler->target.is64Bit())
+         if (comp->target().is64Bit())
             {
-            *(uint64_t *)cursor = (uint64_t)(uintptrj_t)relocation->getTargetAddress();
+            *(uint64_t *)cursor = (uint64_t)(uintptr_t)relocation->getTargetAddress();
             cursor += 8;
             }
          else
             {
-            *(uint32_t *)cursor = (uint32_t)(uintptrj_t)relocation->getTargetAddress();
+            *(uint32_t *)cursor = (uint32_t)(uintptr_t)relocation->getTargetAddress();
             cursor += 4;
             }
          }
@@ -328,10 +328,10 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
                reinterpret_cast<TR_RelocationRecordValidateClassByNameBinaryTemplate *>(cursor);
          // Store class chain to get name of class. Checking the class chain for
          // this record eliminates the need for a separate class chain validation.
-         void *classChainOffsetInSharedCache = sharedCache->offsetInSharedCacheFromPointer(record->_classChain);
+         uintptr_t classChainOffsetInSharedCache = self()->offsetInSharedCacheFromPointer(sharedCache, record->_classChain);
          binaryTemplate->_classID = symValManager->getIDFromSymbol(record->_class);
          binaryTemplate->_beholderID = symValManager->getIDFromSymbol(record->_beholder);
-         binaryTemplate->_classChainOffsetInSCC = reinterpret_cast<uintptrj_t>(classChainOffsetInSharedCache);
+         binaryTemplate->_classChainOffsetInSCC = classChainOffsetInSharedCache;
          cursor += sizeof(TR_RelocationRecordValidateClassByNameBinaryTemplate);
          }
          break;
@@ -344,11 +344,11 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          TR_OpaqueClassBlock *classToValidate = record->_class;
          void *classChainForClassToValidate = record->_classChain;
          //store the classchain's offset for the classloader for the class
-         uintptrj_t classChainOffsetInSharedCacheForCL = sharedCache->getClassChainOffsetOfIdentifyingLoaderForClazzInSharedCache(classToValidate);
+         uintptr_t classChainOffsetInSharedCacheForCL = sharedCache->getClassChainOffsetOfIdentifyingLoaderForClazzInSharedCache(classToValidate);
          //store the classchain's offset for the class that needs to be validated in the second run
-         void * classChainOffsetInSharedCache = sharedCache->offsetInSharedCacheFromPointer(classChainForClassToValidate);
+         uintptr_t classChainOffsetInSharedCache = self()->offsetInSharedCacheFromPointer(sharedCache, classChainForClassToValidate);
          binaryTemplate->_classID = symValManager->getIDFromSymbol(static_cast<void *>(classToValidate));
-         binaryTemplate->_classChainOffsetInSCC = reinterpret_cast<uintptrj_t>(classChainOffsetInSharedCache);
+         binaryTemplate->_classChainOffsetInSCC = classChainOffsetInSharedCache;
          binaryTemplate->_classChainOffsetForCLInScc = classChainOffsetInSharedCacheForCL;
          cursor += sizeof(TR_RelocationRecordValidateProfiledClassBinaryTemplate);
          }
@@ -434,9 +434,9 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
                reinterpret_cast<TR_RelocationRecordValidateSystemClassByNameBinaryTemplate *>(cursor);
          // Store class chain to get name of class. Checking the class chain for
          // this record eliminates the need for a separate class chain validation.
-         void *classChainOffsetInSharedCache = sharedCache->offsetInSharedCacheFromPointer(record->_classChain);
+         uintptr_t classChainOffsetInSharedCache = self()->offsetInSharedCacheFromPointer(sharedCache, record->_classChain);
          binaryTemplate->_systemClassID = symValManager->getIDFromSymbol(record->_class);
-         binaryTemplate->_classChainOffsetInSCC = reinterpret_cast<uintptrj_t>(classChainOffsetInSharedCache);
+         binaryTemplate->_classChainOffsetInSCC = classChainOffsetInSharedCache;
          cursor += sizeof(TR_RelocationRecordValidateSystemClassByNameBinaryTemplate);
          }
          break;
@@ -483,9 +483,9 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
                reinterpret_cast<TR_RelocationRecordValidateClassChainBinaryTemplate *>(cursor);
          void *classToValidate = static_cast<void *>(record->_class);
          void *classChainForClassToValidate = record->_classChain;
-         void *classChainOffsetInSharedCache = sharedCache->offsetInSharedCacheFromPointer(classChainForClassToValidate);
+         uintptr_t classChainOffsetInSharedCache = self()->offsetInSharedCacheFromPointer(sharedCache, classChainForClassToValidate);
          binaryTemplate->_classID = symValManager->getIDFromSymbol(classToValidate);
-         binaryTemplate->_classChainOffsetInSCC = reinterpret_cast<uintptrj_t>(classChainOffsetInSharedCache);
+         binaryTemplate->_classChainOffsetInSCC = classChainOffsetInSharedCache;
          cursor += sizeof(TR_RelocationRecordValidateClassChainBinaryTemplate);
          }
          break;
@@ -497,7 +497,7 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
                reinterpret_cast<TR_RelocationRecordValidateMethodFromClassBinaryTemplate *>(cursor);
          binaryTemplate->_methodID = symValManager->getIDFromSymbol(static_cast<void *>(record->_method));
          binaryTemplate->_beholderID = symValManager->getIDFromSymbol(static_cast<void *>(record->_beholder));
-         binaryTemplate->_index = static_cast<uintptrj_t>(record->_index);
+         binaryTemplate->_index = static_cast<uintptr_t>(record->_index);
          cursor += sizeof(TR_RelocationRecordValidateMethodFromClassBinaryTemplate);
          }
          break;
@@ -577,7 +577,7 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          binaryTemplate->_definingClassID = symValManager->getIDFromSymbol(static_cast<void *>(record->definingClass()));
          binaryTemplate->_beholderID = symValManager->getIDFromSymbol(static_cast<void *>(record->_beholder));
          binaryTemplate->_lookupID = symValManager->getIDFromSymbol(static_cast<void *>(record->_lookup));
-         binaryTemplate->_cpIndex = static_cast<uintptrj_t>(record->_cpIndex);
+         binaryTemplate->_cpIndex = static_cast<uintptr_t>(record->_cpIndex);
          cursor += sizeof(TR_RelocationRecordValidateInterfaceMethodFromCPBinaryTemplate);
          }
          break;
@@ -602,13 +602,13 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
                reinterpret_cast<TR_RelocationRecordValidateMethodFromClassAndSigBinaryTemplate *>(cursor);
          // Store rom method to get name of method
          J9Method *methodToValidate = reinterpret_cast<J9Method *>(record->_method);
-         J9ROMMethod *romMethod = J9_ROM_METHOD_FROM_RAM_METHOD(methodToValidate);
-         void *romMethodOffsetInSharedCache = sharedCache->offsetInSharedCacheFromPointer(romMethod);
+         J9ROMMethod *romMethod = static_cast<TR_J9VM *>(fej9)->getROMMethodFromRAMMethod(methodToValidate);
+         uintptr_t romMethodOffsetInSharedCache = self()->offsetInSharedCacheFromPointer(sharedCache, romMethod);
          binaryTemplate->_methodID = symValManager->getIDFromSymbol(static_cast<void *>(record->_method));
          binaryTemplate->_definingClassID = symValManager->getIDFromSymbol(static_cast<void *>(record->definingClass()));
          binaryTemplate->_lookupClassID = symValManager->getIDFromSymbol(static_cast<void *>(record->_lookupClass));
          binaryTemplate->_beholderID = symValManager->getIDFromSymbol(static_cast<void *>(record->_beholder));
-         binaryTemplate->_romMethodOffsetInSCC = reinterpret_cast<uintptrj_t>(romMethodOffsetInSharedCache);
+         binaryTemplate->_romMethodOffsetInSCC = romMethodOffsetInSharedCache;
          cursor += sizeof(TR_RelocationRecordValidateMethodFromClassAndSigBinaryTemplate);
          }
          break;
@@ -682,7 +682,7 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          {
          uint8_t *symbol = relocation->getTargetAddress();
          uint16_t symbolID = comp->getSymbolValidationManager()->getIDFromSymbol(static_cast<void *>(symbol));
-         uint16_t symbolType = (uint16_t)(uintptrj_t)relocation->getTargetAddress2();
+         uint16_t symbolType = (uint16_t)(uintptr_t)relocation->getTargetAddress2();
          TR_ASSERT_FATAL(symbolID, "symbolID should exist!\n");
          cursor -= sizeof(TR_RelocationRecordBinaryTemplate);
          TR_RelocationRecordSymbolFromManagerBinaryTemplate *binaryTemplate =
@@ -697,8 +697,8 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          {
          TR::Node *aconstNode = (TR::Node *) relocation->getTargetAddress();
 
-         uintptrj_t inlinedSiteIndex = (uintptrj_t)aconstNode->getInlinedSiteIndex();
-         *(uintptrj_t *)cursor = inlinedSiteIndex;
+         uintptr_t inlinedSiteIndex = (uintptr_t)aconstNode->getInlinedSiteIndex();
+         *(uintptr_t *)cursor = inlinedSiteIndex;
          cursor += SIZEPOINTER;
 
          TR_OpaqueMethodBlock *j9method = (TR_OpaqueMethodBlock *) aconstNode->getAddress();
@@ -706,14 +706,14 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
             j9method = (TR_OpaqueMethodBlock *) aconstNode->getSymbolReference()->getSymbol()->castToStaticSymbol()->getStaticAddress();
          TR_OpaqueClassBlock *j9class = fej9->getClassFromMethodBlock(j9method);
 
-         uintptrj_t classChainOffsetInSharedCache = sharedCache->getClassChainOffsetOfIdentifyingLoaderForClazzInSharedCache(j9class);
-         *(uintptrj_t *)cursor = classChainOffsetInSharedCache;
+         uintptr_t classChainOffsetInSharedCache = sharedCache->getClassChainOffsetOfIdentifyingLoaderForClazzInSharedCache(j9class);
+         *(uintptr_t *)cursor = classChainOffsetInSharedCache;
          cursor += SIZEPOINTER;
 
          cursor = self()->emitClassChainOffset(cursor, j9class);
 
-         uintptrj_t vTableOffset = (uintptrj_t) fej9->getInterpreterVTableSlot(j9method, j9class);
-         *(uintptrj_t *)cursor = vTableOffset;
+         uintptr_t vTableOffset = (uintptr_t) fej9->getInterpreterVTableSlot(j9method, j9class);
+         *(uintptr_t *)cursor = vTableOffset;
          cursor += SIZEPOINTER;
          }
          break;
@@ -722,8 +722,8 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          {
          TR::Node *aconstNode = (TR::Node *) relocation->getTargetAddress();
 
-         uintptrj_t inlinedSiteIndex = (uintptrj_t)aconstNode->getInlinedSiteIndex();
-         *(uintptrj_t *)cursor = inlinedSiteIndex;
+         uintptr_t inlinedSiteIndex = (uintptr_t)aconstNode->getInlinedSiteIndex();
+         *(uintptr_t *)cursor = inlinedSiteIndex;
          cursor += SIZEPOINTER;
 
          //for optimizations where we are trying to relocate either profiled j9class or getfrom signature we can't use node to get the target address
@@ -740,8 +740,8 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
                j9class = (TR_OpaqueClassBlock *) aconstNode->getSymbolReference()->getSymbol()->castToStaticSymbol()->getStaticAddress();
             }
 
-         uintptrj_t classChainOffsetInSharedCache = sharedCache->getClassChainOffsetOfIdentifyingLoaderForClazzInSharedCache(j9class);
-         *(uintptrj_t *)cursor = classChainOffsetInSharedCache;
+         uintptr_t classChainOffsetInSharedCache = sharedCache->getClassChainOffsetOfIdentifyingLoaderForClazzInSharedCache(j9class);
+         *(uintptr_t *)cursor = classChainOffsetInSharedCache;
          cursor += SIZEPOINTER;
 
          cursor = self()->emitClassChainOffset(cursor, j9class);
@@ -758,11 +758,11 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
 
          // Data identifying the class is as though for TR_ClassPointer
          // (TR_RelocationRecordPointerBinaryTemplate)
-         *(uintptrj_t *)cursor = inlinedSiteIndex;
+         *(uintptr_t *)cursor = inlinedSiteIndex;
          cursor += SIZEPOINTER;
 
-         uintptrj_t classChainOffsetInSharedCache = sharedCache->getClassChainOffsetOfIdentifyingLoaderForClazzInSharedCache(j9class);
-         *(uintptrj_t *)cursor = classChainOffsetInSharedCache;
+         uintptr_t classChainOffsetInSharedCache = sharedCache->getClassChainOffsetOfIdentifyingLoaderForClazzInSharedCache(j9class);
+         *(uintptr_t *)cursor = classChainOffsetInSharedCache;
          cursor += SIZEPOINTER;
 
          cursor = self()->emitClassChainOffset(cursor, j9class);
@@ -787,10 +787,10 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          *flagsCursor |= (flags & RELOCATION_RELOC_FLAGS_MASK);
 
          int32_t inlinedSiteIndex = guard->getCurrentInlinedSiteIndex();
-         *(uintptrj_t *)cursor = (uintptrj_t)inlinedSiteIndex;
+         *(uintptr_t *)cursor = (uintptr_t)inlinedSiteIndex;
          cursor += SIZEPOINTER;
 
-         *(uintptrj_t *)cursor = (uintptrj_t)guard->getSymbolReference()->getOwningMethod(self()->comp())->constantPool(); // record constant pool
+         *(uintptr_t *)cursor = (uintptr_t)guard->getSymbolReference()->getOwningMethod(self()->comp())->constantPool(); // record constant pool
          cursor += SIZEPOINTER;
 
          if (relocation->getTargetKind() == TR_InlinedInterfaceMethodWithNopGuard ||
@@ -818,25 +818,25 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
                receiverClassID = symValManager->getIDFromSymbol(static_cast<void *>(thisClass));
                }
 
-            *(uintptrj_t*)cursor = (((uintptrj_t)receiverClassID << 16) | (uintptrj_t)methodID);
+            *(uintptr_t*)cursor = (((uintptr_t)receiverClassID << 16) | (uintptr_t)methodID);
             }
          else
             {
-            *(uintptrj_t*)cursor = (uintptrj_t)guard->getSymbolReference()->getCPIndex(); // record cpIndex
+            *(uintptr_t*)cursor = (uintptr_t)guard->getSymbolReference()->getCPIndex(); // record cpIndex
             }
          cursor += SIZEPOINTER;
 
          TR_OpaqueClassBlock *inlinedMethodClass = resolvedMethod->containingClass();
          void *romClass = (void *)fej9->getPersistentClassPointerFromClassPointer(inlinedMethodClass);
-         void *romClassOffsetInSharedCache = sharedCache->offsetInSharedCacheFromPointer(romClass);
+         uintptr_t romClassOffsetInSharedCache = self()->offsetInSharedCacheFromPointer(sharedCache, romClass);
 
-         *(uintptrj_t *)cursor = (uintptrj_t)romClassOffsetInSharedCache;
+         *(uintptr_t *)cursor = romClassOffsetInSharedCache;
          cursor += SIZEPOINTER;
 
          if (relocation->getTargetKind() != TR_InlinedInterfaceMethod &&
              relocation->getTargetKind() != TR_InlinedVirtualMethod)
             {
-            *(uintptrj_t *)cursor = (uintptrj_t)relocation->getTargetAddress(); // record Patch Destination Address
+            *(uintptr_t *)cursor = (uintptr_t)relocation->getTargetAddress(); // record Patch Destination Address
             cursor += SIZEPOINTER;
             }
          }
@@ -849,7 +849,7 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          guard = (TR_VirtualGuard *)relocation->getTargetAddress2();
 
          int32_t inlinedSiteIndex = guard->getCurrentInlinedSiteIndex();
-         *(uintptrj_t *)cursor = (uintptrj_t)inlinedSiteIndex;
+         *(uintptr_t *)cursor = (uintptr_t)inlinedSiteIndex;
          cursor += SIZEPOINTER;
 
          TR::SymbolReference *callSymRef = guard->getSymbolReference();
@@ -859,58 +859,58 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          TR_ResolvedMethod *inlinedMethod = ((TR_AOTMethodInfo *)ics._methodInfo)->resolvedMethod;
          TR_OpaqueClassBlock *inlinedCodeClass = reinterpret_cast<TR_OpaqueClassBlock *>(inlinedMethod->classOfMethod());
 
-         *(uintptrj_t *)cursor = (uintptrj_t)owningMethod->constantPool(); // record constant pool
+         *(uintptr_t *)cursor = (uintptr_t)owningMethod->constantPool(); // record constant pool
          cursor += SIZEPOINTER;
 
          if (comp->getOption(TR_UseSymbolValidationManager))
             {
             uint16_t inlinedCodeClassID = symValManager->getIDFromSymbol(static_cast<void *>(inlinedCodeClass));
-            uintptrj_t data = (uintptrj_t)inlinedCodeClassID;
-            *(uintptrj_t*)cursor = data;
+            uintptr_t data = (uintptr_t)inlinedCodeClassID;
+            *(uintptr_t*)cursor = data;
             }
          else
             {
-            *(uintptrj_t*)cursor = (uintptrj_t)callSymRef->getCPIndex(); // record cpIndex
+            *(uintptr_t*)cursor = (uintptr_t)callSymRef->getCPIndex(); // record cpIndex
             }
          cursor += SIZEPOINTER;
 
          void *romClass = (void *)fej9->getPersistentClassPointerFromClassPointer(inlinedCodeClass);
-         void *romClassOffsetInSharedCache = sharedCache->offsetInSharedCacheFromPointer(romClass);
+         uintptr_t romClassOffsetInSharedCache = self()->offsetInSharedCacheFromPointer(sharedCache, romClass);
          traceMsg(self()->comp(), "class is %p, romclass is %p, offset is %p\n", inlinedCodeClass, romClass, romClassOffsetInSharedCache);
-         *(uintptrj_t *)cursor = (uintptrj_t) romClassOffsetInSharedCache;
+         *(uintptr_t *)cursor = romClassOffsetInSharedCache;
          cursor += SIZEPOINTER;
 
-         uintptrj_t classChainOffsetInSharedCache = sharedCache->getClassChainOffsetOfIdentifyingLoaderForClazzInSharedCache(inlinedCodeClass);
-         *(uintptrj_t *)cursor = classChainOffsetInSharedCache;
+         uintptr_t classChainOffsetInSharedCache = sharedCache->getClassChainOffsetOfIdentifyingLoaderForClazzInSharedCache(inlinedCodeClass);
+         *(uintptr_t *)cursor = classChainOffsetInSharedCache;
          cursor += SIZEPOINTER;
 
          cursor = self()->emitClassChainOffset(cursor, inlinedCodeClass);
 
-         uintptrj_t methodIndex = fej9->getMethodIndexInClass(inlinedCodeClass, inlinedMethod->getNonPersistentIdentifier());
-         *(uintptrj_t *)cursor = methodIndex;
+         uintptr_t methodIndex = fej9->getMethodIndexInClass(inlinedCodeClass, inlinedMethod->getNonPersistentIdentifier());
+         *(uintptr_t *)cursor = methodIndex;
          cursor += SIZEPOINTER;
          }
          break;
 
       case TR_GlobalValue:
-         *(uintptrj_t*)cursor = (uintptr_t) relocation->getTargetAddress();
+         *(uintptr_t*)cursor = (uintptr_t) relocation->getTargetAddress();
          cursor += SIZEPOINTER;
          break;
 
       case TR_ValidateClass:
          {
-         *(uintptrj_t*)cursor = (uintptrj_t)relocation->getTargetAddress(); // Inlined site index
+         *(uintptr_t*)cursor = (uintptr_t)relocation->getTargetAddress(); // Inlined site index
          cursor += SIZEPOINTER;
 
          TR::AOTClassInfo *aotCI = (TR::AOTClassInfo*)relocation->getTargetAddress2();
-         *(uintptrj_t*)cursor = (uintptrj_t) aotCI->_constantPool;
+         *(uintptr_t*)cursor = (uintptr_t) aotCI->_constantPool;
          cursor += SIZEPOINTER;
 
-         *(uintptrj_t*)cursor = (uintptrj_t) aotCI->_cpIndex;
+         *(uintptr_t*)cursor = (uintptr_t) aotCI->_cpIndex;
          cursor += SIZEPOINTER;
 
-         void *classChainOffsetInSharedCache = sharedCache->offsetInSharedCacheFromPointer(aotCI->_classChain);
-         *(uintptrj_t *)cursor = (uintptrj_t) classChainOffsetInSharedCache;
+         uintptr_t classChainOffsetInSharedCache = self()->offsetInSharedCacheFromPointer(sharedCache, aotCI->_classChain);
+         *(uintptr_t *)cursor = classChainOffsetInSharedCache;
          cursor += SIZEPOINTER;
          }
          break;
@@ -918,19 +918,19 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
       case TR_ValidateStaticField:
          {
 
-         *(uintptrj_t*)cursor = (uintptrj_t)relocation->getTargetAddress(); // Inlined site index
+         *(uintptr_t*)cursor = (uintptr_t)relocation->getTargetAddress(); // Inlined site index
          cursor += SIZEPOINTER;
 
          TR::AOTClassInfo *aotCI = (TR::AOTClassInfo*)relocation->getTargetAddress2();
-         *(uintptrj_t*)cursor = (uintptrj_t) aotCI->_constantPool;
+         *(uintptr_t*)cursor = (uintptr_t) aotCI->_constantPool;
          cursor += SIZEPOINTER;
 
-         *(uintptrj_t*)cursor = (uintptrj_t) aotCI->_cpIndex;
+         *(uintptr_t*)cursor = (uintptr_t) aotCI->_cpIndex;
          cursor += SIZEPOINTER;
 
          void *romClass = (void *)fej9->getPersistentClassPointerFromClassPointer(aotCI->_clazz);
-         void *romClassOffsetInSharedCache = sharedCache->offsetInSharedCacheFromPointer(romClass);
-         *(uintptrj_t *)cursor = (uintptrj_t) romClassOffsetInSharedCache;
+         uintptr_t romClassOffsetInSharedCache = self()->offsetInSharedCacheFromPointer(sharedCache, romClass);
+         *(uintptr_t *)cursor = romClassOffsetInSharedCache;
          cursor += SIZEPOINTER;
          }
          break;
@@ -941,29 +941,29 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
          TR_OpaqueClassBlock *classToValidate = aotCI->_clazz;
 
          //store the classchain's offset for the classloader for the class
-         uintptrj_t classChainOffsetInSharedCacheForCL = sharedCache->getClassChainOffsetOfIdentifyingLoaderForClazzInSharedCache(classToValidate);
-         *(uintptrj_t *)cursor = classChainOffsetInSharedCacheForCL;
+         uintptr_t classChainOffsetInSharedCacheForCL = sharedCache->getClassChainOffsetOfIdentifyingLoaderForClazzInSharedCache(classToValidate);
+         *(uintptr_t *)cursor = classChainOffsetInSharedCacheForCL;
          cursor += SIZEPOINTER;
 
          //store the classchain's offset for the class that needs to be validated in the second run
          void *romClass = (void *)fej9->getPersistentClassPointerFromClassPointer(classToValidate);
-         uintptrj_t *classChainForClassToValidate = (uintptrj_t *) aotCI->_classChain;
-         void* classChainOffsetInSharedCache = sharedCache->offsetInSharedCacheFromPointer(classChainForClassToValidate);
-         *(uintptrj_t *)cursor = (uintptrj_t) classChainOffsetInSharedCache;
+         uintptr_t *classChainForClassToValidate = (uintptr_t *) aotCI->_classChain;
+         uintptr_t classChainOffsetInSharedCache = self()->offsetInSharedCacheFromPointer(sharedCache, classChainForClassToValidate);
+         *(uintptr_t *)cursor =classChainOffsetInSharedCache;
          cursor += SIZEPOINTER;
          }
          break;
 
       case TR_HCR:
          {
-         *(uintptrj_t*)cursor = (uintptrj_t)relocation->getTargetAddress();
+         *(uintptr_t*)cursor = (uintptr_t)relocation->getTargetAddress();
          cursor += SIZEPOINTER;
          }
          break;
 
       case TR_EmitClass:
          {
-         *(uintptrj_t *)cursor = (uintptrj_t) relocation->getTargetAddress2(); // Inlined call site index
+         *(uintptr_t *)cursor = (uintptr_t) relocation->getTargetAddress2(); // Inlined call site index
          cursor += SIZEPOINTER;
 
          TR_ByteCodeInfo *bcInfo = (TR_ByteCodeInfo *) relocation->getTargetAddress();
@@ -983,19 +983,19 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
 
          TR::DebugCounterReloData *counterReloData = counter->getReloData();
 
-         uintptrj_t offset = (uintptrj_t)fej9->sharedCache()->rememberDebugCounterName(counter->getName());
+         uintptr_t offset = (uintptr_t)fej9->sharedCache()->rememberDebugCounterName(counter->getName());
 
-         *(uintptrj_t *)cursor = (uintptrj_t)counterReloData->_callerIndex;
+         *(uintptr_t *)cursor = (uintptr_t)counterReloData->_callerIndex;
          cursor += SIZEPOINTER;
-         *(uintptrj_t *)cursor = (uintptrj_t)counterReloData->_bytecodeIndex;
+         *(uintptr_t *)cursor = (uintptr_t)counterReloData->_bytecodeIndex;
          cursor += SIZEPOINTER;
-         *(uintptrj_t *)cursor = offset;
+         *(uintptr_t *)cursor = offset;
          cursor += SIZEPOINTER;
-         *(uintptrj_t *)cursor = (uintptrj_t)counterReloData->_delta;
+         *(uintptr_t *)cursor = (uintptr_t)counterReloData->_delta;
          cursor += SIZEPOINTER;
-         *(uintptrj_t *)cursor = (uintptrj_t)counterReloData->_fidelity;
+         *(uintptr_t *)cursor = (uintptr_t)counterReloData->_fidelity;
          cursor += SIZEPOINTER;
-         *(uintptrj_t *)cursor = (uintptrj_t)counterReloData->_staticDelta;
+         *(uintptr_t *)cursor = (uintptr_t)counterReloData->_staticDelta;
          cursor += SIZEPOINTER;
          }
          break;
@@ -1010,250 +1010,6 @@ uint8_t *J9::Z::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::IteratedEx
       }
    return cursor;
    }
-
-#if 0
-
-void J9::Z::AheadOfTimeCompile::dumpRelocationData()
-   {
-   uint8_t *cursor;
-   AOTcgDiag0(comp(), "J9::Z::AheadOfTimeCompile::dumpRelocationData\n");
-   cursor = getRelocationData();
-   AOTcgDiag1(comp(), "cursor=%x\n", cursor);
-   if (cursor)
-      {
-      uint8_t *endOfData;
-      if (TR::Compiler->target.is64Bit())
-         {
-         endOfData = cursor + *(uint64_t *)cursor;
-         diagnostic("Size of relocation data in AOT object is %d bytes\n"
-                    "Size field in relocation data is         %d bytes\n", getSizeOfAOTRelocations(),
-                    *(uint64_t *)cursor);
-         cursor += 8;
-         }
-      else
-         {
-         endOfData = cursor + *(uint32_t *)cursor;
-         diagnostic("Size of relocation data in AOT object is %d bytes\n"
-                    "Size field in relocation data is         %d bytes\n", getSizeOfAOTRelocations(),
-                    *(uint32_t *)cursor);
-         cursor += 4;
-         }
-
-      while (cursor < endOfData)
-         {
-         diagnostic("\nSize of relocation is %d bytes.\n", *(uint16_t *)cursor);
-         uint8_t *endOfCurrentRecord = cursor + *(uint16_t *)cursor;
-         cursor += 2;
-         TR_ExternalRelocationTargetKind kind = (TR_ExternalRelocationTargetKind)(*cursor & TR_ExternalRelocationTargetKindMask);
-         diagnostic("Relocation type is %s.\n", TR::ExternalRelocation::getName(kind));
-         int32_t offsetSize = (*cursor & WIDE_OFFSETS) ? 4 : 2;
-         bool    isOrderedPair = (*cursor & ORDERED_PAIR)? true : false;
-         diagnostic("Relocation uses %d-byte wide offsets.\n", offsetSize);
-         diagnostic("Relocation uses %s offsets.\n", isOrderedPair ? "ordered-pair" : "non-paired");
-         diagnostic("Relocation is %s.\n", (*cursor & EIP_RELATIVE) ? "EIP Relative" : "Absolute");
-         cursor++;
-         diagnostic("Target Info:\n");
-         switch (kind)
-            {
-            case TR_ConstantPool:
-               // constant pool address is placed as the last word of the header
-               if (TR::Compiler->target.is64Bit())
-                  {
-                  cursor++;    // unused field
-                  cursor += 4; // padding
-                  diagnostic("Constant pool %p", *(uint64_t *)cursor);
-                  cursor += 8;
-                  }
-               else
-                  {
-                  diagnostic("Constant pool %p", *(uint32_t *)++cursor);
-                  cursor += 4;
-                  }
-               break;
-            case TR_HelperAddress:
-               {
-               // final byte of header is the index which indicates the particular helper being relocated to
-               TR::SymbolReference *tempSR = comp()->getSymRefTab()->getSymRef(*cursor);
-               diagnostic("Helper method address of %s(%d)", comp()->getDebug()->getName(tempSR), (int32_t)*cursor++);
-               }
-               break;
-            case TR_RelativeMethodAddress:
-               // next word is the address of the constant pool to which the index refers
-               // second word is the index in the above stored constant pool that indicates the particular
-               // relocation target
-               if (TR::Compiler->target.is64Bit())
-                  {
-                  cursor++; // unused field
-                  cursor += 4; // padding
-                  diagnostic("Relative Method Address: Constant pool = %p, index = %d",
-                              *(uint64_t *)(cursor),
-                              *(uint64_t *)(cursor+8));
-                  cursor += 16;
-                  }
-               else
-                  {
-                  diagnostic("Relative Method Address: Constant pool = %p, index = %d",
-                              *(uint32_t *)(cursor+1),
-                              *(uint32_t *)(cursor+5));
-                  cursor += 9;
-                  }
-               break;
-            case TR_AbsoluteMethodAddress:
-               // Reference to the current method, no other information
-               diagnostic("Absolute Method Address:");
-               cursor++;
-               break;
-            case TR_DataAddress:
-               // next word is the address of the constant pool to which the index refers
-               // second word is the index in the above stored constant pool that indicates the particular
-               // relocation target
-               if (TR::Compiler->target.is64Bit())
-                  {
-                  cursor++; // unused field
-                  cursor += 4; // padding
-                  diagnostic("Data Address: Constant pool = %p, index = %d",
-                              *(uint64_t *)(cursor),
-                              *(uint64_t *)(cursor+8));
-                  cursor += 16;
-                  }
-               else
-                  {
-                  diagnostic("Data Address: Constant pool = %p, index = %d",
-                              *(uint32_t *)(cursor+1),
-                              *(uint32_t *)(cursor+5));
-                  cursor += 9;
-                  }
-               break;
-            case TR_ClassObject:
-               // next word is the address of the constant pool to which the index refers
-               // second word is the index in the above stored constant pool that indicates the particular
-               // relocation target
-               if (TR::Compiler->target.is64Bit())
-                  {
-                  cursor++; // unused field
-                  cursor += 4; // padding
-                  diagnostic("Class Object: Constant pool = %p, index = %d",
-                              *(uint64_t *)(cursor),
-                              *(uint64_t *)(cursor+8));
-                  cursor += 16;
-                  }
-               else
-                  {
-                  diagnostic("Class Object: Constant pool = %p, index = %d",
-                              *(uint32_t *)(cursor+1),
-                              *(uint32_t *)(cursor+5));
-                  cursor += 9;
-                  }
-               break;
-            case TR_MethodObject:
-               // next word is the address of the constant pool to which the index refers
-               // second word is the index in the above stored constant pool that indicates the particular
-               // relocation target
-               if (TR::Compiler->target.is64Bit())
-                  {
-                  cursor++; // unused field
-                  cursor += 4; // padding
-                  diagnostic("Method Object: Constant pool = %p, index = %d",
-                              *(uint64_t *)(cursor),
-                              *(uint64_t *)(cursor+8));
-                  cursor += 16;
-                  }
-               else
-                  {
-                  diagnostic("Method Object: Constant pool = %p, index = %d",
-                              *(uint32_t *)(cursor+1),
-                              *(uint32_t *)(cursor+5));
-                  cursor += 9;
-                  }
-               break;
-            case TR_InterfaceObject:
-               // next word is the address of the constant pool to which the index refers
-               // second word is the index in the above stored constant pool that indicates the particular
-               // relocation target
-               if (TR::Compiler->target.is64Bit())
-                  {
-                  cursor++; // unused field
-                  cursor += 4; // padding
-                  diagnostic("Interface Object: Constant pool = %p, index = %d",
-                              *(uint64_t *)(cursor),
-                              *(uint64_t *)(cursor+8));
-                  cursor += 16;
-                  }
-               else
-                  {
-                  diagnostic("Interface Object: Constant pool = %p, index = %d",
-                              *(uint32_t *)(cursor+1),
-                              *(uint32_t *)(cursor+5));
-                  cursor += 9;
-                  }
-               break;
-            case TR_BodyInfoAddress:
-               // Reference to the method, no other information
-               diagnostic("Body Info Address:");
-               cursor++;
-               break;
-            }
-         diagnostic("\nUpdate location offsets:");
-         uint8_t count = 0;
-         if (offsetSize == 2)
-            {
-            while (cursor < endOfCurrentRecord)
-               {
-               if ((isOrderedPair && (count % 4)==0) ||
-                   (!isOrderedPair && (count % 16)==0))
-                  {
-                  diagnostic("\n");
-                  }
-               count++;
-               if (isOrderedPair)
-                  {
-                  diagnostic("(%04x ", *(uint16_t *)cursor);
-                  cursor += 2;
-                  diagnostic("%04x) ", *(uint16_t *)cursor);
-                  cursor += 2;
-                  }
-               else
-                  {
-                  diagnostic("%04x ", *(uint16_t *)cursor);
-                  cursor += 2;
-                  }
-               }
-            }
-         else
-            {
-            while (cursor < endOfCurrentRecord)
-               {
-               if ((isOrderedPair && (count % 2)==0) ||
-                   (!isOrderedPair && (count % 8)==0))
-                  {
-                  diagnostic("\n");
-                  }
-               count++;
-               if (isOrderedPair)
-                  {
-                  diagnostic("(%08x ", *(uint32_t *)cursor);
-                  cursor += 4;
-                  diagnostic("%08x) ", *(uint32_t *)cursor);
-                  cursor += 4;
-                  }
-               else
-                  {
-                  diagnostic("%08x ", *(uint32_t *)cursor);
-                  cursor += 4;
-                  }
-               }
-            }
-         diagnostic("\n");
-         }
-
-      diagnostic("\n\n");
-      }
-   else
-      {
-      diagnostic("No relocation data allocated\n");
-      }
-   }
-#endif
 
 #if defined(TR_HOST_64BIT)
 uint32_t J9::Z::AheadOfTimeCompile::_relocationTargetTypeToHeaderSizeMap[TR_NumExternalRelocationKinds] =
@@ -1432,4 +1188,3 @@ uint32_t J9::Z::AheadOfTimeCompile::_relocationTargetTypeToHeaderSizeMap[TR_NumE
    };
 
 #endif
-

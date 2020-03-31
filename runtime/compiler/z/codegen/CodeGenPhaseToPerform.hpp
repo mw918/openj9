@@ -42,7 +42,6 @@
     LowerTreesPhase,
     InsertDebugCountersPhase,
     CompressedReferenceRematerializationPhase,
-    SplitWarmAndColdBlocksPhase,
     AllocateLinkageRegisters,
 
     markLoadAsZeroOrSignExtension,
@@ -60,6 +59,7 @@
     RegisterAssigningPhase,
     MapStackPhase,
     PeepholePhase,
+    ExpandInstructionsPhase,
     BinaryEncodingPhase,
     EmitSnippetsPhase,
     ProcessRelocationsPhase

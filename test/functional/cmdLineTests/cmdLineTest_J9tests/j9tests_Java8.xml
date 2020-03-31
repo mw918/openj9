@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 
 <!--
-  Copyright (c) 2009, 2019 IBM Corp. and others
+  Copyright (c) 2009, 2020 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -191,7 +191,8 @@
 
  <test id="Xmso">
   <command>$EXE$ $CP$ -Xmso256K -verbose:sizes $TARGET$</command>
-  <output>.*Xmso256K.*</output>
+  <output platform="aix.*,linux.*,win.*,osx.*,zos_390-31.*">.*Xmso256K.*</output>
+  <output platform="zos_390-64.*">.*Xmso1M.*</output>
  </test>
 
  <test id="Xiss">
@@ -543,6 +544,14 @@
  <test id="Test option -Xjit:count=0,disableZ15">
   <command>$EXE$ -Xjit:count=0,disableZ15 -version</command>
   <output regex="no" type="success">version</output>
+ </test>
+ 
+ <test id="Test StringBuffer/StringBuilder growth">
+  <command>$EXE$ -Xdump:none -Xmx7g -Djava.lang.stringBuffer.growAggressively -cp $Q$$JARPATH$$Q$ TestStringBufferAndBuilderGrowth</command>
+  <output regex="no" type="success">StringBuffer capacity=2147483647 StringBuilder capacity=2147483647</output>
+  <output regex="no" type="success">Option too large</output>
+  <output regex="no" type="success">Not enough resource to run test</output>
+  <output regex="no" type="success">Failed to instantiate heap</output>
  </test>
 
 </suite>

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,6 +20,7 @@
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
+include(CheckCXXCompilerFlag)
 # This CMakeLists is included by the VM CMake lists, and works after composition
 # has occurred.
 #
@@ -49,8 +50,20 @@ if(OMR_ARCH_X86)
 	omr_append_flags(CMAKE_ASM_NASM_FLAGS ${asm_inc_dirs})
 endif()
 
+# Using the linker option -static-libgcc results in an error on OSX. The option -static-libstdc++ is unused. Therefore
+# these options have been excluded from OSX
+if((OMR_TOOLCONFIG STREQUAL "gnu") AND (NOT OMR_OS_OSX))
+	check_cxx_compiler_flag("-static-libstdc++" ALLOWS_STATIC_LIBCPP)
+endif()
+
+# This target is created so that various subdirectories can add dependencies to it.
+# The j9jit target will then depend on it, propagating the dependencies.
+# This is required because at the time we include the subdirectories, the j9jit target
+# does not yet exist (and as such can't have dependencies addded to it).
+add_custom_target(j9jit_generate)
+
 # On windows exceptions are controlled via a the preprocessor define _HAS_EXCEPTIONS
-# We need to enable it again, after omr platform config removed it
+# We need to enable it again, after omr platform config removed it.
 get_directory_property(compile_defs COMPILE_DEFINITIONS)
 list(REMOVE_ITEM compile_defs "_HAS_EXCEPTIONS=0")
 set_property(DIRECTORY PROPERTY COMPILE_DEFINITIONS ${compile_defs})
@@ -67,44 +80,25 @@ add_custom_command(
 )
 add_custom_target(j9jit_tracegen DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/env/ut_j9jit.h)
 
-# JITSERVER_SUPPORT and protobuf
-if(JITSERVER_SUPPORT)
+# J9VM_OPT_JITSERVER
+if(J9VM_OPT_JITSERVER)
 	message(STATUS "JITServer is supported")
-	add_definitions(-DJITSERVER_SUPPORT)
 
-	include(FindProtobuf)
-	set(Protobuf_USE_STATIC_LIBS ON)
-	find_package(Protobuf REQUIRED)
-
-	if(Protobuf_FOUND)
-		include_directories(${Protobuf_INCLUDE_DIRS})
-		string(REPLACE
-			"${CMAKE_SHARED_LIBRARY_PREFIX}protobuf${J9VM_OLD_SHARED_SUFFIX}"
-			"${CMAKE_STATIC_LIBRARY_PREFIX}protobuf${CMAKE_STATIC_LIBRARY_SUFFIX}"
-			Protobuf_LIBRARIES
-			${Protobuf_LIBRARIES})
-		message(STATUS "Protobuf found version : ${Protobuf_VERSION}")
-		message(STATUS "Protobuf include path : ${Protobuf_INCLUDE_DIRS}" )
-		message(STATUS "Protobuf libraries : ${Protobuf_LIBRARIES}" )
-	else()
-		message(FATAL_ERROR "Protobuf not found")
+	if(OPENSSL_CFLAGS)
+		set(J9_CFLAGS "${J9_CFLAGS} ${OPENSSL_CFLAGS}")
+		set(J9_CXXFLAGS "${J9_CXXFLAGS} ${OPENSSL_CFLAGS}")
 	endif()
 
-	find_program(PROTOC "protoc")
-	if(PROTOC-NOTFOUND)
-		message(FATAL_ERROR "'protoc' not found")
-	endif(PROTOC-NOTFOUND)
+	if(OPENSSL_BUNDLE_LIB_PATH) # --enable-openssl-bundling
+		set(OPENSSL_ROOT_DIR ${OPENSSL_BUNDLE_LIB_PATH})
+		set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath,$ORIGIN/..")
+	elseif(OPENSSL_DIR) # --with-openssl=fetched only
+		set(OPENSSL_ROOT_DIR ${OPENSSL_DIR})
+	endif()
 
-	add_custom_command(
-			OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.h ${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.cpp
-			DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/net/protos/compile.proto
-			COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_SOURCE_DIR}/net/gen
-			COMMAND ${PROTOC} -I=${CMAKE_CURRENT_SOURCE_DIR}/net/protos --cpp_out=${CMAKE_CURRENT_SOURCE_DIR}/net/gen ${CMAKE_CURRENT_SOURCE_DIR}/net/protos/compile.proto
-			COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.cc ${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.cpp
-			VERBATIM
-	)
-
-	add_custom_target(j9jit_proto DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.h ${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.cpp)
+	include(FindOpenSSL)
+	find_package(OpenSSL REQUIRED)
+	include_directories(${OPENSSL_INCLUDE_DIR})
 endif()
 
 #TODO We should get rid of this, but its still required by the compiler_support module in omr
@@ -143,8 +137,7 @@ add_subdirectory(optimizer)
 add_subdirectory(ras)
 add_subdirectory(runtime)
 
-if(JITSERVER_SUPPORT)
-	j9jit_files(${CMAKE_CURRENT_SOURCE_DIR}/net/gen/compile.pb.cpp)
+if(J9VM_OPT_JITSERVER)
 	add_subdirectory(net)
 endif()
 
@@ -178,6 +171,7 @@ set(REMOVED_OMR_FILES
 	${omr_SOURCE_DIR}/compiler/ilgen/IlInjector.cpp
 	${omr_SOURCE_DIR}/compiler/ilgen/OMRBytecodeBuilder.cpp
 	${omr_SOURCE_DIR}/compiler/ilgen/OMRIlBuilder.cpp
+	${omr_SOURCE_DIR}/compiler/ilgen/OMRIlType.cpp
 	${omr_SOURCE_DIR}/compiler/ilgen/OMRIlValue.cpp
 	${omr_SOURCE_DIR}/compiler/ilgen/OMRJitBuilderRecorder.cpp
 	${omr_SOURCE_DIR}/compiler/ilgen/OMRJitBuilderRecorderBinaryBuffer.cpp
@@ -198,7 +192,6 @@ get_target_property(compiler_defines j9vm_compiler_defines INTERFACE_COMPILE_DEF
 # Extra defines not provided by the create_omr_compiler_library call
 set(TARGET_DEFINES
 	J9_PROJECT_SPECIFIC
-	_LONG_LONG
 	${compiler_defines}
 )
 
@@ -259,7 +252,7 @@ if(OMR_OS_LINUX OR OMR_OS_OSX)
 		-fno-threadsafe-statics
 		-Wno-invalid-offsetof
 	)
-	if(NOT JITSERVER_SUPPORT)
+	if(NOT J9VM_OPT_JITSERVER)
 		set(J9_CXXFLAGS
 			${J9_CXXFLAGS}
 			-fno-rtti
@@ -277,6 +270,19 @@ elseif(OMR_OS_WINDOWS)
 		-DSUPPORTS_THREAD_LOCAL
 		-DWINDOWS
 	)
+elseif(OMR_OS_AIX)
+	set(J9_SHAREDFLAGS
+		-DAIXPPC
+		-DRS6000
+		-D_XOPEN_SOURCE_EXTENDED=1
+		-D_ALL_SOURCE
+		-DSUPPORTS_THREAD_LOCAL
+	)
+	if(OMR_ENV_DATA64)
+		set(J9_SHAREDFLAGS -q64)
+	else()
+		set(J9_SHAREDFLAGS -q32)
+	endif()
 else()
 	message(SEND_ERROR "unsupported platform")
 endif()
@@ -301,11 +307,8 @@ create_omr_compiler_library(NAME j9jit
 add_dependencies(j9jit
 	omrgc_hookgen
 	j9jit_tracegen
+	j9jit_generate
 )
-
-if(JITSERVER_SUPPORT)
-	add_dependencies(j9jit j9jit_proto)
-endif()
 
 target_link_libraries(j9jit
 	PRIVATE
@@ -323,9 +326,16 @@ target_link_libraries(j9jit
 		${CMAKE_DL_LIBS}
 )
 
-if(JITSERVER_SUPPORT)
-	target_link_libraries(j9jit PRIVATE ${Protobuf_LIBRARIES})
-endif()
+# This is a bit hokey, but cmake can't track the fact that files are generated across directories.
+# Note: while these are only needed on z, setting the properties unconditionally has no ill-effect.
+set_source_files_properties(
+	${CMAKE_CURRENT_BINARY_DIR}/z/runtime/Math.s
+	${CMAKE_CURRENT_BINARY_DIR}/z/runtime/PicBuilder.s
+	${CMAKE_CURRENT_BINARY_DIR}/z/runtime/Recompilation.s
+	${CMAKE_CURRENT_BINARY_DIR}/z/runtime/ValueProf.s
+	PROPERTIES
+	GENERATED TRUE
+)
 
 if(OMR_OS_LINUX)
 	set_property(TARGET j9jit APPEND_STRING PROPERTY
@@ -333,6 +343,15 @@ if(OMR_OS_LINUX)
 	target_link_libraries(j9jit PRIVATE m)
 elseif(OMR_OS_WINDOWS)
 	target_sources(j9jit PRIVATE build/scripts/j9jit.def)
+elseif(OMR_OS_AIX)
+	set_property(TARGET j9jit APPEND_STRING PROPERTY
+		LINK_FLAGS " -Wl,-bE:${CMAKE_CURRENT_SOURCE_DIR}/build/scripts/j9jit.aix.exp")
+endif()
+if((OMR_TOOLCONFIG STREQUAL "gnu") AND ALLOWS_STATIC_LIBCPP)
+	# We assume that if the compiler allows -static-libstdc++
+	# it will also allow -static-libgcc
+	set_property(TARGET j9jit APPEND_STRING PROPERTY
+		LINK_FLAGS " -static-libgcc -static-libstdc++")
 endif()
 set_property(TARGET j9jit PROPERTY LINKER_LANGUAGE CXX)
 

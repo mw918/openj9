@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -28,9 +28,9 @@
 #include "env/CompilerEnv.hpp"
 #include "env/jittypes.h"
 #include "env/VMJ9.h"
+#include "il/LabelSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
-#include "il/symbol/LabelSymbol.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
 #include "optimizer/Simplifier.hpp"
@@ -207,7 +207,7 @@ genLoadDFP(
       fprRegister = cg->allocateRegister(TR_FPR);
 
       // move it from GPR to FPR
-      if (TR::Compiler->target.cpu.getSupportsFloatingPointExtensionFacility())
+      if (cg->comp()->target().cpu.getSupportsFloatingPointExtensionFacility())
          {
          generateRRInstruction(cg, TR::InstOpCode::LDGR, node, fprRegister, newRegister);
          }
@@ -1879,7 +1879,7 @@ fixedToDFP(TR::Node * node, TR::CodeGenerator * cg)
 
    TR::Register *tempReg = cg->allocateRegister();
    TR::RegisterDependencyConditions * deps = NULL;
-   if (TR::Compiler->target.is32Bit())
+   if (cg->comp()->target().is32Bit())
       {
       deps = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(0, 1, cg);
       deps->addPostCondition(tempReg, TR::RealRegister::GPR0);

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -30,14 +30,14 @@
 #include "env/IO.hpp"
 #include "env/jittypes.h"
 #include "env/VMJ9.h"
+#include "il/LabelSymbol.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/RegisterMappedSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
-#include "il/symbol/LabelSymbol.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/RegisterMappedSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "p/codegen/PPCInstruction.hpp"
 #include "p/codegen/PPCRecompilation.hpp"
 #include "runtime/CodeCacheManager.hpp"
@@ -46,7 +46,7 @@ uint8_t *TR::PPCForceRecompilationSnippet::emitSnippetBody()
    {
    uint8_t             *buffer = cg()->getBinaryBufferCursor();
    TR::SymbolReference  *induceRecompilationSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_PPCinduceRecompilation, false, false, false);
-   intptrj_t startPC = (intptrj_t)((uint8_t*)cg()->getCodeStart());
+   intptr_t startPC = (intptr_t)((uint8_t*)cg()->getCodeStart());
 
    getSnippetLabel()->setCodeLocation(buffer);
 
@@ -55,7 +55,7 @@ uint8_t *TR::PPCForceRecompilationSnippet::emitSnippetBody()
 
    TR::InstOpCode opcode;
 
-   if (TR::Compiler->target.is64Bit())
+   if (cg()->comp()->target().is64Bit())
       {
       // put jit entry point address in startPCReg
       uint32_t hhval, hlval, lhval, llval;
@@ -118,16 +118,16 @@ uint8_t *TR::PPCForceRecompilationSnippet::emitSnippetBody()
       buffer += PPC_INSTRUCTION_LENGTH;
       }
 
-   intptrj_t helperAddress = (intptrj_t)induceRecompilationSymRef->getMethodAddress();
-   if (cg()->directCallRequiresTrampoline(helperAddress, (intptrj_t)buffer))
+   intptr_t helperAddress = (intptr_t)induceRecompilationSymRef->getMethodAddress();
+   if (cg()->directCallRequiresTrampoline(helperAddress, (intptr_t)buffer))
       {
       helperAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(induceRecompilationSymRef->getReferenceNumber(), (void *)buffer);
-      TR_ASSERT_FATAL(TR::Compiler->target.cpu.isTargetWithinIFormBranchRange(helperAddress, (intptrj_t)buffer),
+      TR_ASSERT_FATAL(cg()->comp()->target().cpu.isTargetWithinIFormBranchRange(helperAddress, (intptr_t)buffer),
                       "Helper address is out of range");
       }
 
    // b distance
-   *(int32_t *)buffer = 0x48000000 | ((helperAddress - (intptrj_t)buffer) & 0x03ffffff);
+   *(int32_t *)buffer = 0x48000000 | ((helperAddress - (intptr_t)buffer) & 0x03ffffff);
 
    cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer,(uint8_t *)induceRecompilationSymRef,TR_HelperAddress, cg()),
                           __FILE__,
@@ -151,7 +151,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::PPCForceRecompilationSnippet * snippet)
 
    int32_t value;
 
-   if (TR::Compiler->target.is64Bit())
+   if (_comp->target().is64Bit())
       {
       printPrefix(pOutFile, NULL, cursor, 4);
       value = *((int32_t *) cursor) & 0x0ffff;
@@ -197,11 +197,11 @@ TR_Debug::print(TR::FILE *pOutFile, TR::PPCForceRecompilationSnippet * snippet)
    printPrefix(pOutFile, NULL, cursor, 4);
    value = *((int32_t *) cursor) & 0x03fffffc;
    value = (value << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t; %s%s", (intptrj_t)cursor + value, getName(_cg->getSymRef(TR_PPCinduceRecompilation)), info);
+   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t; %s%s", (intptr_t)cursor + value, getName(_cg->getSymRef(TR_PPCinduceRecompilation)), info);
    cursor += 4;
    }
 
 uint32_t TR::PPCForceRecompilationSnippet::getLength(int32_t estimatedSnippetStart)
    {
-   return(TR::Compiler->target.is64Bit() ? 6*PPC_INSTRUCTION_LENGTH : 3*PPC_INSTRUCTION_LENGTH);
+   return(cg()->comp()->target().is64Bit() ? 6*PPC_INSTRUCTION_LENGTH : 3*PPC_INSTRUCTION_LENGTH);
    }

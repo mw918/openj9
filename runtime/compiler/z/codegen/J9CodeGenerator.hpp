@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -36,14 +36,12 @@ namespace J9 { typedef J9::Z::CodeGenerator CodeGeneratorConnector; }
 #error J9::Z::CodeGenerator expected to be a primary connector, but a J9 connector is already defined
 #endif
 
-
-
 #include "compiler/codegen/J9CodeGenerator.hpp"
 #include "j9cfg.h"
+
 namespace TR { class S390EyeCatcherDataSnippet; }
-
-
 namespace TR { class Node; }
+
 
 namespace J9
 {
@@ -114,8 +112,8 @@ class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
    bool canGeneratePDBinaryIntrinsic(TR::ILOpCodes opCode, TR::Node * op1PrecNode, TR::Node * op2PrecNode, TR::Node * resultPrecNode);
 
    bool constLoadNeedsLiteralFromPool(TR::Node *node);
-   
-   bool supportsTrapsInTMRegion(){ return TR::Compiler->target.isZOS();}
+
+   bool supportsTrapsInTMRegion(){ return J9::Z::CodeGenerator::comp()->target().isZOS(); }
 
    using J9::CodeGenerator::addAllocatedRegister;
    void addAllocatedRegister(TR_PseudoRegister * temp);
@@ -231,8 +229,6 @@ class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
    bool canCopyWithOneOrTwoInstrs(char *lit, size_t size);
    bool inlineSmallLiteral(size_t srcSize, char *srcLiteral, size_t destSize, bool trace);
 
-   bool allowSplitWarmAndColdBlocks() { return true; }
-
 #if defined(J9VM_JIT_FREE_SYSTEM_STACK_POINTER)
    /** \brief
     *     Determines whether the JIT supports freeing up the system stack pointer (SSP) for register allocation.
@@ -328,6 +324,9 @@ class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
       {
       return _ignoreDecimalOverflowException;
       }
+
+   // LL: move to .cpp
+   bool arithmeticNeedsLiteralFromPool(TR::Node *node);
 
    private:
 

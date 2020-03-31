@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -623,7 +623,7 @@ MM_IncrementalGenerationalGC::heapRemoveRange(MM_EnvironmentBase *env, MM_Memory
  * @see MM_GlobalCollector::heapReconfigured()
  */
 void
-MM_IncrementalGenerationalGC::heapReconfigured(MM_EnvironmentBase *env)
+MM_IncrementalGenerationalGC::heapReconfigured(MM_EnvironmentBase *env, HeapReconfigReason reason, MM_MemorySubSpace *subspace, void *lowAddress, void *highAddress)
 {
 	MM_EnvironmentVLHGC *envVLHGC = MM_EnvironmentVLHGC::getEnvironment(env);
 	
@@ -848,6 +848,7 @@ MM_IncrementalGenerationalGC::taxationEntryPoint(MM_EnvironmentBase *envModron, 
 		Assert_MM_true(NULL == env->_cycleState);
 		MM_CycleStateVLHGC cycleState;
 		env->_cycleState = &cycleState;
+		cycleState._schedulingDelegate = &_schedulingDelegate;
 		env->_cycleState->_gcCode = MM_GCCode(J9MMCONSTANT_IMPLICIT_GC_DEFAULT);
 		env->_cycleState->_collectionType = MM_CycleState::CT_PARTIAL_GARBAGE_COLLECTION;
 		env->_cycleState->_type = OMR_GC_CYCLE_TYPE_VLHGC_PARTIAL_GARBAGE_COLLECT;
@@ -1350,6 +1351,7 @@ MM_IncrementalGenerationalGC::partialGarbageCollectUsingCopyForward(MM_Environme
 
 	/* flush the RSList and RSM from our currently selected regions into the card table since we will rebuild them as we process the table */
 	flushRememberedSetIntoCardTable(env);
+
 	_interRegionRememberedSet->flushBuffersForDecommitedRegions(env);
 
 	Assert_MM_true(env->_cycleState->_markMap == _markMapManager->getPartialGCMap());
@@ -2254,13 +2256,15 @@ MM_IncrementalGenerationalGC::exportStats(MM_EnvironmentVLHGC *env, MM_Collectio
 				if (classesPotentiallyUnloaded && !isMarked((J9Object *)spine)) {
 					stats->_arrayletUnknownLeaves += 1;
 					/* is this first arraylet leaf? */
-					if (region->getLowAddress() == mmPointerFromToken((J9VMThread*)env->getLanguageVMThread(), _extensions->indexableObjectModel.getArrayoidPointer(spine)[0])) {
+					GC_SlotObject firstArrayletLeafSlot(_javaVM->omrVM, _extensions->indexableObjectModel.getArrayoidPointer(spine));
+					if (region->getLowAddress() == firstArrayletLeafSlot.readReferenceFromSlot()) {
 						stats->_arrayletUnknownObjects += 1;
 					}
 				} else if (GC_ObjectModel::SCAN_POINTER_ARRAY_OBJECT == _extensions->objectModel.getScanType((J9Object *)spine)) {
 					stats->_arrayletReferenceLeaves += 1;
 					/* is this first arraylet leaf? */
-					if (region->getLowAddress() == mmPointerFromToken((J9VMThread*)env->getLanguageVMThread(), _extensions->indexableObjectModel.getArrayoidPointer(spine)[0])) {
+					GC_SlotObject firstArrayletLeafSlot(_javaVM->omrVM, _extensions->indexableObjectModel.getArrayoidPointer(spine));
+					if (region->getLowAddress() == firstArrayletLeafSlot.readReferenceFromSlot()) {
 						stats->_arrayletReferenceObjects += 1;
 						UDATA numExternalArraylets = _extensions->indexableObjectModel.numExternalArraylets(spine);
 						if (stats->_largestReferenceArraylet < numExternalArraylets) {
@@ -2270,7 +2274,8 @@ MM_IncrementalGenerationalGC::exportStats(MM_EnvironmentVLHGC *env, MM_Collectio
 				} else {
 					Assert_MM_true(GC_ObjectModel::SCAN_PRIMITIVE_ARRAY_OBJECT == _extensions->objectModel.getScanType((J9Object *)spine));
 					stats->_arrayletPrimitiveLeaves += 1;
-					if (region->getLowAddress() == mmPointerFromToken((J9VMThread*)env->getLanguageVMThread(), _extensions->indexableObjectModel.getArrayoidPointer(spine)[0])) {
+					GC_SlotObject firstArrayletLeafSlot(_javaVM->omrVM, _extensions->indexableObjectModel.getArrayoidPointer(spine));
+					if (region->getLowAddress() == firstArrayletLeafSlot.readReferenceFromSlot()) {
 						stats->_arrayletPrimitiveObjects += 1;
 						UDATA numExternalArraylets = _extensions->indexableObjectModel.numExternalArraylets(spine);
 						if (stats->_largestPrimitiveArraylet < numExternalArraylets) {

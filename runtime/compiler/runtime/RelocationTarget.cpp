@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -31,7 +31,7 @@
 #include "j9cp.h"
 #include "j9protos.h"
 #include "rommeth.h"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "codegen/PicHelpers.hpp"
 #include "control/Options.hpp"
 #include "control/Options_inlines.hpp"
@@ -131,23 +131,22 @@ uint8_t *
 TR_RelocationTarget::loadClassAddressForHeader(uint8_t *reloLocation)
    {
    // reloLocation points at the start of the address, so just need to dereference as uint8_t *
-#ifdef OMR_GC_COMPRESSED_POINTERS
-   return (uint8_t *) (uintptr_t) loadUnsigned32b(reloLocation);
-#else
+   if (TR::Compiler->om.compressObjectReferences())
+      return (uint8_t *) (uintptr_t) loadUnsigned32b(reloLocation);
    return (uint8_t *) loadPointer(reloLocation);
-#endif
    }
 
 void
 TR_RelocationTarget::storeClassAddressForHeader(uint8_t *clazz, uint8_t *reloLocation)
    {
    // reloLocation points at the start of the address, so just store the uint8_t * at reloLocation
-#ifdef OMR_GC_COMPRESSED_POINTERS
-   uintptr_t clazzPtr = (uintptr_t)clazz;
-   storeUnsigned32b((uint32_t)clazzPtr, reloLocation);
-#else
-   storePointer(clazz, reloLocation);
-#endif
+   if (TR::Compiler->om.compressObjectReferences())
+      {
+      uintptr_t clazzPtr = (uintptr_t)clazz;
+      storeUnsigned32b((uint32_t)clazzPtr, reloLocation);
+      }
+   else
+      storePointer(clazz, reloLocation);
    }
 
 uint32_t
@@ -157,7 +156,7 @@ TR_RelocationTarget::loadCPIndex(uint8_t *reloLocation)
    return 0;
    }
 
-uintptrj_t
+uintptr_t
 TR_RelocationTarget::loadThunkCPIndex(uint8_t *reloLocation)
    {
    TR_ASSERT(0, "Error: loadThunkCPIndex not implemented in relocation target base class");
@@ -238,6 +237,12 @@ void
 TR_RelocationTarget::performThunkRelocation(uint8_t *thunkAddress, uintptr_t vmHelper)
    {
    TR_ASSERT(0, "Error: performThunkRelocation not implemented in relocation target base class");
+   }
+
+void
+TR_RelocationTarget::performInvokeExactJ2IThunkRelocation(TR_J2IThunk *thunk)
+   {
+   TR_ASSERT(0, "Error: performInvokeExactJ2IThunkRelocation not implemented in relocation target base class");
    }
 
 uint8_t *

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -50,7 +50,7 @@ extern TR::Instruction *loadAddressRAM32(TR::CodeGenerator *cg,
 
 extern TR::Instruction *loadAddressRAM(TR::CodeGenerator *cg,
                                     TR::Node        *node,
-                                    intptrj_t         value,
+                                    intptr_t         value,
                                     TR::Register    *targetRegister);
 
 extern TR::Instruction *loadAddressJNI32(TR::CodeGenerator *cg,
@@ -60,7 +60,7 @@ extern TR::Instruction *loadAddressJNI32(TR::CodeGenerator *cg,
 
 extern TR::Instruction *loadAddressJNI(TR::CodeGenerator *cg,
                                     TR::Node        *node,
-                                    intptrj_t         value,
+                                    intptr_t         value,
                                     TR::Register    *targetRegister);
 
 namespace J9
@@ -85,6 +85,8 @@ class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
 
    bool inlineDirectCall(TR::Node *node, TR::Register *&resultReg);
 
+   TR::Linkage *deriveCallingLinkage(TR::Node *node, bool isIndirect);
+
    bool suppressInliningOfRecognizedMethod(TR::RecognizedMethod method);
 
    bool enableAESInHardwareTransformations();
@@ -92,6 +94,8 @@ class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
    void insertPrefetchIfNecessary(TR::Node *node, TR::Register *targetRegister);
 
    int32_t getInternalPtrMapBit() { return 18;}
+
+   bool canEmitDataForExternallyRelocatableInstructions();
 
 #ifdef J9VM_OPT_JAVA_CRYPTO_ACCELERATION
    bool suppressInliningOfCryptoMethod(TR::RecognizedMethod method);

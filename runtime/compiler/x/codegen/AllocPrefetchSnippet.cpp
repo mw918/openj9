@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -34,7 +34,7 @@
 uint8_t *TR::X86AllocPrefetchSnippet::emitSnippetBody()
    {
    TR::Compilation *comp = cg()->comp();
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
+   if (comp->getOptions()->realTimeGC())
       return 0;
 
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
@@ -61,7 +61,7 @@ uint8_t *TR::X86AllocPrefetchSnippet::emitSnippetBody()
    *buffer++ = 0xe8;
 
    int32_t disp32;
-   uintptrj_t helperAddress = 0;
+   uintptr_t helperAddress = 0;
 
    if (useSharedCodeCacheSnippet)
       {
@@ -88,7 +88,7 @@ uint8_t *TR::X86AllocPrefetchSnippet::emitSnippetBody()
       TR_RuntimeHelper helper = (comp->getOption(TR_EnableNewX86PrefetchTLH)) ? TR_X86newPrefetchTLH : TR_X86prefetchTLH;
       helperSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(helper, false, false, false);
       disp32 = cg()->branchDisplacementToHelperOrTrampoline(buffer+4, helperSymRef);
-      if (fej9->helpersNeedRelocation())
+      if (fej9->needRelocationsForHelpers())
          {
          cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer,
                                                                                 (uint8_t *)helperSymRef,
@@ -318,7 +318,7 @@ void TR::createCCPreLoadedCode(uint8_t *CCPreLoadedCodeBase, uint8_t *CCPreLoade
    uint8_t *cursor = CCPreLoadedCodeBase;
 
    CCPreLoadedCodeTable[TR_CCPreLoadedCode::TR_AllocPrefetch] = static_cast<void *>(cursor);
-   if (TR::Compiler->target.is64Bit())
+   if (cg->comp()->target().is64Bit())
       cursor = TR::X86AllocPrefetchSnippet::emitSharedBody<TR::HeapTypes::ZeroedHeap, true>(cursor, cg->getX86ProcessorInfo());
    else
       cursor = TR::X86AllocPrefetchSnippet::emitSharedBody<TR::HeapTypes::ZeroedHeap, false>(cursor, cg->getX86ProcessorInfo());
@@ -326,7 +326,7 @@ void TR::createCCPreLoadedCode(uint8_t *CCPreLoadedCodeBase, uint8_t *CCPreLoade
    cursor = static_cast<uint8_t *>( TR::alignAllocation<32>(cursor) );
 
    CCPreLoadedCodeTable[TR_CCPreLoadedCode::TR_NonZeroAllocPrefetch] = static_cast<void *>(cursor);
-   if (TR::Compiler->target.is64Bit())
+   if (cg->comp()->target().is64Bit())
       cursor = TR::X86AllocPrefetchSnippet::emitSharedBody<TR::HeapTypes::NonZeroedHeap, true>(cursor, cg->getX86ProcessorInfo());
    else
       cursor = TR::X86AllocPrefetchSnippet::emitSharedBody<TR::HeapTypes::NonZeroedHeap, false>(cursor, cg->getX86ProcessorInfo());

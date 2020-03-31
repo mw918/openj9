@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -260,7 +260,7 @@ MM_MetronomeDelegate::allocateAndInitializeOwnableSynchronizerObjectLists(MM_Env
 		ownableSynchronizerObjectLists[index].setNextList(nextOwnableSynchronizerObjectList);
 		ownableSynchronizerObjectLists[index].setPreviousList(previousOwnableSynchronizerObjectList);
 	}
-	_extensions->ownableSynchronizerObjectLists = ownableSynchronizerObjectLists;
+	_extensions->setOwnableSynchronizerObjectLists(ownableSynchronizerObjectLists);
 	return true;
 }
 
@@ -277,9 +277,9 @@ MM_MetronomeDelegate::tearDown(MM_EnvironmentBase *env)
 		_extensions->unfinalizedObjectLists = NULL;
 	}
 
-	if (NULL != _extensions->ownableSynchronizerObjectLists) {
-		env->getForge()->free(_extensions->ownableSynchronizerObjectLists);
-		_extensions->ownableSynchronizerObjectLists = NULL;
+	if (NULL != _extensions->getOwnableSynchronizerObjectLists()) {
+		env->getForge()->free(_extensions->getOwnableSynchronizerObjectLists());
+		_extensions->setOwnableSynchronizerObjectLists(NULL);
 	}
 	
 	if (NULL != _extensions->accessBarrier) {
@@ -1219,7 +1219,7 @@ MM_MetronomeDelegate::scanOwnableSynchronizerObjects(MM_EnvironmentRealtime *env
 		GC_OMRVMInterface::flushNonAllocationCaches(env);
 		UDATA listIndex;
 		for (listIndex = 0; listIndex < maxIndex; ++listIndex) {
-			MM_OwnableSynchronizerObjectList *ownableSynchronizerObjectList = &_extensions->ownableSynchronizerObjectLists[listIndex];
+			MM_OwnableSynchronizerObjectList *ownableSynchronizerObjectList = &_extensions->getOwnableSynchronizerObjectLists()[listIndex];
 			ownableSynchronizerObjectList->startOwnableSynchronizerProcessing();
 		}
 		env->_currentTask->releaseSynchronizedGCThreads(env);
@@ -1229,7 +1229,7 @@ MM_MetronomeDelegate::scanOwnableSynchronizerObjects(MM_EnvironmentRealtime *env
 	MM_OwnableSynchronizerObjectBuffer *buffer = gcEnv->_ownableSynchronizerObjectBuffer;
 	UDATA listIndex;
 	for (listIndex = 0; listIndex < maxIndex; ++listIndex) {
-		MM_OwnableSynchronizerObjectList *list = &_extensions->ownableSynchronizerObjectLists[listIndex];
+		MM_OwnableSynchronizerObjectList *list = &_extensions->getOwnableSynchronizerObjectLists()[listIndex];
 		if (!list->wasEmpty()) {
 			if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 				J9Object *object = list->getPriorList();
@@ -1332,7 +1332,7 @@ MM_MetronomeDelegate::processReferenceList(MM_EnvironmentRealtime *env, MM_HeapR
 
 		J9Object* nextReferenceObj = _extensions->accessBarrier->getReferenceLink(referenceObj);
 
-		GC_SlotObject referentSlotObject(_extensions->getOmrVM(), &J9GC_J9VMJAVALANGREFERENCE_REFERENT(env, referenceObj));
+		GC_SlotObject referentSlotObject(_extensions->getOmrVM(), J9GC_J9VMJAVALANGREFERENCE_REFERENT_ADDRESS(env, referenceObj));
 		J9Object *referent = referentSlotObject.readReferenceFromSlot();
 		if (NULL != referent) {
 			UDATA referenceObjectType = J9CLASS_FLAGS(J9GC_J9OBJECT_CLAZZ(referenceObj, env)) & J9AccClassReferenceMask;

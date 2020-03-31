@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -82,6 +82,36 @@ setCurrentExceptionNLS(J9VMThread * vmThread, UDATA exceptionNumber, U_32 module
 	setCurrentExceptionUTF(vmThread, exceptionNumber, msg);
 }
 
+void
+prepareExceptionUsingClassName(J9VMThread *vmThread, const char *exceptionClassName)
+{
+	J9Class *exceptionClass = NULL;
+	j9object_t exception = NULL;
+
+	prepareForExceptionThrow(vmThread);
+
+	exceptionClass = internalFindClassUTF8(
+			vmThread,
+			(U_8 *)exceptionClassName,
+			strlen(exceptionClassName),
+			vmThread->javaVM->systemClassLoader,
+			J9_FINDCLASS_FLAG_THROW_ON_FAIL);
+
+	/* internalFindClassUTF8 will set an exception on failure. */
+	if (J9_EXPECTED(NULL != exceptionClass)) {
+		exception = vmThread->javaVM->memoryManagerFunctions->J9AllocateObject(
+				vmThread,
+				exceptionClass,
+				J9_GC_ALLOCATE_OBJECT_NON_INSTRUMENTABLE);
+
+		if (J9_UNEXPECTED(NULL == exception)) {
+			setHeapOutOfMemoryError(vmThread);
+		} else {
+			vmThread->currentException = exception;
+			vmThread->privateFlags |= J9_PRIVATE_FLAGS_REPORT_EXCEPTION_THROW;
+		}
+	}
+}
 
 /**
  * Creates exception with nls message; substitutes string values into error message.
@@ -1001,7 +1031,8 @@ setClassLoadingConstraintOverrideError(J9VMThread *currentThread, J9UTF8 *newCla
 				 loader1ClassNameLength, loader1ClassName, loader1Hash,
 				 class1ClassNameLength, class1ClassName,
 				 loader2ClassNameLength, loader2ClassName, loader2Hash,
-				 class2ClassNameLength, class2ClassName
+				 class2ClassNameLength, class2ClassName,
+				 newClassNameLength, newClassName
 			);
 	}
 

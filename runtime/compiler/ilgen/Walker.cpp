@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -121,990 +121,6 @@
 #define JSR292_asTypeSig           "(Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;"
 #define JSR292_forGenericInvoke    "forGenericInvoke"
 #define JSR292_forGenericInvokeSig "(Ljava/lang/invoke/MethodType;Z)Ljava/lang/invoke/MethodHandle;"
-
-
-TR::Node *
-TR_J9ByteCodeIlGenerator::handleVectorIntrinsicCall(TR::Node *node, TR::MethodSymbol *symbol)
-   {
-   TR_ASSERT(TR::firstVectorIntrinsic <= symbol->getRecognizedMethod() && symbol->getRecognizedMethod() <= TR::lastVectorIntrinsic, "assertion failure");
-   switch(symbol->getRecognizedMethod())
-      {
-
-      // ---- Integer Type Operations
-      case TR::com_ibm_dataaccess_SIMD_vectorAddInt:
-         return genVectorBinaryOp(node, TR::vadd, TR::VectorInt32, TR::iadd, TR::Int32);
-      case TR::com_ibm_dataaccess_SIMD_vectorSubInt:
-         return genVectorBinaryOp(node, TR::vsub, TR::VectorInt32, TR::isub, TR::Int32);
-      case TR::com_ibm_dataaccess_SIMD_vectorMulInt:
-         return genVectorBinaryOp(node, TR::vmul, TR::VectorInt32, TR::imul, TR::Int32);
-      case TR::com_ibm_dataaccess_SIMD_vectorDivInt:
-         return genVectorBinaryOp(node, TR::vdiv, TR::VectorInt32,  TR::idiv, TR::Int32);
-      case TR::com_ibm_dataaccess_SIMD_vectorRemInt:
-         return genVectorBinaryOp(node, TR::virem, TR::VectorInt32, TR::irem, TR::Int32);
-      case TR::com_ibm_dataaccess_SIMD_vectorNegInt:
-         return genVectorUnaryOp(node, TR::vneg, TR::VectorInt32, TR::ineg, TR::Int32);
-      case TR::com_ibm_dataaccess_SIMD_vectorSplatsInt:
-         return genVectorSplatsOp(node, TR::vsplats, TR::VectorInt32, TR::Int32);
-      case TR::com_ibm_dataaccess_SIMD_vectorMinInt:
-         return genVectorBinaryOp(node, TR::vimin, TR::VectorInt32, TR::imin, TR::Int32);
-      case TR::com_ibm_dataaccess_SIMD_vectorMaxInt:
-         return genVectorBinaryOp(node, TR::vimax, TR::VectorInt32, TR::imax, TR::Int32);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpEqInt:
-	 return genVectorBinaryOp(node, TR::vicmpeq, TR::VectorInt32, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpGeInt:
-        return genVectorBinaryOp(node, TR::vicmpge, TR::VectorInt32, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpGtInt:
-        return genVectorBinaryOp(node, TR::vicmpgt, TR::VectorInt32, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpLeInt:
-        return genVectorBinaryOp(node, TR::vicmple, TR::VectorInt32, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpLtInt:
-        return genVectorBinaryOp(node, TR::vicmplt, TR::VectorInt32, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorStoreInt:
-         return genVectorStore(node, TR::VectorInt32, TR::Int32);
-      case TR::com_ibm_dataaccess_SIMD_vectorAndInt:
-         return genVectorBinaryOp(node, TR::vand, TR::VectorInt32, TR::iand, TR::Int32);
-      case TR::com_ibm_dataaccess_SIMD_vectorOrInt:
-         return genVectorBinaryOp(node, TR::vor, TR::VectorInt32, TR::ior, TR::Int32);
-      case TR::com_ibm_dataaccess_SIMD_vectorXorInt:
-         return genVectorBinaryOp(node, TR::vxor, TR::VectorInt32, TR::ixor, TR::Int32);
-      case TR::com_ibm_dataaccess_SIMD_vectorNotInt:
-         return genVectorUnaryOp(node, TR::vnot, TR::VectorInt32, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorGetElementInt:
-        return genVectorGetElementOp(node, TR::vigetelem);
-      case TR::com_ibm_dataaccess_SIMD_vectorSetElementInt:
-        return genVectorSetElementOp(node, TR::visetelem);
-      case TR::com_ibm_dataaccess_SIMD_vectorMergeHighInt:
-        return genVectorBinaryOp(node, TR::vimergeh, TR::VectorInt32, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorMergeLowInt:
-        return genVectorBinaryOp(node, TR::vimergel, TR::VectorInt32, TR::BadILOp, TR::NoType);
-
-      // ---- Long Type Operations
-      case TR::com_ibm_dataaccess_SIMD_vectorAddLong:
-         return genVectorBinaryOp(node, TR::vadd, TR::VectorInt64, TR::ladd, TR::Int64);
-      case TR::com_ibm_dataaccess_SIMD_vectorSubLong:
-         return genVectorBinaryOp(node, TR::vsub, TR::VectorInt64, TR::lsub, TR::Int64);
-      case TR::com_ibm_dataaccess_SIMD_vectorMulLong:
-         return genVectorBinaryOp(node, TR::vmul, TR::VectorInt64, TR::lmul, TR::Int64);
-      case TR::com_ibm_dataaccess_SIMD_vectorDivLong:
-         return genVectorBinaryOp(node, TR::vdiv, TR::VectorInt64,  TR::ldiv, TR::Int64);
-
-      // ---- Double Type Operations
-      case TR::com_ibm_dataaccess_SIMD_vectorMaddDouble:
-         return genVectorTernaryOp(node, TR::vdmadd);
-      case TR::com_ibm_dataaccess_SIMD_vectorNmsubDouble:
-         return genVectorTernaryOp(node, TR::vdnmsub);
-      case TR::com_ibm_dataaccess_SIMD_vectorMsubDouble:
-         return genVectorTernaryOp(node, TR::vdmsub);
-      case TR::com_ibm_dataaccess_SIMD_vectorSelDouble:
-         return genVectorTernaryOp(node, TR::vdsel);
-      case TR::com_ibm_dataaccess_SIMD_vectorSplatsDouble:
-         return genVectorSplatsOp(node, TR::vsplats, TR::VectorDouble, TR::Double);
-      case TR::com_ibm_dataaccess_SIMD_vectorStoreDouble:
-         return genVectorStore(node, TR::VectorDouble, TR::Double);
-      case TR::com_ibm_dataaccess_SIMD_vectorAddress:
-         return genVectorAddress(node, TR::a2l);
-
-      case TR::com_ibm_dataaccess_SIMD_vectorStoreByte:
-         return genVectorStore(node, TR::VectorInt8, TR::Int8);
-      case TR::com_ibm_dataaccess_SIMD_vectorStoreChar:
-         return genVectorStore(node, TR::VectorInt16, TR::Int16);
-      case TR::com_ibm_dataaccess_SIMD_vectorStoreShort:
-         return genVectorStore(node, TR::VectorInt16, TR::Int16);
-      case TR::com_ibm_dataaccess_SIMD_vectorStoreLong:
-         return genVectorStore(node, TR::VectorInt64, TR::Int64);
-
-      case TR::com_ibm_dataaccess_SIMD_vectorSplatsByte:
-         return genVectorSplatsOp(node, TR::vsplats, TR::VectorInt8, TR::Int8);
-      case TR::com_ibm_dataaccess_SIMD_vectorSplatsChar:
-      case TR::com_ibm_dataaccess_SIMD_vectorSplatsShort:
-         return genVectorSplatsOp(node, TR::vsplats, TR::VectorInt16, TR::Int16);
-      case TR::com_ibm_dataaccess_SIMD_vectorSplatsLong:
-         return genVectorSplatsOp(node, TR::vsplats, TR::VectorInt64, TR::Int64);
-
-      case TR::com_ibm_dataaccess_SIMD_vectorAddFloat:
-         return genVectorBinaryOp(node, TR::vadd, TR::VectorFloat, TR::fadd, TR::Float);
-      case TR::com_ibm_dataaccess_SIMD_vectorSubFloat:
-         return genVectorBinaryOp(node, TR::vsub, TR::VectorFloat, TR::fsub, TR::Float);
-      case TR::com_ibm_dataaccess_SIMD_vectorMulFloat:
-         return genVectorBinaryOp(node, TR::vmul, TR::VectorFloat, TR::fmul, TR::Float);
-      case TR::com_ibm_dataaccess_SIMD_vectorDivFloat:
-         return genVectorBinaryOp(node, TR::vdiv, TR::VectorFloat, TR::fdiv, TR::Float);
-      case TR::com_ibm_dataaccess_SIMD_vectorNegFloat:
-         return genVectorUnaryOp(node, TR::vneg, TR::VectorFloat, TR::fneg, TR::Float);
-      case TR::com_ibm_dataaccess_SIMD_vectorSplatsFloat:
-         return genVectorSplatsOp(node, TR::vsplats, TR::VectorFloat, TR::Float);
-      case TR::com_ibm_dataaccess_SIMD_vectorAddDouble:
-         return genVectorBinaryOp(node, TR::vadd, TR::VectorDouble, TR::dadd, TR::Double);
-      case TR::com_ibm_dataaccess_SIMD_vectorMinDouble:
-         return genVectorBinaryOp(node, TR::vdmin, TR::VectorDouble, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorMaxDouble:
-         return genVectorBinaryOp(node, TR::vdmax, TR::VectorDouble, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorDivDouble:
-         return genVectorBinaryOp(node, TR::vdiv, TR::VectorDouble, TR::ddiv, TR::Double);
-      case TR::com_ibm_dataaccess_SIMD_vectorMulDouble:
-         return genVectorBinaryOp(node, TR::vmul, TR::VectorDouble, TR::dmul, TR::Double);
-      case TR::com_ibm_dataaccess_SIMD_vectorSubDouble:
-         return genVectorBinaryOp(node, TR::vsub, TR::VectorDouble, TR::dsub, TR::Double);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAllEqInt:
-        return genVectorBinaryOpNoTrg(node, TR::vicmpalleq);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAllGeInt:
-        return genVectorBinaryOpNoTrg(node, TR::vicmpallge);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAllGtInt:
-        return genVectorBinaryOpNoTrg(node, TR::vicmpallgt);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAllLeInt:
-        return genVectorBinaryOpNoTrg(node, TR::vicmpallle);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAllLtInt:
-        return genVectorBinaryOpNoTrg(node, TR::vicmpalllt);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAnyEqInt:
-        return genVectorBinaryOpNoTrg(node, TR::vicmpanyeq);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAnyGeInt:
-        return genVectorBinaryOpNoTrg(node, TR::vicmpanyge);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAnyGtInt:
-        return genVectorBinaryOpNoTrg(node, TR::vicmpanygt);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAnyLeInt:
-        return genVectorBinaryOpNoTrg(node, TR::vicmpanyle);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAnyLtInt:
-        return genVectorBinaryOpNoTrg(node, TR::vicmpanylt);
-      // case TR::com_ibm_dataaccess_SIMD_vectorRemDouble:
-         // return genVectorBinaryOp(node, TR::vdrem);
-      case TR::com_ibm_dataaccess_SIMD_vectorNegDouble:
-         return genVectorUnaryOp(node, TR::vneg, TR::VectorDouble, TR::dneg, TR::Double);
-      case TR::com_ibm_dataaccess_SIMD_vectorSqrtDouble:
-         return genVectorUnaryOp(node, TR::vdsqrt, TR::VectorDouble, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorMergeHighDouble:
-        return genVectorBinaryOp(node, TR::vdmergeh, TR::VectorDouble, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorMergeLowDouble:
-        return genVectorBinaryOp(node, TR::vdmergel, TR::VectorDouble, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpEqDouble:
-        return genVectorBinaryOp(node, TR::vdcmpeq, TR::VectorDouble, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpGeDouble:
-        return genVectorBinaryOp(node, TR::vdcmpge, TR::VectorDouble, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpGtDouble:
-        return genVectorBinaryOp(node, TR::vdcmpgt, TR::VectorDouble, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpLeDouble:
-        return genVectorBinaryOp(node, TR::vdcmple, TR::VectorDouble, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpLtDouble:
-        return genVectorBinaryOp(node, TR::vdcmplt, TR::VectorDouble, TR::BadILOp, TR::NoType);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAllEqDouble:
-        return genVectorBinaryOpNoTrg(node, TR::vdcmpalleq);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAllGeDouble:
-        return genVectorBinaryOpNoTrg(node, TR::vdcmpallge);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAllGtDouble:
-        return genVectorBinaryOpNoTrg(node, TR::vdcmpallgt);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAllLeDouble:
-        return genVectorBinaryOpNoTrg(node, TR::vdcmpallle);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAllLtDouble:
-        return genVectorBinaryOpNoTrg(node, TR::vdcmpalllt);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAnyEqDouble:
-        return genVectorBinaryOpNoTrg(node, TR::vdcmpanyeq);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAnyGeDouble:
-        return genVectorBinaryOpNoTrg(node, TR::vdcmpanyge);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAnyGtDouble:
-        return genVectorBinaryOpNoTrg(node, TR::vdcmpanygt);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAnyLeDouble:
-        return genVectorBinaryOpNoTrg(node, TR::vdcmpanyle);
-      case TR::com_ibm_dataaccess_SIMD_vectorCmpAnyLtDouble:
-        return genVectorBinaryOpNoTrg(node, TR::vdcmpanylt);
-      case TR::com_ibm_dataaccess_SIMD_vectorGetElementDouble:
-        return genVectorGetElementOp(node, TR::vdgetelem);
-      case TR::com_ibm_dataaccess_SIMD_vectorSetElementDouble:
-        return genVectorSetElementOp(node, TR::vdsetelem);
-      case TR::com_ibm_dataaccess_SIMD_vectorAddReduceDouble:
-        return genVectorAddReduceDouble(node);
-      case TR::com_ibm_dataaccess_SIMD_vectorLoadWithStrideDouble:
-        return genVectorLoadWithStrideDouble(node);
-      case TR::com_ibm_dataaccess_SIMD_vectorLogDouble:
-	 return genVectorUnaryOp(node, TR::vdlog, TR::VectorDouble, TR::BadILOp, TR::NoType);
-
-
-      default:
-      	NULL;
-      }
-
-   return NULL;
-   }
-
-
-TR::Node *
-TR_J9ByteCodeIlGenerator::genVectorUnaryOp(TR::Node *node, TR::ILOpCodes op1, TR::DataType dt1, TR::ILOpCodes op2, TR::DataType dt2)
-   {
-   if (comp()->getOption(TR_TraceILGen)) traceMsg(comp(), "Vector intrinsic method call recognized in %p\n", node);
-
-   TR::Node *dst_idx = node->getChild(1);
-   TR::Node *src1_idx = node->getChild(3);
-
-   TR::Node *valueNode;
-   if (comp()->getOption(TR_EnableSIMDLibrary))
-      {
-      push(node->getChild(2));
-      push(src1_idx);
-      loadArrayElement(dt1);
-      TR::Node *firstOperandNode = pop();
-
-      push(node->getChild(0));
-      push(dst_idx);
-
-      valueNode = TR::Node::create(op1, 1);
-      valueNode->setAndIncChild(0, firstOperandNode);
-      push(valueNode);
-      storeArrayElement(dt1);
-      }
-   else if (op2 != TR::BadILOp)
-      {
-      TR_ASSERT(dt2 == TR::Double, "type not supported\n");
-
-      push(node->getChild(2));
-      push(src1_idx);
-      loadArrayElement(dt2);
-      TR::Node *firstOperandNode = pop();
-
-      push(node->getChild(0));
-      push(dst_idx);
-
-      valueNode = TR::Node::create(op2, 1);
-      valueNode->setAndIncChild(0, firstOperandNode);
-      push(valueNode);
-      storeArrayElement(dt2);
-
-      // handle second element
-      TR::Node *one = TR::Node::create(TR::iconst, 0, 1);
-
-      TR::Node *dst_idx1 = TR::Node::create(TR::iadd, 2);
-      dst_idx1->setAndIncChild(0, dst_idx);
-      dst_idx1->setAndIncChild(1, one);
-
-      TR::Node *src1_idx1 = TR::Node::create(TR::iadd, 2);
-      src1_idx1->setAndIncChild(0, src1_idx);
-      src1_idx1->setAndIncChild(1, one);
-
-      push(node->getChild(2));
-      push(src1_idx1);
-      loadArrayElement(dt2);
-      firstOperandNode = pop();
-
-      push(node->getChild(0));
-      push(dst_idx1);
-
-      valueNode = TR::Node::create(op2, 1);
-      valueNode->setAndIncChild(0, firstOperandNode);
-      push(valueNode);
-      storeArrayElement(dt2);
-      }
-   else
-      {
-      return NULL;
-      }
-
-   for (int i = 0; i < node->getNumChildren(); i++)
-       node->getChild(i)->recursivelyDecReferenceCount();
-
-   return valueNode;
-   }
-
-TR::Node *
-TR_J9ByteCodeIlGenerator::genVectorAddress(TR::Node *node, TR::ILOpCodes op)
-   {
-   if (!comp()->getOption(TR_EnableSIMDLibrary))
-      return NULL;
-
-   if (comp()->getOption(TR_TraceILGen)) traceMsg(comp(), "Vector intrinsic method call recognized in %p\n", node);
-
-   TR::Node *firstOperandNode = node->getChild(0);
-
-   TR::Node *valueNode = TR::Node::create(op, 1);
-   valueNode->setAndIncChild(0, firstOperandNode);
-
-   for (int i = 0; i < node->getNumChildren(); i++)
-       node->getChild(i)->recursivelyDecReferenceCount();
-
-   return valueNode;
-   }
-
-TR::Node *
-TR_J9ByteCodeIlGenerator::genVectorBinaryOpNoTrg(TR::Node *node, TR::ILOpCodes op)
-   {
-   if (comp()->getOption(TR_TraceILGen)) traceMsg(comp(), "Vector intrinsic method call recognized in %p\n", node);
-
-   TR::DataType operandType = TR::NoType;
-   switch(op)
-      {
-      case TR::vicmpalleq: case TR::vicmpallgt: case TR::vicmpallge: case TR::vicmpalllt: case TR::vicmpallle:
-      case TR::vicmpanyeq: case TR::vicmpanygt: case TR::vicmpanyge: case TR::vicmpanylt: case TR::vicmpanyle:
-         operandType = TR::VectorInt32;
-         break;
-      case TR::vdcmpalleq: case TR::vdcmpallgt: case TR::vdcmpallge: case TR::vdcmpalllt: case TR::vdcmpallle:
-      case TR::vdcmpanyeq: case TR::vdcmpanygt: case TR::vdcmpanyge: case TR::vdcmpanylt: case TR::vdcmpanyle:
-         operandType = TR::VectorDouble;
-         break;
-      default:
-         TR_ASSERT(0, "Unexpexted operation.\n");
-      }
-
-   push(node->getChild(0));
-   push(node->getChild(1));
-   loadArrayElement(operandType);
-   TR::Node *firstOperandNode = pop();
-
-   push(node->getChild(2));
-   push(node->getChild(3));
-   loadArrayElement(operandType);
-   TR::Node *secondOperandNode = pop();
-
-   TR::Node *valueNode = TR::Node::create(op, 2);
-   valueNode->setAndIncChild(0, firstOperandNode);
-   valueNode->setAndIncChild(1, secondOperandNode);
-   push(valueNode);
-
-   for (int i = 0; i < node->getNumChildren(); i++)
-       node->getChild(i)->recursivelyDecReferenceCount();
-
-   return valueNode;
-   }
-
-
-TR::Node *
-TR_J9ByteCodeIlGenerator::genVectorBinaryOp(TR::Node *node, TR::ILOpCodes op1, TR::DataType dt1, TR::ILOpCodes op2, TR::DataType dt2)
-   {
-   if (comp()->getOption(TR_TraceILGen)) traceMsg(comp(), "Vector intrinsic method call recognized in %p\n", node);
-
-   if (!comp()->cg()->getSupportsOpCodeForAutoSIMD(op1, dt2))
-      {
-      printf("SIMD opcode is not supprted on this platform\n");
-      return NULL;
-      }
-
-   TR::Node *dst_idx = node->getChild(1);
-   TR::Node *src1_idx = node->getChild(3);
-   TR::Node *src2_idx = node->getChild(5);
-
-   TR::DataType vectorType = dt1;
-
-   TR::Node *valueNode;
-   if (comp()->getOption(TR_EnableSIMDLibrary))
-      {
-      push(node->getChild(2));
-      push(src1_idx);
-      loadArrayElement(vectorType);
-      TR::Node *firstOperandNode = pop();
-
-      push(node->getChild(4));
-      push(src2_idx);
-      loadArrayElement(vectorType);
-      TR::Node *secondOperandNode = pop();
-
-      push(node->getChild(0));
-      push(dst_idx);
-
-      valueNode = TR::Node::create(op1, 2);
-      valueNode->setAndIncChild(0, firstOperandNode);
-      valueNode->setAndIncChild(1, secondOperandNode);
-      push(valueNode);
-
-      TR_ASSERT((valueNode->getDataType() == vectorType) || valueNode->getOpCode().isBooleanCompare(), "Data Type mismatching %s\n",valueNode->getDataType().toString());
-
-      storeArrayElement(vectorType);
-      }
-   else if (op2 != TR::BadILOp)
-      {
-      TR::DataType scalarType = dt2;
-
-      TR_ASSERT(scalarType == TR::Double || scalarType == TR::Int32, "type not supported\n");
-
-      push(node->getChild(2));
-      push(src1_idx);
-      loadArrayElement(scalarType);
-      TR::Node *firstOperandNode = pop();
-
-      push(node->getChild(4));
-      push(src2_idx);
-      loadArrayElement(scalarType);
-      TR::Node *secondOperandNode = pop();
-
-      push(node->getChild(0));
-      push(dst_idx);
-
-      valueNode = TR::Node::create(op2, 2);
-      valueNode->setAndIncChild(0, firstOperandNode);
-      valueNode->setAndIncChild(1, secondOperandNode);
-      push(valueNode);
-      storeArrayElement(scalarType);
-
-      // handle the rest of the elements
-      TR::Node *one = TR::Node::create(TR::iconst, 0, 1);
-      int N = (scalarType == TR::Double) ? 1 : 3;
-
-      for (int i = 0; i < N; i++)
-         {
-         TR::Node *dst_idx1 = TR::Node::create(TR::iadd, 2);
-         dst_idx1->setAndIncChild(0, dst_idx);
-         dst_idx1->setAndIncChild(1, one);
-
-         TR::Node *src1_idx1 = TR::Node::create(TR::iadd, 2);
-         src1_idx1->setAndIncChild(0, src1_idx);
-         src1_idx1->setAndIncChild(1, one);
-
-         TR::Node *src2_idx1 = TR::Node::create(TR::iadd, 2);
-         src2_idx1->setAndIncChild(0, src2_idx);
-         src2_idx1->setAndIncChild(1, one);
-
-         push(node->getChild(2));
-         push(src1_idx1);
-         loadArrayElement(scalarType);
-         firstOperandNode = pop();
-
-         push(node->getChild(4));
-         push(src2_idx1);
-         loadArrayElement(scalarType);
-         secondOperandNode = pop();
-
-         push(node->getChild(0));
-         push(dst_idx1);
-
-         valueNode = TR::Node::create(op2, 2);
-         valueNode->setAndIncChild(0, firstOperandNode);
-         valueNode->setAndIncChild(1, secondOperandNode);
-         push(valueNode);
-         storeArrayElement(scalarType);
-
-         dst_idx = dst_idx1;
-         src1_idx = src1_idx1;
-         src2_idx = src2_idx1;
-         }
-      }
-   else if (op1 == TR::vdmergeh || op1 == TR::vdmergel)
-      {
-      TR::Node *one = TR::Node::create(TR::iconst, 0, 1);
-
-      TR::Node *dst_idx1 = TR::Node::create(TR::iadd, 2);
-      dst_idx1->setAndIncChild(0, dst_idx);
-      dst_idx1->setAndIncChild(1, one);
-
-      if (op1 == TR::vdmergel)
-         {
-         TR::Node *src1_idx1 = TR::Node::create(TR::iadd, 2);
-         src1_idx1->setAndIncChild(0, src1_idx);
-         src1_idx1->setAndIncChild(1, one);
-         src1_idx = src1_idx1;
-
-         TR::Node *src2_idx1 = TR::Node::create(TR::iadd, 2);
-         src2_idx1->setAndIncChild(0, src2_idx);
-         src2_idx1->setAndIncChild(1, one);
-         src2_idx = src2_idx1;
-         }
-
-      push(node->getChild(0));
-      push(dst_idx);
-      push(node->getChild(2));
-      push(src1_idx);
-      loadArrayElement(TR::Double);
-      storeArrayElement(TR::Double);
-
-      push(node->getChild(0));
-      push(dst_idx1);
-      push(node->getChild(4));
-      push(src2_idx);
-      loadArrayElement(TR::Double);
-      storeArrayElement(TR::Double);
-
-      valueNode = src2_idx;
-      }
-   else
-      {
-      return NULL;
-      }
-
-   for (int i = 0; i < node->getNumChildren(); i++)
-       node->getChild(i)->recursivelyDecReferenceCount();
-
-   return valueNode;
-   }
-
-TR::Node *
-TR_J9ByteCodeIlGenerator::genVectorTernaryOp(TR::Node *node, TR::ILOpCodes op)
-   {
-   if (comp()->getOption(TR_TraceILGen)) traceMsg(comp(), "Vector intrinsic method call recognized in %p\n", node);
-
-   TR::Node *dst_idx = node->getChild(1);
-   TR::Node *src1_idx = node->getChild(3);
-   TR::Node *src2_idx = node->getChild(5);
-   TR::Node *src3_idx = node->getChild(7);
-
-   TR::Node *valueNode;
-   if (comp()->getOption(TR_EnableSIMDLibrary))
-      {
-      push(node->getChild(2));
-      push(src1_idx);
-      loadArrayElement(TR::VectorDouble);
-      TR::Node *firstOperandNode = pop();
-
-      push(node->getChild(4));
-      push(src2_idx);
-      loadArrayElement(TR::VectorDouble);
-      TR::Node *secondOperandNode = pop();
-
-      push(node->getChild(6));
-      push(src3_idx);
-      loadArrayElement(TR::VectorDouble);
-      TR::Node *thirdOperandNode = pop();
-
-      push(node->getChild(0));
-      push(dst_idx);
-
-      valueNode = TR::Node::create(op, 3);
-      valueNode->setAndIncChild(0, firstOperandNode);
-      valueNode->setAndIncChild(1, secondOperandNode);
-      valueNode->setAndIncChild(2, thirdOperandNode);
-      push(valueNode);
-
-      storeArrayElement(TR::VectorDouble);
-      }
-   else if (op == TR::vdmadd || op == TR::vdmsub || op == TR::vdnmsub)
-      {
-      push(node->getChild(2));
-      push(src1_idx);
-      loadArrayElement(TR::Double);
-      TR::Node *firstOperandNode = pop();
-
-      push(node->getChild(4));
-      push(src2_idx);
-      loadArrayElement(TR::Double);
-      TR::Node *secondOperandNode = pop();
-
-      push(node->getChild(6));
-      push(src3_idx);
-      loadArrayElement(TR::Double);
-      TR::Node *thirdOperandNode = pop();
-
-      push(node->getChild(0));
-      push(dst_idx);
-
-      TR::ILOpCodes op2;
-
-      if (op == TR::vdmadd)
-         op2 = TR::dadd;
-      else if (op == TR::vdmsub || TR::vdnmsub)
-         op2 = TR::dsub;
-
-      valueNode = TR::Node::create(TR::dmul, 2);
-      valueNode->setAndIncChild(0, firstOperandNode);
-      valueNode->setAndIncChild(1, secondOperandNode);
-      firstOperandNode = valueNode;
-
-      valueNode = TR::Node::create(op2, 2);
-      valueNode->setAndIncChild(0, op == TR::vdnmsub ? thirdOperandNode : firstOperandNode);
-      valueNode->setAndIncChild(1, op == TR::vdnmsub ? firstOperandNode : thirdOperandNode);
-      push(valueNode);
-      storeArrayElement(TR::Double);
-
-      // handle second element
-      TR::Node *one = TR::Node::create(TR::iconst, 0, 1);
-      TR::Node *dst_idx1 = TR::Node::create(TR::iadd, 2);
-      dst_idx1->setAndIncChild(0, dst_idx);
-      dst_idx1->setAndIncChild(1, one);
-
-      TR::Node *src1_idx1 = TR::Node::create(TR::iadd, 2);
-      src1_idx1->setAndIncChild(0, src1_idx);
-      src1_idx1->setAndIncChild(1, one);
-
-      TR::Node *src2_idx1 = TR::Node::create(TR::iadd, 2);
-      src2_idx1->setAndIncChild(0, src2_idx);
-      src2_idx1->setAndIncChild(1, one);
-
-      TR::Node *src3_idx1 = TR::Node::create(TR::iadd, 2);
-      src3_idx1->setAndIncChild(0, src3_idx);
-      src3_idx1->setAndIncChild(1, one);
-
-      push(node->getChild(2));
-      push(src1_idx1);
-      loadArrayElement(TR::Double);
-      firstOperandNode = pop();
-
-      push(node->getChild(4));
-      push(src2_idx1);
-      loadArrayElement(TR::Double);
-      secondOperandNode = pop();
-
-      push(node->getChild(6));
-      push(src3_idx1);
-      loadArrayElement(TR::Double);
-      thirdOperandNode = pop();
-
-      push(node->getChild(0));
-      push(dst_idx1);
-
-      valueNode = TR::Node::create(TR::dmul, 2);
-      valueNode->setAndIncChild(0, firstOperandNode);
-      valueNode->setAndIncChild(1, secondOperandNode);
-      firstOperandNode = valueNode;
-
-      valueNode = TR::Node::create(op2, 2);
-      valueNode->setAndIncChild(0, op == TR::vdnmsub ? thirdOperandNode : firstOperandNode);
-      valueNode->setAndIncChild(1, op == TR::vdnmsub ? firstOperandNode : thirdOperandNode);
-      push(valueNode);
-      storeArrayElement(TR::Double);
-      }
-   else
-      {
-      return NULL;
-      }
-
-   for (int i = 0; i < node->getNumChildren(); i++)
-       node->getChild(i)->recursivelyDecReferenceCount();
-
-   return valueNode;
-   }
-
-TR::Node *
-TR_J9ByteCodeIlGenerator::genVectorSplatsOp(TR::Node *node, TR::ILOpCodes op, TR::DataType vectorType, TR::DataType scalarType)
-   {
-   if (comp()->getOption(TR_TraceILGen))
-      traceMsg(comp(), "Vector intrinsic method call recognized in %p\n", node);
-
-   TR::Node *dst_idx = node->getChild(1);
-   TR::Node *baseAddr = node->getChild(0);
-   TR::Node *value = node->getChild(2);
-   TR::Node *valueNode;
-
-   if (comp()->getOption(TR_EnableSIMDLibrary))
-      {
-      push(baseAddr);
-      push(dst_idx);
-
-      valueNode = TR::Node::create(op, 1);
-
-      if (value->getDataType() != scalarType)
-         value = TR::Node::create(TR::ILOpCode::getProperConversion(value->getDataType(), scalarType, false), 1, value);
-
-      valueNode->setAndIncChild(0, value);
-
-      push(valueNode);
-      storeArrayElement(vectorType);
-      }
-   else
-      {
-      TR_ASSERT(scalarType == TR::Double || scalarType == TR::Int32, "type not supported\n");
-
-      push(baseAddr);
-      push(dst_idx);
-      valueNode = value;
-      push(valueNode);
-      storeArrayElement(scalarType);
-
-      // handle the rest of the elements
-      int N = (scalarType == TR::Double) ? 1 : 3;
-      TR::Node *one = TR::Node::create(TR::iconst, 0, 1);
-
-      for (int i = 0; i < N; i++)
-         {
-         TR::Node *dst_idx1 = TR::Node::create(TR::iadd, 2);
-         dst_idx1->setAndIncChild(0, dst_idx);
-         dst_idx1->setAndIncChild(1, one);
-
-         push(baseAddr);
-         push(dst_idx1);
-         push(valueNode);
-         storeArrayElement(scalarType);
-
-         dst_idx = dst_idx1;
-         }
-      }
-
-   for (int i = 0; i < node->getNumChildren(); i++)
-       node->getChild(i)->recursivelyDecReferenceCount();
-
-   return valueNode;
-   }
-
-TR::Node *
-TR_J9ByteCodeIlGenerator::genVectorStore(TR::Node *node, TR::DataType dt, TR::DataType dt2)
-   {
-   if (comp()->getOption(TR_TraceILGen))
-      traceMsg(comp(), "Vector intrinsic method call recognized in %p\n", node);
-
-   TR::Node *dst_idx = node->getChild(1);
-   TR::Node *src_idx = node->getChild(3);
-
-   TR::Node *value;
-   if (comp()->getOption(TR_EnableSIMDLibrary))
-      {
-      push(node->getChild(0));
-      push(dst_idx);
-
-      push(node->getChild(2));
-      push(src_idx);
-      loadArrayElement(dt);
-      value = pop();
-      push(value);
-      storeArrayElement(dt);
-      }
-   else
-      {
-      push(node->getChild(0));
-      push(dst_idx);
-      push(node->getChild(2));
-      push(src_idx);
-      loadArrayElement(dt2);
-      value = pop();
-      push(value);
-      storeArrayElement(dt2);
-
-      // handle the rest of the elements
-      TR_ASSERT(dt2 == TR::Double || dt2 == TR::Int32, "Not supported data type\n");
-      int N = (dt2 == TR::Double) ? 1 : 3;
-      TR::Node *one = TR::Node::create(TR::iconst, 0, 1);
-
-      for (int i = 0; i < N; i++)
-         {
-         TR::Node *dst_idx1 = TR::Node::create(TR::iadd, 2);
-         dst_idx1->setAndIncChild(0, dst_idx);
-         dst_idx1->setAndIncChild(1, one);
-
-         TR::Node *src_idx1 = TR::Node::create(TR::iadd, 2);
-         src_idx1->setAndIncChild(0, src_idx);
-         src_idx1->setAndIncChild(1, one);
-
-         push(node->getChild(0));
-         push(dst_idx1);
-         push(node->getChild(2));
-         push(src_idx1);
-         loadArrayElement(dt2);
-         value = pop();
-         push(value);
-         storeArrayElement(dt2);
-
-         dst_idx = dst_idx1;
-         src_idx = src_idx1;
-         }
-      }
-
-   for (int i = 0; i < node->getNumChildren(); i++)
-       node->getChild(i)->recursivelyDecReferenceCount();
-
-   return value;
-   }
-
-
-TR::Node *
-TR_J9ByteCodeIlGenerator::genVectorGetElementOp(TR::Node *node, TR::ILOpCodes op)
-   {
-   if (comp()->getOption(TR_TraceILGen)) traceMsg(comp(), "Vector intrinsic method call recognized in %p\n", node);
-
-   TR::Node *valueNode;
-   if (comp()->getOption(TR_EnableSIMDLibrary))
-      {
-      push(node->getChild(0));
-      loadConstant(TR::iconst, 0);
-      loadArrayElement(op == TR::vigetelem ? TR::VectorInt32 : TR::VectorDouble);
-      TR::Node *firstOperandNode = pop();
-
-      valueNode = TR::Node::create(op, 2);
-      valueNode->setAndIncChild(0, firstOperandNode);
-      valueNode->setAndIncChild(1, node->getChild(1));
-      }
-   else
-      {
-      push(node->getChild(0));
-      push(node->getChild(1));
-      loadArrayElement(op == TR::vigetelem ? TR::Int32 : TR::Double);
-      valueNode = pop();
-      }
-
-   for (int i = 0; i < node->getNumChildren(); i++)
-       node->getChild(i)->recursivelyDecReferenceCount();
-
-   return valueNode;
-   }
-
-TR::Node *
-TR_J9ByteCodeIlGenerator::genVectorSetElementOp(TR::Node *node, TR::ILOpCodes op)
-   {
-   if (comp()->getOption(TR_TraceILGen)) traceMsg(comp(), "Vector intrinsic method call recognized in %p\n", node);
-
-   push(node->getChild(0));
-   loadConstant(TR::iconst, 0);
-
-   push(node->getChild(0));
-   loadConstant(TR::iconst, 0);
-   loadArrayElement(op == TR::visetelem ?  TR::VectorInt32 : TR::VectorDouble);
-   TR::Node *firstOperandNode = pop();
-
-   TR::Node *valueNode = TR::Node::create(op, 3);
-   valueNode->setAndIncChild(0, firstOperandNode);
-   valueNode->setAndIncChild(1, node->getChild(1));
-   valueNode->setAndIncChild(2, node->getChild(2));
-
-   push(valueNode);
-   storeArrayElement(op == TR::visetelem ?  TR::VectorInt32 : TR::VectorDouble);
-
-   for (int i = 0; i < node->getNumChildren(); i++)
-       node->getChild(i)->recursivelyDecReferenceCount();
-
-   return valueNode;
-   }
-
-TR::Node *
-TR_J9ByteCodeIlGenerator::genVectorAddReduceDouble(TR::Node *node)
-   {
-   if (comp()->getOption(TR_TraceILGen)) traceMsg(comp(), "Vector intrinsic method call recognized in %p\n", node);
-
-   TR::Node *src_idx = node->getChild(1);
-   TR::Node *valueNode;
-   if (comp()->getOption(TR_EnableSIMDLibrary))
-      {
-      push(node->getChild(0));
-      push(src_idx);
-      loadArrayElement(TR::VectorDouble);
-      TR::Node *vectorNode = pop();
-
-      loadConstant(TR::iconst, 0);
-      TR::Node *const0 = pop();
-      loadConstant(TR::iconst, 1);
-      TR::Node *const1 = pop();
-
-      TR::Node *elem0 = TR::Node::create(TR::vdgetelem, 2);
-      elem0->setAndIncChild(0, vectorNode);
-      elem0->setAndIncChild(1, const0);
-
-      TR::Node *elem1 = TR::Node::create(TR::vdgetelem, 2);
-      elem1->setAndIncChild(0, vectorNode);
-      elem1->setAndIncChild(1, const1);
-
-      valueNode = TR::Node::create(TR::dadd, 2);
-      valueNode->setAndIncChild(0, elem0);
-      valueNode->setAndIncChild(1, elem1);
-      }
-   else
-      {
-      push(node->getChild(0));
-      push(src_idx);
-      loadArrayElement(TR::Double);
-      TR::Node *elem0 = pop();
-
-      loadConstant(TR::iconst, 1);
-      TR::Node *const1 = pop();
-      TR::Node *src_idx1 = TR::Node::create(TR::iadd, 2);
-      src_idx1->setAndIncChild(0, src_idx);
-      src_idx1->setAndIncChild(1, const1);
-
-      push(node->getChild(0));
-      push(src_idx1);
-      loadArrayElement(TR::Double);
-      TR::Node *elem1 = pop();
-
-      valueNode = TR::Node::create(TR::dadd, 2);
-      valueNode->setAndIncChild(0, elem0);
-      valueNode->setAndIncChild(1, elem1);
-      }
-
-   for (int i = 0; i < node->getNumChildren(); i++)
-       node->getChild(i)->recursivelyDecReferenceCount();
-
-   return valueNode;
-   }
-
-TR::Node *
-TR_J9ByteCodeIlGenerator::genVectorLoadWithStrideDouble(TR::Node *node)
-   {
-   if (comp()->getOption(TR_TraceILGen)) traceMsg(comp(), "Vector intrinsic method call recognized in %p\n", node);
-
-   TR::Node *dst_idx = node->getChild(1);
-   TR::Node *src_idx = node->getChild(3);
-   TR::Node *stride = node->getChild(4);
-
-   TR::Node *valueNode;
-   if (comp()->getOption(TR_EnableSIMDLibrary))
-      {
-      push(node->getChild(0));
-      push(dst_idx);
-      loadArrayElement(TR::VectorDouble);
-      TR::Node *vectorNode = pop();
-
-      push(node->getChild(2));
-      push(src_idx);
-      loadArrayElement(TR::Double);
-      TR::Node *doubleNode = pop();
-
-      loadConstant(TR::iconst, 0);
-      TR::Node *const0 = pop();
-      loadConstant(TR::iconst, 1);
-      TR::Node *const1 = pop();
-
-      valueNode = TR::Node::create(TR::vdsetelem, 3);
-      valueNode->setAndIncChild(0, vectorNode);
-      valueNode->setAndIncChild(1, doubleNode);
-      valueNode->setAndIncChild(2, const0);
-
-      vectorNode = valueNode;
-
-      TR::Node *idxNode = TR::Node::create(TR::iadd, 2);
-      idxNode->setAndIncChild(0, src_idx);
-      idxNode->setAndIncChild(1, stride);
-
-      push(node->getChild(2));
-      push(idxNode);
-      loadArrayElement(TR::Double);
-      doubleNode = pop();
-
-      valueNode = TR::Node::create(TR::vdsetelem, 3);
-      valueNode->setAndIncChild(0, vectorNode);
-      valueNode->setAndIncChild(1, doubleNode);
-      valueNode->setAndIncChild(2, const1);
-
-      push(node->getChild(0));
-      push(dst_idx);
-      push(valueNode);
-      storeArrayElement(TR::VectorDouble);
-      }
-   else
-      {
-      push(node->getChild(0));
-      push(dst_idx);
-      push(node->getChild(2));
-      push(src_idx);
-      loadArrayElement(TR::Double);
-      storeArrayElement(TR::Double);
-
-      loadConstant(TR::iconst, 1);
-      TR::Node *const1 = pop();
-      TR::Node *dst_idx1 = TR::Node::create(TR::iadd, 2);
-      dst_idx1->setAndIncChild(0, dst_idx);
-      dst_idx1->setAndIncChild(1, const1);
-
-      TR::Node *src_idx1 = TR::Node::create(TR::iadd, 2);
-      src_idx1->setAndIncChild(0, src_idx);
-      src_idx1->setAndIncChild(1, stride);
-
-      push(node->getChild(0));
-      push(dst_idx1);
-      push(node->getChild(2));
-      push(src_idx1);
-      loadArrayElement(TR::Double);
-      storeArrayElement(TR::Double);
-      valueNode = src_idx1;
-      }
-
-   for (int i = 0; i < node->getNumChildren(); i++)
-       node->getChild(i)->recursivelyDecReferenceCount();
-
-   return valueNode;
-
-   }
-
-
-// find CPindex for "element0" field
-static int32_t getCPIndexForVectorElement(TR::Compilation *comp, TR::ResolvedMethodSymbol *method)
-   {
-   TR::StackMemoryRegion stackMemoryRegion(*comp->trMemory());
-   int cp = 0;
-   while (true)
-      {
-      int len;
-      char *fieldName = method->getResolvedMethod()->fieldNameChars(cp,len);
-      if (len == 8 && 0 == strncmp(fieldName, "element0", 8)) break;
-      cp++;
-      }
-   return cp;
-   }
 
 
 static void printStack(TR::Compilation *comp, TR_Stack<TR::Node*> *stack, const char *message)
@@ -1287,7 +303,7 @@ TR::Block * TR_J9ByteCodeIlGenerator::walker(TR::Block * prevBlock)
          case J9BCdaload: loadArrayElement(TR::Double);                             _bcIndex += 1; break;
          case J9BCaaload: loadArrayElement(TR::Address);                            _bcIndex += 1; break;
          case J9BCbaload: loadArrayElement(TR::Int8);             genUnary(TR::b2i); _bcIndex += 1; break;
-         case J9BCcaload: loadArrayElement(TR::Int16, TR::cloadi); genUnary(TR::su2i); _bcIndex += 1; break;
+         case J9BCcaload: loadArrayElement(TR::Int16); genUnary(TR::su2i); _bcIndex += 1; break;
          case J9BCsaload: loadArrayElement(TR::Int16);            genUnary(TR::s2i); _bcIndex += 1; break;
 
          case J9BCiloadw: loadAuto(TR::Int32,  next2Bytes()); _bcIndex += 3; break;
@@ -1342,7 +358,7 @@ TR::Block * TR_J9ByteCodeIlGenerator::walker(TR::Block * prevBlock)
          case J9BCdastore:                   storeArrayElement(TR::Double);           _bcIndex += 1; break;
          case J9BCaastore:                   storeArrayElement(TR::Address);          _bcIndex += 1; break;
          case J9BCbastore: genUnary(TR::i2b); storeArrayElement(TR::Int8);             _bcIndex += 1; break;
-         case J9BCcastore: genUnary(TR::i2s); storeArrayElement(TR::Int16, TR::cstorei);_bcIndex += 1; break;
+         case J9BCcastore: genUnary(TR::i2s); storeArrayElement(TR::Int16);_bcIndex += 1; break;
          case J9BCsastore: genUnary(TR::i2s); storeArrayElement(TR::Int16);            _bcIndex += 1; break;
 
          case J9BCistorew: storeAuto(TR::Int32,  next2Bytes()); _bcIndex += 3; break;
@@ -2543,6 +1559,11 @@ TR_J9ByteCodeIlGenerator::handlePendingPushSaveSideEffects(TR::Node * n, TR::Nod
       }
    }
 
+bool
+TR_J9ByteCodeIlGenerator::isAtBBStart(int32_t bcIndex)
+   {
+   return blocks(bcIndex) && blocks(bcIndex)->getEntry()->getNode()->getByteCodeIndex() == bcIndex;
+   }
 /*
  * Stash the required number of arguments for the provided bytecode.
  * The current stack will be walked, determining pending push temps for
@@ -2552,7 +1573,9 @@ TR_J9ByteCodeIlGenerator::handlePendingPushSaveSideEffects(TR::Node * n, TR::Nod
 void
 TR_J9ByteCodeIlGenerator::stashArgumentsForOSR(TR_J9ByteCode byteCode)
    {
-   if (!_couldOSRAtNextBC)
+   if (!_couldOSRAtNextBC &&
+       !isAtBBStart(_bcIndex)) // _couldOSRAtNextBC doesn't work if the curent bc is at bbstart,
+                               // conversatively assume OSR transition can happen at bbstart
       return;
    _couldOSRAtNextBC = false;
 
@@ -2694,12 +1717,12 @@ TR_J9ByteCodeIlGenerator::valueMayBeModified(TR::Node * sideEffect, TR::Node * n
 
 
 TR::Node *
-TR_J9ByteCodeIlGenerator::loadConstantValueIfPossible(TR::Node *topNode, uintptrj_t topFieldOffset,  TR::DataType type, bool isArrayLength)
+TR_J9ByteCodeIlGenerator::loadConstantValueIfPossible(TR::Node *topNode, uintptr_t topFieldOffset,  TR::DataType type, bool isArrayLength)
    {
    TR::Node *constNode = NULL;
    TR::Node *parent = topNode;
    TR::SymbolReference *symRef = NULL;
-   uintptrj_t fieldOffset = 0;
+   uintptr_t fieldOffset = 0;
    if (topNode->getOpCode().hasSymbolReference())
       {
       symRef = topNode->getSymbolReference();
@@ -2770,7 +1793,7 @@ TR_J9ByteCodeIlGenerator::loadConstantValueIfPossible(TR::Node *topNode, uintptr
 
          if (loadConstantValueCriticalSection.hasVMAccess())
             {
-            uintptrj_t objectPointer = comp()->fej9()->getStaticReferenceFieldAtAddress((uintptrj_t)symbol->getStaticAddress());
+            uintptr_t objectPointer = comp()->fej9()->getStaticReferenceFieldAtAddress((uintptr_t)symbol->getStaticAddress());
             if (objectPointer)
                {
                switch (symbol->getDataType())
@@ -3020,7 +2043,7 @@ TR_J9ByteCodeIlGenerator::calculateElementAddressInContiguousArray(int32_t width
       {
       loadConstant(TR::iconst, shift);
       // generate a TR::aladd instead if required
-      if (TR::Compiler->target.is64Bit())
+      if (comp()->target().is64Bit())
          {
          // stack is now ...index,shift<===
          TR::Node *second = pop();
@@ -3031,7 +2054,7 @@ TR_J9ByteCodeIlGenerator::calculateElementAddressInContiguousArray(int32_t width
       else
          genBinary(TR::ishl);
       }
-   if (TR::Compiler->target.is64Bit())
+   if (comp()->target().is64Bit())
       {
       if (headerSize > 0)
          {
@@ -3073,7 +2096,7 @@ void
 TR_J9ByteCodeIlGenerator::calculateIndexFromOffsetInContiguousArray(int32_t width, int32_t headerSize)
    {
 
-   if (TR::Compiler->target.is64Bit())
+   if (comp()->target().is64Bit())
       {
       if (headerSize > 0)
          {
@@ -3095,7 +2118,7 @@ TR_J9ByteCodeIlGenerator::calculateIndexFromOffsetInContiguousArray(int32_t widt
    if (shift)
       {
       loadConstant(TR::iconst, shift);
-      if (TR::Compiler->target.is64Bit())
+      if (comp()->target().is64Bit())
          {
          genBinary(TR::lshr);
          genUnary(TR::l2i);
@@ -3134,8 +2157,6 @@ TR_J9ByteCodeIlGenerator::calculateArrayElementAddress(TR::DataType dataType, bo
    // since each element of an reference array is a compressed pointer,
    // modify the width accordingly, so the stride is 4bytes instead of 8
    //
-   // OMR_GC_COMPRESSED_POINTERS
-   //
    if (comp()->useCompressedPointers() && dataType == TR::Address)
       {
       width = TR::Compiler->om.sizeofReferenceField();
@@ -3143,7 +2164,7 @@ TR_J9ByteCodeIlGenerator::calculateArrayElementAddress(TR::DataType dataType, bo
 
    // Stack is now ...,aryRef,index<===
    TR::Node * index = pop();
-   dup();
+   if (checks) dup();
    dup();
    TR::Node * nodeThatWasNullChecked = pop();
 
@@ -3509,13 +2530,13 @@ TR_J9ByteCodeIlGenerator::genIfOneOperand(TR::ILOpCodes nodeop)
          loadConstant(TR::iconst, 0);
          break;
       case J9BCifnull:
-         if (TR::Compiler->target.is64Bit())
+         if (comp()->target().is64Bit())
             loadConstant(TR::aconst, (int64_t)0);
          else
             loadConstant(TR::aconst, (int32_t)0);
          break;
       case J9BCifnonnull:
-         if (TR::Compiler->target.is64Bit())
+         if (comp()->target().is64Bit())
             loadConstant(TR::aconst, (int64_t)0);
          else
             loadConstant(TR::aconst, (int32_t)0);
@@ -3870,13 +2891,11 @@ TR_J9ByteCodeIlGenerator::genInvokeSpecial(int32_t cpIndex)
       {
       _invokeSpecialSeen = true;
 
-      J9Class * const textualDefClass =
-         TR::Compiler->cls.convertClassOffsetToClassPtr(_method->containingClass());
       // For this purpose, an anonymous class whose host class is an interface
       // is expected to behave as though its code is contained within that
       // interface. For non-anonymous classes, hostClass is circular.
       TR_OpaqueClassBlock * const defClass =
-         fej9()->convertClassPtrToClassOffset(textualDefClass->hostClass);
+         fej9()->getHostClass(_method->containingClass());
       if (TR::Compiler->cls.isInterfaceClass(comp(), defClass))
          _invokeSpecialInterface = defClass;
 
@@ -4045,15 +3064,10 @@ TR_J9ByteCodeIlGenerator::genInvokeInterface(int32_t cpIndex)
          {
          TR::SymbolReference *symRef = symRefTab()->findOrCreateMethodSymbol(
             _methodSymbol->getResolvedMethodIndex(),
-            -1, // don't use cpIndex to find the vtable slot
+            cpIndex,
             improperMethod,
             TR::MethodSymbol::Virtual,
             /* isUnresolvedInCP = */ false);
-
-         symRef->setCPIndex(cpIndex);
-         TR_OpaqueMethodBlock *m = improperMethod->getPersistentIdentifier();
-         symRef->setOffset(
-            TR::Compiler->cls.vTableSlot(comp(), m, fej9()->getClassOfMethod(m)));
 
          callNode = genInvokeWithVFTChild(symRef);
          _methodSymbol->setMayHaveIndirectCalls(true);
@@ -4121,7 +3135,7 @@ TR_J9ByteCodeIlGenerator::genInvokeDynamic(int32_t callSiteIndex)
    TR_ResolvedMethod * owningMethod = _methodSymbol->getResolvedMethod();
    if (!owningMethod->isUnresolvedCallSiteTableEntry(callSiteIndex))
       {
-      TR_ResolvedMethod *specimen = fej9()->createMethodHandleArchetypeSpecimen(trMemory(), (uintptrj_t*)owningMethod->callSiteTableEntryAddress(callSiteIndex), owningMethod);
+      TR_ResolvedMethod *specimen = fej9()->createMethodHandleArchetypeSpecimen(trMemory(), (uintptr_t*)owningMethod->callSiteTableEntryAddress(callSiteIndex), owningMethod);
       if (specimen)
          symRef = symRefTab()->findOrCreateMethodSymbol(_methodSymbol->getResolvedMethodIndex(), -1, specimen, TR::MethodSymbol::ComputedVirtual);
       }
@@ -4264,10 +3278,10 @@ TR_J9ByteCodeIlGenerator::genOrFindAdjunct(TR::Node* node)
    else
       {
       // expect that adjunct part is third child of node
-      TR_ASSERT(node->isDualHigh() || node->isTernaryHigh(),
-             "this node should be a dual or ternary, where the adjunct part of the answer is in the third child");
+      TR_ASSERT(node->isDualHigh() || node->isSelectHigh(),
+             "this node should be a dual or select, where the adjunct part of the answer is in the third child");
       adjunct = node->getChild(2);
-      if (node->isTernaryHigh())
+      if (node->isSelectHigh())
          {
          adjunct = adjunct->getFirstChild();
          }
@@ -4373,7 +3387,7 @@ TR_J9ByteCodeIlGenerator::genInvoke(TR::SymbolReference * symRef, TR::Node *indi
             opcode = TR::ihbit;
             break;
          case TR::java_lang_Integer_lowestOneBit:
-            if(TR::Compiler->target.cpu.isX86())
+            if(comp()->target().cpu.isX86())
                opcode = TR::ilbit;
             else
                opcode = TR::BadILOp;
@@ -4385,7 +3399,7 @@ TR_J9ByteCodeIlGenerator::genInvoke(TR::SymbolReference * symRef, TR::Node *indi
             opcode = TR::inotz;
             break;
          case TR::java_lang_Integer_bitCount:
-            if (TR::Compiler->target.cpu.hasPopulationCountInstruction())
+            if (comp()->target().cpu.hasPopulationCountInstruction())
                opcode = TR::ipopcnt;
             else
                opcode = TR::BadILOp;
@@ -4394,7 +3408,7 @@ TR_J9ByteCodeIlGenerator::genInvoke(TR::SymbolReference * symRef, TR::Node *indi
             opcode = TR::lhbit;
             break;
          case TR::java_lang_Long_lowestOneBit:
-            if(TR::Compiler->target.cpu.isX86())
+            if(comp()->target().cpu.isX86())
                opcode = TR::llbit;
             else
                opcode = TR::BadILOp;
@@ -4406,7 +3420,7 @@ TR_J9ByteCodeIlGenerator::genInvoke(TR::SymbolReference * symRef, TR::Node *indi
             opcode = TR::lnotz;
             break;
          case TR::java_lang_Long_bitCount:
-            if (TR::Compiler->target.cpu.hasPopulationCountInstruction())
+            if (comp()->target().cpu.hasPopulationCountInstruction())
                opcode = TR::lpopcnt;
             else
                opcode = TR::BadILOp;
@@ -4486,14 +3500,14 @@ TR_J9ByteCodeIlGenerator::genInvoke(TR::SymbolReference * symRef, TR::Node *indi
             //        lconst 0
             //        lconst 0
             //        computeCC
-            //          luadd               adjunct operator
+            //          ladd               adjunct operator
             //            x
             //            y
             TR::Node* y = pop();
             TR::Node* x = pop();
             TR::Node* zero   = TR::Node::create(TR::lconst, 0, 0);
-            TR::Node* luadd  = TR::Node::create(TR::luadd, 2, x, y);
-            TR::Node* carry = TR::Node::create(TR::computeCC, 1, luadd);
+            TR::Node* ladd  = TR::Node::create(TR::ladd, 2, x, y);
+            TR::Node* carry = TR::Node::create(TR::computeCC, 1, ladd);
             TR::Node* luaddc = TR::Node::create(TR::luaddc, 3, zero, zero, carry);
             push(luaddc);
             return luaddc;
@@ -4505,15 +3519,15 @@ TR_J9ByteCodeIlGenerator::genInvoke(TR::SymbolReference * symRef, TR::Node *indi
             //        wh
             //        lconst 0
             //        computeCC
-            //          luadd               adjunct operator
+            //          ladd               adjunct operator
             //            wl
             //            x
             TR::Node* x = pop();
             TR::Node* wh = pop();
             TR::Node* wl = genOrFindAdjunct(wh);
             TR::Node* zero   = TR::Node::create(TR::lconst, 0, 0);
-            TR::Node* luadd  = TR::Node::create(TR::luadd, 2, wl, x);
-            TR::Node* carry = TR::Node::create(TR::computeCC, 1, luadd);
+            TR::Node* ladd  = TR::Node::create(TR::ladd, 2, wl, x);
+            TR::Node* carry = TR::Node::create(TR::computeCC, 1, ladd);
             TR::Node* luaddc = TR::Node::create(TR::luaddc, 3, wh, zero, carry);
             push(luaddc);
             return luaddc;
@@ -4527,14 +3541,14 @@ TR_J9ByteCodeIlGenerator::genInvoke(TR::SymbolReference * symRef, TR::Node *indi
             //        lconst 0
             //        lconst 0
             //        computeCC
-            //          lusub               adjunct operator
+            //          lsub               adjunct operator
             //            x
             //            y
             TR::Node* y = pop();
             TR::Node* x = pop();
             TR::Node* zero   = TR::Node::create(TR::lconst, 0, 0);
-            TR::Node* lusub  = TR::Node::create(TR::lusub, 2, x, y);
-            TR::Node* borrow = TR::Node::create(TR::computeCC, 1, lusub);
+            TR::Node* lsub  = TR::Node::create(TR::lsub, 2, x, y);
+            TR::Node* borrow = TR::Node::create(TR::computeCC, 1, lsub);
             TR::Node* lusubb = TR::Node::create(TR::lusubb, 3, zero, zero, borrow);
             push(lusubb);
             return lusubb;
@@ -4546,15 +3560,15 @@ TR_J9ByteCodeIlGenerator::genInvoke(TR::SymbolReference * symRef, TR::Node *indi
             //        wh
             //        lconst 0
             //        computeCC
-            //          lusub               adjunct operator
+            //          lsub               adjunct operator
             //            wl
             //            x
             TR::Node* x = pop();
             TR::Node* wh = pop();
             TR::Node* wl  = genOrFindAdjunct(wh);
             TR::Node* zero   = TR::Node::create(TR::lconst, 0, 0);
-            TR::Node* lusub  = TR::Node::create(TR::lusub, 2, wl, x);
-            TR::Node* borrow = TR::Node::create(TR::computeCC, 1, lusub);
+            TR::Node* lsub  = TR::Node::create(TR::lsub, 2, wl, x);
+            TR::Node* borrow = TR::Node::create(TR::computeCC, 1, lsub);
             TR::Node* lusubb = TR::Node::create(TR::lusubb, 3, wh, zero, borrow);
             push(lusubb);
             return lusubb;
@@ -4667,11 +3681,11 @@ TR_J9ByteCodeIlGenerator::genInvoke(TR::SymbolReference * symRef, TR::Node *indi
              n2->getSymbolReference()->getSymbol()->isStatic() &&
              n2->getSymbolReference()->getSymbol()->castToStaticSymbol()->isConstString())
             {
-             uintptrj_t offset = fej9()->getFieldOffset(comp(), n2->getSymbolReference(), n3->getSymbolReference() );
+             uintptr_t offset = fej9()->getFieldOffset(comp(), n2->getSymbolReference(), n3->getSymbolReference() );
              if (offset)
                {
                TR::Node * n ;
-               if (TR::Compiler->target.is32Bit() ||
+               if (comp()->target().is32Bit() ||
                    (int32_t)(((uint32_t)((uint64_t)offset >> 32)) & 0xffffffff) == (uint32_t)0)
                   {
                   n = TR::Node::create(TR::iconst, 0, offset);
@@ -4766,8 +3780,6 @@ break
       DAA_PRINT(TR::com_ibm_dataaccess_ByteArrayUnmarshaller_readFloat);
       DAA_PRINT(TR::com_ibm_dataaccess_ByteArrayUnmarshaller_readDouble);
 
-      DAA_PRINT(TR::com_ibm_dataaccess_ByteArrayUtils_trailingZeros);
-
       DAA_PRINT(TR::com_ibm_dataaccess_DecimalData_JITIntrinsicsEnabled);
 
       DAA_PRINT(TR::com_ibm_dataaccess_DecimalData_convertIntegerToPackedDecimal);
@@ -4838,8 +3850,8 @@ break
 
    if(symbol->getRecognizedMethod() == TR::com_ibm_dataaccess_DecimalData_JITIntrinsicsEnabled)
       {
-      bool isZLinux = TR::Compiler->target.isLinux() && TR::Compiler->target.cpu.isZ();
-      int32_t constVal = (TR::Compiler->target.isZOS() || isZLinux) &&
+      bool isZLinux = comp()->target().isLinux() && comp()->target().cpu.isZ();
+      int32_t constVal = (comp()->target().isZOS() || isZLinux) &&
               !comp()->getOption(TR_DisablePackedDecimalIntrinsics) ? 1 : 0;
 
       loadConstant(TR::iconst, constVal);
@@ -4850,10 +3862,10 @@ break
       {
       bool dfpbd = comp()->getOption(TR_DisableHysteresis);
       bool nodfpbd =  comp()->getOption(TR_DisableDFP);
-      bool isPOWERDFP = TR::Compiler->target.cpu.isPower() && TR::Compiler->target.cpu.supportsDecimalFloatingPoint();
+      bool isPOWERDFP = comp()->target().cpu.isPower() && comp()->target().cpu.supportsDecimalFloatingPoint();
       bool is390DFP =
 #ifdef TR_TARGET_S390
-         TR::Compiler->target.cpu.isZ() && TR::Compiler->target.cpu.getSupportsDecimalFloatingPointFacility();
+         comp()->target().cpu.isZ() && comp()->target().cpu.getSupportsDecimalFloatingPointFacility();
 #else
          false;
 #endif
@@ -5025,7 +4037,7 @@ break
        if (fold && indirectCallFirstChild && isCall32bit)
           {
           // fold away the check if possible
-          int32_t value = TR::Compiler->target.is64Bit() ? 0 : 1;
+          int32_t value = comp()->target().is64Bit() ? 0 : 1;
           loadConstant(TR::iconst, value);
           // cleanup the receiver because its not going to be used anymore
           //
@@ -5168,7 +4180,7 @@ break
 
    if (!comp()->getOption(TR_DisableSIMDDoubleMaxMin))
       {
-      bool platformSupported = TR::Compiler->target.cpu.isZ();
+      bool platformSupported = comp()->target().cpu.isZ();
       bool vecInstrAvailable = cg()->getSupportsVectorRegisters();
 
       if (platformSupported && vecInstrAvailable &&
@@ -5197,32 +4209,6 @@ break
           {
           comp()->failCompilation<J9::LambdaEnforceScorching>("Enforcing optLevel=scorching");
           }
-      }
-
-
-   if (comp()->getOption(TR_EnableSIMDLibrary))
-      {
-      TR::Node * newCallNode = NULL;
-
-      if (TR::firstVectorIntrinsic <= symbol->getRecognizedMethod() && symbol->getRecognizedMethod() <= TR::lastVectorIntrinsic)
-         {
-         newCallNode = handleVectorIntrinsicCall(callNode, symbol);
-
-         if (newCallNode) // if intrinsic call is recognized
-            {
-            callNode = newCallNode;
-            isStatic = true; // to avoid generating NULLchk
-            // printf ("SIMD call recognized:  %s while compiling %s\n", symbol->getMethod()->nameChars(), comp()->signature());
-            }
-         }
-
-      if (!comp()->isPeekingMethod() && !newCallNode &&
-          !strncmp(symbol->getMethod()->classNameChars(), "com/ibm/dataaccess/SIMD", 23) &&
-          !strncmp(symbol->getMethod()->nameChars(), "vector", 6))
-         {
-         printf("SIMD call not recognized:  %s while compiling %s\n", symbol->getMethod()->nameChars(), comp()->signature());
-         traceMsg(comp(), "SIMD call not recognized:  %s while compiling %s\n", symbol->getMethod()->nameChars(), comp()->signature());
-         }
       }
 
    // fast pathing for ORB readObject optimization
@@ -5262,7 +4248,7 @@ break
             TR_OpaqueClassBlock *orbClass = fej9()->getClassFromSignature(ORB_REPLACE_CLASS_NAME, ORB_REPLACE_CLASS_LEN, callNode->getSymbol()->castToResolvedMethodSymbol()->getResolvedMethod());
 
             if (comp()->getOption(TR_TraceILGen))
-               traceMsg(comp(), "orbClass = %p, orbClassLoader %s systemClassLoader\n", orbClass, (fej9()->getClassLoader(cl) != fej9()->getSystemClassLoader()) ? "!=" : "==");
+               traceMsg(comp(), "orbClass = %p, orbClassLoader %s systemClassLoader\n", orbClass, (!fej9()->isClassLoadedBySystemClassLoader(cl)) ? "!=" : "==");
 
             // PR107804 if the ORB class is loaded we cannot do the serialization opt since the
             // ObjectInputStream.redirectedReadObject cannot handle ORB for some reason
@@ -5271,7 +4257,7 @@ break
                canDoSerializationOpt = false;
                }
 
-            if (orbClass && (fej9()->getClassLoader(cl) != fej9()->getSystemClassLoader()))
+            if (orbClass && !fej9()->isClassLoadedBySystemClassLoader(cl))
                {
                TR_ScratchList<TR_ResolvedMethod> methods(trMemory());
                fej9()->getResolvedMethods(trMemory(), orbClass, &methods);
@@ -5347,8 +4333,8 @@ break
                   {
                   TR_OpaqueClassBlock *serialClass = fej9()->getClassFromSignature(JAVA_SERIAL_REPLACE_CLASS_NAME, JAVA_SERIAL_REPLACE_CLASS_LEN, callNode->getSymbol()->castToResolvedMethodSymbol()->getResolvedMethod());
                   if (comp()->getOption(TR_TraceILGen))
-                     traceMsg(comp(), "serialClass = %p, serialClassLoader %s systemClassLoader\n", serialClass, (fej9()->getClassLoader(cl) != fej9()->getSystemClassLoader()) ? "!=" : "==");
-                  if (serialClass && (fej9()->getClassLoader(cl) != fej9()->getSystemClassLoader()))
+                     traceMsg(comp(), "serialClass = %p, serialClassLoader %s systemClassLoader\n", serialClass, (!fej9()->isClassLoadedBySystemClassLoader(cl)) ? "!=" : "==");
+                  if (serialClass && !fej9()->isClassLoadedBySystemClassLoader(cl))
                      {
                      TR_ScratchList<TR_ResolvedMethod> methods(trMemory());
                      fej9()->getResolvedMethods(trMemory(), serialClass, &methods);
@@ -5500,7 +4486,7 @@ break
       TR::Node* obj = callNode->getChild(1);
       TR::Node* vftLoad = TR::Node::createWithSymRef(callNode, TR::aloadi, 1, obj, symRefTab()->findOrCreateVftSymbolRef());
 
-      if (TR::Compiler->target.is32Bit())
+      if (comp()->target().is32Bit())
          {
          resultNode = TR::Node::createWithSymRef(callNode, TR::iloadi, 1, vftLoad, symRefTab()->findOrCreateClassAndDepthFlagsSymbolRef());
          }
@@ -5529,7 +4515,7 @@ break
       TR::Node* jlClass = callNode->getChild(1);
       TR::Node* j9Class = TR::Node::createWithSymRef(callNode, TR::aloadi, 1, jlClass, symRefTab()->findOrCreateClassFromJavaLangClassSymbolRef());
 
-      if (TR::Compiler->target.is32Bit())
+      if (comp()->target().is32Bit())
          {
          resultNode = TR::Node::createWithSymRef(callNode, TR::iloadi, 1, j9Class, symRefTab()->findOrCreateInitializeStatusFromClassSymbolRef());
          }
@@ -5586,7 +4572,13 @@ break
          }
       }
 
-   if (cg()->getEnforceStoreOrder() && calledMethod->isConstructor())
+   // We disable this optimization for JITServer because TR_VMField is not supported on JITServer yet. Once we have decided how to build the data structures
+   // required by this optimization efficiently, we can re-enable this optimization.
+   if (cg()->getEnforceStoreOrder() && calledMethod->isConstructor()
+      #ifdef J9VM_OPT_JITSERVER
+         && !cg()->comp()->isOutOfProcessCompilation()
+      #endif
+      )
       {
       if (resolvedMethodSymbol)
          {
@@ -5657,12 +4649,6 @@ TR_J9ByteCodeIlGenerator::chopPlaceholder(TR::Node *placeholder, int32_t firstCh
 bool
 TR_J9ByteCodeIlGenerator::runMacro(TR::SymbolReference * symRef)
    {
-   if (comp()->isPeekingMethod())
-      {
-      // Not safe to run ILGen macros when peeking
-      return false;
-      }
-
    // Give FE first kick at the can
    //
    if (runFEMacro(symRef))
@@ -5953,9 +4939,9 @@ TR_J9ByteCodeIlGenerator::loadInstance(int32_t cpIndex)
    // performed only when DFP isn't disabled, and the target
    // is DFP enabled (i.e. Power6, zSeries6)
    if (!comp()->compileRelocatableCode() && !comp()->getOption(TR_DisableDFP) &&
-       ((TR::Compiler->target.cpu.isPower() && TR::Compiler->target.cpu.supportsDecimalFloatingPoint())
+       ((comp()->target().cpu.isPower() && comp()->target().cpu.supportsDecimalFloatingPoint())
 #ifdef TR_TARGET_S390
-         || (TR::Compiler->target.cpu.isZ() && TR::Compiler->target.cpu.getSupportsDecimalFloatingPointFacility())
+         || (comp()->target().cpu.isZ() && comp()->target().cpu.getSupportsDecimalFloatingPointFacility())
 #endif
          ))
       {
@@ -6044,7 +5030,7 @@ TR_J9ByteCodeIlGenerator::loadStatic(int32_t cpIndex)
             }
          case TR::Symbol::Com_ibm_jit_JITHelpers_IS_32_BIT:
             {
-            int32_t constValue = TR::Compiler->target.is64Bit() ? 0 : 1;
+            int32_t constValue = comp()->target().is64Bit() ? 0 : 1;
             loadConstant(TR::iconst, constValue);
             return;
             }
@@ -6196,7 +5182,7 @@ TR_J9ByteCodeIlGenerator::loadStatic(int32_t cpIndex)
             }
          case TR::Symbol::Com_ibm_oti_vm_VM_ADDRESS_SIZE:
             {
-            loadConstant(TR::iconst, (int32_t)sizeof(uintptrj_t));
+            loadConstant(TR::iconst, (int32_t)sizeof(uintptr_t));
             return;
             }
          default:
@@ -6267,7 +5253,7 @@ TR_J9ByteCodeIlGenerator::loadStatic(int32_t cpIndex)
       switch (type)
          {
          case TR::Address:
-            if ((void *)comp()->fej9()->getStaticReferenceFieldAtAddress((uintptrj_t)p) == 0)
+            if ((void *)comp()->fej9()->getStaticReferenceFieldAtAddress((uintptr_t)p) == 0)
                {
                loadConstant(TR::aconst, 0);
                break;
@@ -6288,7 +5274,7 @@ TR_J9ByteCodeIlGenerator::loadStatic(int32_t cpIndex)
          default:         loadConstant(TR::iconst, *(int32_t *)p); break;
          }
       }
-   else if (symbol->isVolatile() && type == TR::Int64 && isResolved && TR::Compiler->target.is32Bit() &&
+   else if (symbol->isVolatile() && type == TR::Int64 && isResolved && comp()->target().is32Bit() &&
             !comp()->cg()->getSupportsInlinedAtomicLongVolatiles() && 0)
       {
       TR::SymbolReference * volatileLongSymRef =
@@ -6441,7 +5427,7 @@ void
 TR_J9ByteCodeIlGenerator::loadConstant(TR::ILOpCodes loadop, void * constant)
    {
    TR::Node * node = TR::Node::create(loadop, 0);
-   node->setAddress((uintptrj_t)constant);
+   node->setAddress((uintptr_t)constant);
    push(node);
    }
 
@@ -6475,6 +5461,19 @@ TR_J9ByteCodeIlGenerator::loadFromCP(TR::DataType type, int32_t cpIndex)
             int returnTypeUtf8Length = J9UTF8_LENGTH(returnTypeUtf8);
             char* returnTypeUtf8Data = (char *)J9UTF8_DATA(returnTypeUtf8);
             bool isCondyPrimitive = (1 == returnTypeUtf8Length);
+
+            // Use aconst for null object
+            if (!isCondyPrimitive && !isCondyUnresolved)
+               {
+               TR::VMAccessCriticalSection condyCriticalSection(comp()->fej9());
+               uintptr_t obj = 0;
+               uintptr_t* objLocation = (uintptr_t*)_methodSymbol->getResolvedMethod()->dynamicConstant(cpIndex, &obj);
+               if (obj == 0)
+                  {
+                  loadConstant(TR::aconst, (void *)0);
+                  return;
+                  }
+               }
 
             char* symbolTypeSig = NULL;
             int32_t symbolTypeSigLength = 0;
@@ -6569,8 +5568,8 @@ TR_J9ByteCodeIlGenerator::loadFromCP(TR::DataType type, int32_t cpIndex)
                                                             comp());
                   if (primitiveCondyCriticalSection.hasVMAccess())
                      {
-                     uintptrj_t* objLocation = (uintptrj_t*)_methodSymbol->getResolvedMethod()->dynamicConstant(cpIndex);
-                     uintptrj_t obj = *objLocation;
+                     uintptr_t obj = 0;
+                     uintptr_t* objLocation = (uintptr_t*)_methodSymbol->getResolvedMethod()->dynamicConstant(cpIndex, &obj);
                      TR_ASSERT(obj, "Resolved primitive Constant Dynamic-type CP entry %d must have autobox object", cpIndex);
                      switch (returnTypeUtf8Data[0])
                         {
@@ -7037,7 +6036,7 @@ TR_J9ByteCodeIlGenerator::genNewArray(int32_t typeIndex)
 
       TR::Node *arrayRefNode;
       int32_t hdrSize = (int32_t) TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
-      bool is64BitTarget = TR::Compiler->target.is64Bit();
+      bool is64BitTarget = comp()->target().is64Bit();
 
       if (is64BitTarget)
          {
@@ -7364,7 +6363,6 @@ TR_J9ByteCodeIlGenerator::storeInstance(int32_t cpIndex)
          TR::Node *secondChild = node->getChild(1);
          if (secondChild && secondChild->getOpCodeValue() == TR::iconst && secondChild->getInt() == 0)
             {
-            symbol->resetVolatile();
             handleSideEffect(node);
             genTreeTop(node);
             genFullFence(node);
@@ -7461,7 +6459,7 @@ TR_J9ByteCodeIlGenerator::storeStatic(int32_t cpIndex)
 
       node = TR::Node::createWithSymRef(comp()->il.opCodeForDirectWriteBarrier(type), 2, 2, value, pop(), symRef);
       }
-   else if (symbol->isVolatile() && type == TR::Int64 && !symRef->isUnresolved() && TR::Compiler->target.is32Bit() &&
+   else if (symbol->isVolatile() && type == TR::Int64 && !symRef->isUnresolved() && comp()->target().is32Bit() &&
             !comp()->cg()->getSupportsInlinedAtomicLongVolatiles() && 0)
       {
       TR::SymbolReference *volatileLongSymRef =
@@ -7521,14 +6519,14 @@ TR_J9ByteCodeIlGenerator::storeStatic(int32_t cpIndex)
 void
 TR_J9ByteCodeIlGenerator::storeDualAuto(TR::Node * storeValue, int32_t slot)
    {
-   TR_ASSERT(storeValue->isDualHigh() || storeValue->isTernaryHigh(), "Coerced types only happen when a dual or ternary operator is generated.");
+   TR_ASSERT(storeValue->isDualHigh() || storeValue->isSelectHigh(), "Coerced types only happen when a dual or select operator is generated.");
 
    // type may need to be coerced from TR::Address into the type of the value being stored
    TR::DataType type = storeValue->getDataType();
 
    // generate the two stores for the storeValue and its adjunct.
    TR::Node* adjunctValue = storeValue->getChild(2);
-   if (storeValue->isTernaryHigh())
+   if (storeValue->isSelectHigh())
       {
       adjunctValue = adjunctValue->getFirstChild();
       }
@@ -7556,7 +6554,7 @@ TR_J9ByteCodeIlGenerator::storeAuto(TR::DataType type, int32_t slot, bool isAdju
       }
 
    symRef = symRefTab()->findOrCreateAutoSymbol(_methodSymbol, slot, type, true, false, true, isAdjunct);
-   if (storeValue->isDualHigh() || storeValue->isTernaryHigh() || isAdjunct)
+   if (storeValue->isDualHigh() || storeValue->isSelectHigh() || isAdjunct)
       symRef->setIsDual();
 
    bool isStatic = _methodSymbol->isStatic();
@@ -7800,7 +6798,7 @@ int32_t
 TR_J9ByteCodeIlGenerator::genLookupSwitch()
    {
    int32_t i = 1;
-   while ((intptrj_t)&_code[_bcIndex+i] & 3) ++i; // 4 byte align
+   while ((intptr_t)&_code[_bcIndex+i] & 3) ++i; // 4 byte align
 
    int32_t bcIndex = _bcIndex + i;
    int32_t defaultTarget = nextSwitchValue(bcIndex) + _bcIndex;
@@ -7840,7 +6838,7 @@ int32_t
 TR_J9ByteCodeIlGenerator::genTableSwitch()
    {
    int32_t i = 1;
-   while ((intptrj_t)&_code[_bcIndex+i] & 3) ++i; // 4 byte align
+   while ((intptr_t)&_code[_bcIndex+i] & 3) ++i; // 4 byte align
 
    int32_t bcIndex = _bcIndex + i;
    int32_t defaultTarget = nextSwitchValue(bcIndex) + _bcIndex;
@@ -7946,6 +6944,11 @@ void TR_J9ByteCodeIlGenerator::genFullFence(TR::Node *node)
 
 void TR_J9ByteCodeIlGenerator::performClassLookahead(TR_PersistentClassInfo *classInfo)
    {
+#if defined(J9VM_OPT_JITSERVER)
+   // Do not perform class lookahead in server mode
+   if (comp()->isOutOfProcessCompilation())
+      return;
+#endif
    // Do not perform class lookahead when peeking (including recursive class lookahead)
    //
    if (comp()->isPeekingMethod())

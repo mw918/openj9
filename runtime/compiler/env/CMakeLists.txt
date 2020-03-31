@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2018 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -58,3 +58,13 @@ j9jit_files(
 	env/SystemSegmentProvider.cpp
 	env/VMJ9.cpp
 )
+
+if(J9VM_OPT_JITSERVER)
+	j9jit_files(
+		env/j9methodServer.cpp
+		env/JITServerCHTable.cpp
+		env/JITServerPersistentCHTable.cpp
+		env/VMJ9Server.cpp
+	)
+endif()
+

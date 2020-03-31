@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -371,9 +371,44 @@ doVerify:
 						goto done;
 					}
 				}
+
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+				/* verify flattened fields */
+				if (NULL != clazz->flattenedClassCache) {
+					UDATA numberOfFlattenedFields = clazz->flattenedClassCache->numberOfEntries;
+
+					for (UDATA i = 0; i < numberOfFlattenedFields; i++) {
+						J9FlattenedClassCacheEntry *entry = J9_VM_FCC_ENTRY_FROM_CLASS(clazz, i);
+						Trc_VM_classInitStateMachine_verifyFlattenableField(currentThread, entry->clazz);
+						PUSH_OBJECT_IN_SPECIAL_FRAME(currentThread, initializationLock);
+						classInitStateMachine(currentThread, entry->clazz, J9_CLASS_INIT_VERIFIED);
+						initializationLock = POP_OBJECT_IN_SPECIAL_FRAME(currentThread);
+						clazz = VM_VMHelpers::currentClass(clazz);
+
+						if (VM_VMHelpers::exceptionPending(currentThread)) {
+							initializationLock = setInitStatus(currentThread, clazz, J9ClassInitUnverified, initializationLock);
+							clazz = VM_VMHelpers::currentClass(clazz);
+							goto done;
+						}
+					}
+				}
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+
 				/* Verify this class */
 				PUSH_OBJECT_IN_SPECIAL_FRAME(currentThread, initializationLock);
 				performVerification(currentThread, clazz);
+				/* Validate class relationships if -XX:+ClassRelationshipVerifier is used and if the classfile major version is at least 51 (Java 7) */
+				if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_CLASS_RELATIONSHIP_VERIFIER) && (clazz->romClass->majorVersion >= 51)) {
+					U_8 *clazzName = J9UTF8_DATA(J9ROMCLASS_CLASSNAME(clazz->romClass));
+					UDATA clazzNameLength = J9UTF8_LENGTH(J9ROMCLASS_CLASSNAME(clazz->romClass));
+					J9Class *validateResult = j9bcv_validateClassRelationships(currentThread, clazz->classLoader, clazzName, clazzNameLength, clazz);
+					if (NULL != validateResult) {
+						U_8 *resultName = J9UTF8_DATA(J9ROMCLASS_CLASSNAME(validateResult->romClass));
+						UDATA resultNameLength = J9UTF8_LENGTH(J9ROMCLASS_CLASSNAME(validateResult->romClass));
+						Trc_VM_classInitStateMachine_classRelationshipValidationFailed(currentThread, clazzNameLength, clazzName, resultNameLength, resultName);
+						setCurrentExceptionNLSWithArgs(currentThread, J9NLS_VM_CLASS_RELATIONSHIP_INVALID, J9VMCONSTANTPOOL_JAVALANGVERIFYERROR, clazzNameLength, clazzName, resultNameLength, resultName);
+					}
+				}
 				initializationLock = POP_OBJECT_IN_SPECIAL_FRAME(currentThread);
 				clazz = VM_VMHelpers::currentClass(clazz);
 				if (VM_VMHelpers::exceptionPending(currentThread)) {
@@ -403,7 +438,7 @@ doVerify:
 					j9object_t *defaultValueAddress = &(clazz->flattenedClassCache->defaultValue);
 					J9STATIC_OBJECT_STORE(currentThread, clazz, defaultValueAddress, defaultValue);
 				}
-#endif
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 				if (((UDATA)currentThread | J9ClassInitUnverified) == clazz->initializeStatus) {
 					initializationLock = setInitStatus(currentThread, clazz, J9ClassInitUnprepared, initializationLock);
 					clazz = VM_VMHelpers::currentClass(clazz);
@@ -456,6 +491,27 @@ doVerify:
 					}
 					iTable = iTable->next;
 				}
+
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+				/* prepare flattened fields */
+				if (NULL != clazz->flattenedClassCache) {
+					UDATA numberOfFlattenedFields = clazz->flattenedClassCache->numberOfEntries;
+
+					for (UDATA i = 0; i < numberOfFlattenedFields; i++) {
+						J9FlattenedClassCacheEntry *entry = J9_VM_FCC_ENTRY_FROM_CLASS(clazz, i);
+						Trc_VM_classInitStateMachine_prepareFlattenableField(currentThread, entry->clazz);
+						PUSH_OBJECT_IN_SPECIAL_FRAME(currentThread, initializationLock);
+						classInitStateMachine(currentThread, entry->clazz, J9_CLASS_INIT_PREPARED);
+						initializationLock = POP_OBJECT_IN_SPECIAL_FRAME(currentThread);
+						clazz = VM_VMHelpers::currentClass(clazz);
+
+						if (VM_VMHelpers::exceptionPending(currentThread)) {
+							goto done;
+						}
+					}
+				}
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+
 				/* Prepare this class */
 				initializationLock = enterInitializationLock(currentThread, initializationLock);
 				clazz = VM_VMHelpers::currentClass(clazz);
@@ -552,6 +608,27 @@ doVerify:
 						iTable = iTable->next;
 					}
 				}
+
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+				/* init flattened fields */
+				if (NULL != clazz->flattenedClassCache) {
+					UDATA numberOfFlattenedFields = clazz->flattenedClassCache->numberOfEntries;
+
+					for (UDATA i = 0; i < numberOfFlattenedFields; i++) {
+						J9FlattenedClassCacheEntry *entry = J9_VM_FCC_ENTRY_FROM_CLASS(clazz, i);
+						Trc_VM_classInitStateMachine_initFlattenableField(currentThread, entry->clazz);
+						PUSH_OBJECT_IN_SPECIAL_FRAME(currentThread, initializationLock);
+						classInitStateMachine(currentThread, entry->clazz, J9_CLASS_INIT_INITIALIZED);
+						initializationLock = POP_OBJECT_IN_SPECIAL_FRAME(currentThread);
+						clazz = VM_VMHelpers::currentClass(clazz);
+
+						if (VM_VMHelpers::exceptionPending(currentThread)) {
+							goto initFailed;
+						}
+					}
+				}
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+
 				/* Initialize this class */
 				PUSH_OBJECT_IN_SPECIAL_FRAME(currentThread, initializationLock);
 				initializeImpl(currentThread, clazz);

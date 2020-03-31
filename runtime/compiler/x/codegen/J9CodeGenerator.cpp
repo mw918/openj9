@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -157,7 +157,7 @@ J9::X86::CodeGenerator::CodeGenerator() :
          returnInfo = TR_LongReturn;
          break;
       case TR::Address:
-         returnInfo = TR::Compiler->target.is64Bit() ? TR_ObjectReturn : TR_IntReturn;
+         returnInfo = comp->target().is64Bit() ? TR_ObjectReturn : TR_IntReturn;
          break;
       case TR::Float:
          returnInfo = TR_FloatXMMReturn;
@@ -198,7 +198,7 @@ J9::X86::CodeGenerator::beginInstructionSelection()
       }
    else if (comp->getOption(TR_FullSpeedDebug) || comp->getOption(TR_SupportSwitchToInterpreter))
       {
-      int32_t alignmentMargin = TR::Compiler->target.is64Bit()? 2 : 0; // # bytes between the alignment instruction and the address that needs to be aligned
+      int32_t alignmentMargin = comp->target().is64Bit()? 2 : 0; // # bytes between the alignment instruction and the address that needs to be aligned
       if (methodSymbol->getLinkageConvention() == TR_Private)
          alignmentMargin += 4; // The linkageInfo word
 
@@ -209,7 +209,7 @@ J9::X86::CodeGenerator::beginInstructionSelection()
       int32_t alignmentBoundary = 8;
 
       TR::Instruction *cursor = self()->generateSwitchToInterpreterPrePrologue(NULL, alignmentBoundary, alignmentMargin);
-      if (TR::Compiler->target.is64Bit())
+      if (comp->target().is64Bit())
          {
          // A copy of the first two bytes of the method, in case we need to un-patch them
          //
@@ -219,9 +219,9 @@ J9::X86::CodeGenerator::beginInstructionSelection()
    else if (methodSymbol->isJNI())
       {
 
-      intptrj_t methodAddress = (intptrj_t)methodSymbol->getResolvedMethod()->startAddressForJNIMethod(comp);
+      intptr_t methodAddress = (intptr_t)methodSymbol->getResolvedMethod()->startAddressForJNIMethod(comp);
 
-      if (TR::Compiler->target.is64Bit())
+      if (comp->target().is64Bit())
          new (self()->trHeapMemory()) TR::AMD64Imm64Instruction ((TR::Instruction *)NULL, DQImm64, methodAddress, self());
       else
          new (self()->trHeapMemory()) TR::X86ImmInstruction    ((TR::Instruction *)NULL, DDImm4, methodAddress, self());
@@ -301,10 +301,10 @@ J9::X86::CodeGenerator::generateSwitchToInterpreterPrePrologue(
    TR::Compilation *comp = self()->comp();
    TR::Register *ediRegister = self()->allocateRegister();
    TR::ResolvedMethodSymbol *methodSymbol = comp->getJittedMethodSymbol();
-   intptrj_t feMethod = (intptrj_t)methodSymbol->getResolvedMethod()->resolvedMethodAddress();
+   intptr_t feMethod = (intptr_t)methodSymbol->getResolvedMethod()->resolvedMethodAddress();
    TR::LabelSymbol *startLabel = NULL;
 
-   if (TR::Compiler->target.is32Bit())
+   if (comp->target().is32Bit())
       {
       // Put the alignment before the interpreter jump so the jump's offset is fixed
       //
@@ -323,7 +323,7 @@ J9::X86::CodeGenerator::generateSwitchToInterpreterPrePrologue(
    TR::SymbolReference *helperSymRef =
       self()->symRefTab()->findOrCreateRuntimeHelper(TR_j2iTransition, false, false, false);
 
-   if (TR::Compiler->target.is64Bit())
+   if (comp->target().is64Bit())
       {
       prev = generateRegImm64Instruction(prev, MOV8RegImm64, ediRegister, feMethod, self(), TR_RamMethod);
       if (comp->getOption(TR_EnableHCR))
@@ -337,10 +337,10 @@ J9::X86::CodeGenerator::generateSwitchToInterpreterPrePrologue(
          comp->getStaticHCRPICSites()->push_front(prev);
       }
 
-   prev = new (self()->trHeapMemory()) TR::X86ImmSymInstruction(prev, JMP4, (uintptrj_t)helperSymRef->getMethodAddress(), helperSymRef, deps, self());
+   prev = new (self()->trHeapMemory()) TR::X86ImmSymInstruction(prev, JMP4, (uintptr_t)helperSymRef->getMethodAddress(), helperSymRef, deps, self());
    self()->stopUsingRegister(ediRegister);
 
-   if (TR::Compiler->target.is64Bit())
+   if (comp->target().is64Bit())
       {
       // Generate a mini-trampoline jump to the start of the
       // SwitchToInterpreterPrePrologue.  This comes after the alignment
@@ -396,7 +396,7 @@ J9::X86::CodeGenerator::suppressInliningOfRecognizedMethod(TR::RecognizedMethod 
 bool
 J9::X86::CodeGenerator::supportsInliningOfIsAssignableFrom()
    {
-   static const bool disableInliningOfIsAssignableFrom = (bool)feGetEnv("TR_DisableInliningOfIsAssignableFrom");
+   static const bool disableInliningOfIsAssignableFrom = feGetEnv("TR_disableInlineIsAssignableFrom") != NULL;
    return !disableInliningOfIsAssignableFrom;
    }
 

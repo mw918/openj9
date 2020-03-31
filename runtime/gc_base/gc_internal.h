@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -80,6 +80,7 @@ extern J9_CFUNC UDATA j9gc_is_local_collector(J9JavaVM* javaVM, UDATA gcID);
 extern J9_CFUNC UDATA j9gc_get_collector_id(OMR_VMThread *omrVMThread);
 extern J9_CFUNC UDATA j9gc_pools_memory(J9JavaVM* javaVM, UDATA poolIDs, UDATA* totals, UDATA* frees, BOOLEAN gcEnd);
 extern J9_CFUNC UDATA j9gc_pool_maxmemory(J9JavaVM* javaVM, UDATA poolID);
+extern J9_CFUNC UDATA j9gc_pool_memoryusage(J9JavaVM *javaVM, UDATA poolID, UDATA *free, UDATA *total);
 extern J9_CFUNC const char* j9gc_get_gc_action(J9JavaVM* javaVM, UDATA gcID);
 extern J9_CFUNC const char* j9gc_get_gc_cause(OMR_VMThread* omrVMthread);
 extern J9_CFUNC struct J9HookInterface** j9gc_get_private_hook_interface(J9JavaVM *javaVM);
@@ -97,8 +98,9 @@ extern J9_CFUNC void j9gc_objaccess_indexableStoreAddress(J9VMThread *vmThread, 
 extern J9_CFUNC void j9gc_objaccess_mixedObjectStoreAddress(J9VMThread *vmThread, j9object_t destObject, UDATA offset, void *value, UDATA isVolatile);
 extern J9_CFUNC void j9gc_objaccess_cloneObject(J9VMThread *vmThread, j9object_t srcObject, j9object_t destObject);
 extern J9_CFUNC void j9gc_objaccess_copyObjectFields(J9VMThread *vmThread, J9Class *valueClass, J9Object *srcObject, UDATA srcOffset, J9Object *destObject, UDATA destOffset);
-extern J9_CFUNC void j9gc_objaccess_copyObjectFieldsToArrayElement(J9VMThread *vmThread, J9Class *arrayClazz, j9object_t srcObject, J9IndexableObject *arrayRef, I_32 index);
-extern J9_CFUNC void j9gc_objaccess_copyObjectFieldsFromArrayElement(J9VMThread *vmThread, J9Class *arrayClazz, j9object_t destObject, J9IndexableObject *arrayRef, I_32 index);
+extern J9_CFUNC void j9gc_objaccess_copyObjectFieldsToFlattenedArrayElement(J9VMThread *vmThread, J9ArrayClass *arrayClazz, j9object_t srcObject, J9IndexableObject *arrayRef, I_32 index);
+extern J9_CFUNC void j9gc_objaccess_copyObjectFieldsFromFlattenedArrayElement(J9VMThread *vmThread, J9ArrayClass *arrayClazz, j9object_t destObject, J9IndexableObject *arrayRef, I_32 index);
+extern J9_CFUNC BOOLEAN j9gc_objaccess_structuralCompareFlattenedObjects(J9VMThread *vmThread, J9Class *valueClass, j9object_t lhsObject, j9object_t rhsObject, UDATA startOffset);
 extern J9_CFUNC j9object_t j9gc_objaccess_asConstantPoolObject(J9VMThread *vmThread, j9object_t toConvert, UDATA allocationFlags);
 extern J9_CFUNC jvmtiIterationControl j9mm_iterate_heaps(J9JavaVM *vm, J9PortLibrary *portLibrary, UDATA flags, jvmtiIterationControl(*func)(J9JavaVM *vm, struct J9MM_IterateHeapDescriptor *heapDesc, void *userData), void *userData);
 extern J9_CFUNC int gcStartupHeapManagement(J9JavaVM * vm);
@@ -271,7 +273,6 @@ void j9mm_get_guaranteed_nursery_range(J9JavaVM* javaVM, void** start, void** en
 /* StringTable.cpp */
 extern J9_CFUNC j9object_t j9gc_createJavaLangString(J9VMThread *vmThread, U_8 *data, UDATA length, UDATA stringFlags);
 extern J9_CFUNC j9object_t j9gc_internString(J9VMThread *vmThread, j9object_t sourceString);
-extern J9_CFUNC j9object_t j9gc_allocStringWithSharedCharData(J9VMThread *vmThread, U_8 *data, UDATA length, UDATA resolveFlags);
 extern UDATA j9gc_stringHashFn (void *key, void *userData);
 extern UDATA j9gc_stringHashEqualFn (void *leftKey, void *rightKey, void *userData);
 

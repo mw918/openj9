@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -29,14 +29,14 @@
 #include "env/IO.hpp"
 #include "env/jittypes.h"
 #include "env/VMJ9.h"
+#include "il/LabelSymbol.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/RegisterMappedSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
-#include "il/symbol/LabelSymbol.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/RegisterMappedSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "runtime/CodeCacheManager.hpp"
 
 uint32_t TR::X86CheckFailureSnippet::getLength(int32_t estimatedSnippetStart)
@@ -149,7 +149,7 @@ uint8_t *TR::X86CheckFailureSnippet::emitCheckFailureSnippetBody(uint8_t *buffer
       }
 
    *buffer++ = 0xe8; // CallImm4
-   intptrj_t destinationAddress = (intptrj_t)getDestination()->getMethodAddress();
+   intptr_t destinationAddress = (intptr_t)getDestination()->getMethodAddress();
 
    if (NEEDS_TRAMPOLINE(destinationAddress, buffer+4, cg()))
       {
@@ -157,7 +157,7 @@ uint8_t *TR::X86CheckFailureSnippet::emitCheckFailureSnippetBody(uint8_t *buffer
       TR_ASSERT(IS_32BIT_RIP(destinationAddress, buffer+4), "Local helper trampoline should be reachable directly.\n");
       }
 
-   *(int32_t *)buffer = (int32_t)(destinationAddress - (intptrj_t)(buffer+4));
+   *(int32_t *)buffer = (int32_t)(destinationAddress - (intptr_t)(buffer+4));
    cg()->addExternalRelocation(new (cg()->trHeapMemory())
       TR::ExternalRelocation(
          buffer,
@@ -299,13 +299,13 @@ uint8_t *TR::X86CheckFailureSnippetWithResolve::emitSnippetBody()
    *buffer++ = 0xe8;                      // call  Imm4 glue routine
 
    TR::SymbolReference * glueSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(getHelper(), false, false, false);
-   intptrj_t glueAddress = (intptrj_t)glueSymRef->getMethodAddress();
+   intptr_t glueAddress = (intptr_t)glueSymRef->getMethodAddress();
    if (NEEDS_TRAMPOLINE(glueAddress, buffer+4, cg()))
       {
       glueAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(glueSymRef->getReferenceNumber(), (void *)buffer);
       TR_ASSERT(IS_32BIT_RIP(glueAddress, buffer+4), "Local helper trampoline should be reachable directly.\n");
       }
-   *(int32_t *)buffer = (int32_t)(glueAddress - (intptrj_t)(buffer+4));
+   *(int32_t *)buffer = (int32_t)(glueAddress - (intptr_t)(buffer+4));
    cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer,
                                                          (uint8_t *)glueSymRef,
                                                          TR_HelperAddress, cg()),
@@ -325,13 +325,13 @@ uint8_t *TR::X86CheckFailureSnippetWithResolve::emitSnippetBody()
 
    *buffer++ = 0xe8; // CallImm4
 
-   intptrj_t destinationAddress = (intptrj_t)getDestination()->getMethodAddress();
+   intptr_t destinationAddress = (intptr_t)getDestination()->getMethodAddress();
    if (NEEDS_TRAMPOLINE(destinationAddress, buffer+4, cg()))
       {
       destinationAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(getDestination()->getReferenceNumber(), (void *)buffer);
       TR_ASSERT(IS_32BIT_RIP(destinationAddress, buffer+4), "Local helper trampoline should be reachable directly.\n");
       }
-   *(int32_t *)buffer = (int32_t)(destinationAddress - (intptrj_t)(buffer+4));
+   *(int32_t *)buffer = (int32_t)(destinationAddress - (intptr_t)(buffer+4));
    cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer,
                                                          (uint8_t *)getDestination(),
                                                          TR_HelperAddress,

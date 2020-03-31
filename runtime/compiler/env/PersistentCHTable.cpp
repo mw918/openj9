@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,7 +25,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/CompilationTypes.hpp"
 #include "compile/ResolvedMethod.hpp"
@@ -41,8 +41,8 @@
 #include "env/ClassTableCriticalSection.hpp"
 #include "env/VMJ9.h"
 #include "il/DataTypes.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
 #include "il/SymbolReference.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
 #include "infra/Assert.hpp"
 #include "infra/Link.hpp"
 #include "infra/List.hpp"
@@ -297,7 +297,7 @@ TR_PersistentCHTable::findSingleJittedImplementer(
 TR_PersistentClassInfo *
 TR_PersistentCHTable::findClassInfo(TR_OpaqueClassBlock * classId)
    {
-   TR_PersistentClassInfo *cl = _classes[TR_RuntimeAssumptionTable::hashCode((uintptrj_t)classId) % CLASSHASHTABLE_SIZE].getFirst();
+   TR_PersistentClassInfo *cl = _classes[TR_RuntimeAssumptionTable::hashCode((uintptr_t)classId) % CLASSHASHTABLE_SIZE].getFirst();
    while (cl &&
           cl->getClassId() != classId)
       cl = cl->getNext();
@@ -709,7 +709,7 @@ TR_PersistentCHTable::classGotLoaded(
    TR_PersistentClassInfo *clazz = new (PERSISTENT_NEW) TR_PersistentClassInfo(classId);
    if (clazz)
       {
-      _classes[TR_RuntimeAssumptionTable::hashCode((uintptrj_t) classId) % CLASSHASHTABLE_SIZE].add(clazz);
+      _classes[TR_RuntimeAssumptionTable::hashCode((uintptr_t) classId) % CLASSHASHTABLE_SIZE].add(clazz);
       }
    return clazz;
    }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -29,6 +29,7 @@
 #include "codegen/CodeGenerator.hpp"
 #include "codegen/GCStackMap.hpp"
 #include "codegen/Machine.hpp"
+#include "codegen/S390PrivateLinkage.hpp"
 #include "codegen/SnippetGCMap.hpp"
 #include "env/CompilerEnv.hpp"
 #include "env/IO.hpp"
@@ -38,7 +39,6 @@
 #include "il/Node_inlines.hpp"
 #include "env/VMJ9.h"
 #include "runtime/CodeCacheManager.hpp"
-#include "z/codegen/J9S390PrivateLinkage.hpp"
 #include "z/codegen/S390Instruction.hpp"
 #include "z/codegen/S390Snippets.hpp"
 
@@ -69,17 +69,17 @@ TR::S390HeapAllocSnippet::emitSnippetBody()
    uint8_t * buffer = codeGen->getBinaryBufferCursor();
    int32_t distance;
    int32_t jumpToCallDistance = -1;
-   intptrj_t branchToCallLocation = -1;
+   intptr_t branchToCallLocation = -1;
 
    TR::Machine *machine = codeGen->machine();
    TR::RegisterDependencyConditions *deps = getRestartLabel()->getInstruction()->getDependencyConditions();
    TR::RealRegister * resReg = machine->getRealRegister(deps->getPostConditions()->getRegisterDependency(2)->getRealRegister());
    uint32_t resRegEncoding = resReg->getRegisterNumber() - 1;
-   bool is64BitTarget = TR::Compiler->target.is64Bit();
+   bool is64BitTarget = cg()->comp()->target().is64Bit();
 
    getSnippetLabel()->setCodeLocation(buffer);
 
-   TR_ASSERT(jumpToCallDistance == -1 || jumpToCallDistance == (((intptrj_t)buffer) - branchToCallLocation), "Jump in Heap Alloc Misaligned.");
+   TR_ASSERT(jumpToCallDistance == -1 || jumpToCallDistance == (((intptr_t)buffer) - branchToCallLocation), "Jump in Heap Alloc Misaligned.");
 
    // The code for the none-G5 32bit snippet looks like:
    // BRASL  gr14, jitNewXXXX;
@@ -89,7 +89,7 @@ TR::S390HeapAllocSnippet::emitSnippetBody()
    *(uint16_t *) buffer = 0xc0e5;
    buffer += 2;
 
-   intptrj_t destAddr = (intptrj_t) getDestination()->getSymbol()->castToMethodSymbol()->getMethodAddress();
+   intptr_t destAddr = (intptr_t) getDestination()->getSymbol()->castToMethodSymbol()->getMethodAddress();
 
 #if defined(TR_TARGET_64BIT)
 #if defined(J9ZOS390)
@@ -116,7 +116,7 @@ TR::S390HeapAllocSnippet::emitSnippetBody()
    TR_ASSERT(CHECK_32BIT_TRAMPOLINE_RANGE(destAddr, buffer), "Helper Call is not reachable.");
    this->setSnippetDestAddr(destAddr);
 
-   *(int32_t *) buffer = (int32_t)((destAddr - (intptrj_t)(buffer - 2)) / 2);
+   *(int32_t *) buffer = (int32_t)((destAddr - (intptr_t)(buffer - 2)) / 2);
    if (cg()->comp()->compileRelocatableCode())
       {
       cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer, (uint8_t*) getDestination(), TR_HelperAddress, cg()),
@@ -143,7 +143,7 @@ TR::S390HeapAllocSnippet::emitSnippetBody()
       buffer += 2;
       }
 
-   distance = (intptrj_t) getRestartLabel()->getCodeLocation() - (intptrj_t) buffer;
+   distance = (intptr_t) getRestartLabel()->getCodeLocation() - (intptr_t) buffer;
    distance >>= 1;
    if (!isLongBranch())
       {
@@ -174,7 +174,7 @@ TR::S390HeapAllocSnippet::getLength(int32_t  estimatedCodeStart)
       }
 
    distance = estimatedCodeStart +
-        (TR::Compiler->target.is64Bit() ? 10 : 8) -
+        (cg()->comp()->target().is64Bit() ? 10 : 8) -
         getRestartLabel()->getEstimatedCodeLocation();
 
    // to be conservative: we use the byte count as half-word count, accounting for length estimation deviation
@@ -182,7 +182,7 @@ TR::S390HeapAllocSnippet::getLength(int32_t  estimatedCodeStart)
       {
       setIsLongBranch(true);
       }
-   if (TR::Compiler->target.is64Bit())
+   if (cg()->comp()->target().is64Bit())
       {
       if (isLongBranch())
          length = 16;
@@ -213,7 +213,7 @@ TR::S390HeapAllocSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg()->comp()->fe());
    uint8_t * buffer = getSnippetLabel()->getCodeLocation();
    int32_t distance;
-   bool is64BitTarget = TR::Compiler->target.is64Bit();
+   bool is64BitTarget = cg()->comp()->target().is64Bit();
 
    TR::Machine *machine = cg()->machine();
    TR::RegisterDependencyConditions *deps = getRestartLabel()->getInstruction()->getDependencyConditions();
@@ -227,13 +227,13 @@ TR::S390HeapAllocSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
    // LR/LGR     resReg, gr2;
    // BRC[L] restartLabel;
 
-   distance = (intptrj_t) getDestination()->getSymbol()->castToMethodSymbol()->getMethodAddress() - (intptrj_t) buffer;
+   distance = (intptr_t) getDestination()->getSymbol()->castToMethodSymbol()->getMethodAddress() - (intptr_t) buffer;
 
    debug->printPrefix(pOutFile, NULL, buffer, 6);
    trfprintf(pOutFile, "BRASL \tGPR14, 0x%8x", distance >> 1);
    buffer += 6;
 
-   if (TR::Compiler->target.is64Bit())
+   if (cg()->comp()->target().is64Bit())
       {
       debug->printPrefix(pOutFile, NULL, buffer, 4);
       trfprintf(pOutFile, "LGR \t%s,GPR2", debug->getName(resReg));
@@ -246,7 +246,7 @@ TR::S390HeapAllocSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
       buffer += 2;
       }
 
-   distance = (intptrj_t) getRestartLabel()->getCodeLocation() - (intptrj_t) buffer;
+   distance = (intptr_t) getRestartLabel()->getCodeLocation() - (intptr_t) buffer;
    distance >>= 1;
    if (!isLongBranch())
       {
@@ -268,7 +268,7 @@ uint32_t
 TR::S390RestoreGPR7Snippet::getLength(int32_t estimatedSnippetStart)
    {
 
-   if (TR::Compiler->target.is64Bit())
+   if (cg()->comp()->target().is64Bit())
 #if defined(J9VM_JIT_FREE_SYSTEM_STACK_POINTER)
       return 6*3 + 6 + 4;
 #else
@@ -298,7 +298,7 @@ TR::S390RestoreGPR7Snippet::emitSnippetBody()
 
 
    //E370DXXX0058
-   if (TR::Compiler->target.is64Bit())//generate LG
+   if (cg()->comp()->target().is64Bit())//generate LG
       {
 #if defined(J9VM_JIT_FREE_SYSTEM_STACK_POINTER)
       *(int32_t *) cursor = 0xE340D000|sspOffset;
@@ -358,7 +358,7 @@ TR::S390RestoreGPR7Snippet::emitSnippetBody()
    cursor += sizeof(int32_t);
 
 #if defined(J9VM_JIT_FREE_SYSTEM_STACK_POINTER)
-    if (TR::Compiler->target.is64Bit())
+    if (cg()->comp()->target().is64Bit())
         TR_ASSERT(((U_8*)cursor) - startPointCursor == 24,
                 "for 64bit, DAA eyecatcher should be generated at offset 24 bytes");
     else
@@ -380,7 +380,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390RestoreGPR7Snippet *snippet)
 
 #ifdef J9VM_JIT_FREE_SYSTEM_STACK_POINTER
    //save GPR4 to
-   if (TR::Compiler->target.is64Bit())
+   if (_comp->target().is64Bit())
       {
       printPrefix(pOutFile, NULL, buffer, 6);
       trfprintf(pOutFile, "STG   GPR7, SSP(GPR13)", snippet->getTargetLabel()->getCodeLocation());
@@ -395,7 +395,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390RestoreGPR7Snippet *snippet)
 #endif
 
    //0x4a2af68a (???)       e370d0980058 LY      R7,152(,R13)
-   if (TR::Compiler->target.is64Bit())
+   if (_comp->target().is64Bit())
       {
       printPrefix(pOutFile, NULL, buffer, 6);
       trfprintf(pOutFile, "LG    GPR7, 152(GPR13)", snippet->getTargetLabel()->getCodeLocation());
@@ -410,7 +410,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::S390RestoreGPR7Snippet *snippet)
 
 #ifdef J9VM_JIT_FREE_SYSTEM_STACK_POINTER
    //                                    L      R4,136(,R13)
-   if (TR::Compiler->target.is64Bit())
+   if (_comp->target().is64Bit())
       {
       printPrefix(pOutFile, NULL, buffer, 6);
       trfprintf(pOutFile, "LG    GPR4, 136(GPR13)", snippet->getTargetLabel()->getCodeLocation());

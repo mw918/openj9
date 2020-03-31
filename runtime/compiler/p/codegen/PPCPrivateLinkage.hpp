@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corp. and others
+ * Copyright (c) 2000, 2019 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,8 +23,8 @@
 #ifndef PPC_PRIVATELINKAGE_INCL
 #define PPC_PRIVATELINKAGE_INCL
 
-#include "codegen/Linkage.hpp"
-
+#include "codegen/LinkageConventionsEnum.hpp"
+#include "codegen/PrivateLinkage.hpp"
 #include "infra/Assert.hpp"
 
 class TR_BitVector;
@@ -38,7 +38,8 @@ namespace TR { class ParameterSymbol; }
 namespace TR { class RegisterDependencyConditions; }
 namespace TR { class ResolvedMethodSymbol; }
 
-namespace TR {
+namespace J9
+{
 
 struct PPCPICItem
    {
@@ -52,12 +53,20 @@ struct PPCPICItem
    float _frequency;
    };
 
+}
 
-class PPCPrivateLinkage : public TR::Linkage
+
+namespace J9
+{
+
+namespace Power
+{
+
+class PrivateLinkage : public J9::PrivateLinkage
    {
    public:
 
-   PPCPrivateLinkage(TR::CodeGenerator *cg);
+   PrivateLinkage(TR::CodeGenerator *cg);
 
    virtual const TR::PPCLinkageProperties& getProperties();
    virtual uint32_t getRightToLeft();
@@ -106,11 +115,11 @@ class PPCPrivateLinkage : public TR::Linkage
    };
 
 
-class PPCHelperLinkage : public TR::PPCPrivateLinkage
+class HelperLinkage : public PrivateLinkage
    {
    public:
 
-   PPCHelperLinkage(TR::CodeGenerator *cg, TR_LinkageConventions helperLinkage) : _helperLinkage(helperLinkage), TR::PPCPrivateLinkage(cg)
+   HelperLinkage(TR::CodeGenerator *cg, TR_LinkageConventions helperLinkage) : _helperLinkage(helperLinkage), PrivateLinkage(cg)
       {
       TR_ASSERT(helperLinkage == TR_Helper || helperLinkage == TR_CHelper, "Unexpected helper linkage convention");
       }
@@ -122,6 +131,8 @@ class PPCHelperLinkage : public TR::PPCPrivateLinkage
 
    TR_LinkageConventions _helperLinkage;
    };
+
+}
 
 }
 

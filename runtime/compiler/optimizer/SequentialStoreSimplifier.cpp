@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -28,7 +28,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "codegen/CodeGenerator.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "codegen/StorageInfo.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/SymbolReferenceTable.hpp"
@@ -46,11 +46,11 @@
 #include "il/ILOps.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
 #include "infra/Array.hpp"
 #include "infra/Assert.hpp"
 #include "infra/Cfg.hpp"
@@ -464,7 +464,7 @@ TR_arraycopySequentialStores::TR_arraycopySequentialStores(TR::Compilation* comp
    {
    memset(_addrTree, 0, sizeof(_addrTree));
    memset(_val, 0, sizeof(_val));
-   _bigEndian = TR::Compiler->target.cpu.isBigEndian();
+   _bigEndian = comp->target().cpu.isBigEndian();
    }
 
 //   i2b [node cannot overflow]
@@ -496,7 +496,7 @@ bool isValidSeqLoadB2i(TR::Compilation * comp, TR::Node* b2iNode)
       return false;
    firstChild = firstChild->getFirstChild();
 
-   if(TR::Compiler->target.is64Bit())
+   if(comp->target().is64Bit())
       {
       if ( !(firstChild->getOpCodeValue()==TR::aladd) )
          return false;
@@ -553,7 +553,7 @@ int32_t getOffsetForSeqLoad(TR::Compilation * comp, TR::Node* rootNode, int32_t 
          {
          dummyNode = dummyNode->getFirstChild();
          }
-      if(TR::Compiler->target.is64Bit())
+      if(comp->target().is64Bit())
          {
          return dummyNode->getFirstChild()->getFirstChild()->getFirstChild()->getSecondChild()->getSecondChild()->getLongInt() * -1;
          }
@@ -570,7 +570,7 @@ int32_t getOffsetForSeqLoad(TR::Compilation * comp, TR::Node* rootNode, int32_t 
          }
       if (dummyNode->getSecondChild()->getOpCodeValue()==TR::imul)
          {
-         if(TR::Compiler->target.is64Bit())
+         if(comp->target().is64Bit())
             {
             return dummyNode->getSecondChild()->getFirstChild()->getFirstChild()->getFirstChild()->getSecondChild()->getSecondChild()->getLongInt() * -1;
             }
@@ -581,7 +581,7 @@ int32_t getOffsetForSeqLoad(TR::Compilation * comp, TR::Node* rootNode, int32_t 
          }
       else
          {
-         if(TR::Compiler->target.is64Bit())
+         if(comp->target().is64Bit())
             {
             return dummyNode->getSecondChild()->getFirstChild()->getFirstChild()->getSecondChild()->getSecondChild()->getLongInt()*-1;
             }
@@ -693,7 +693,6 @@ bool TR_ShiftedValueTree::process(TR::Node* loadNode)
       case TR::l2b: shift = true;  _valueSize = 8; shiftCode = TR::lushr; altShiftCode = TR::lshr; constCode = TR::iconst; break;
       case TR::bload:
       case TR::bconst:
-      case TR::cconst:
       case TR::sconst:
       case TR::iconst:
       case TR::lconst: shift = false; _valueSize = 1; _shiftValue = 0; break;
@@ -720,7 +719,6 @@ bool TR_ShiftedValueTree::process(TR::Node* loadNode)
          _valNode = loadNode->getFirstChild()->getFirstChild();
          switch(constCode)
             {
-            case TR::cconst: _shiftValue = shiftVal->getConst<uint16_t>(); break;
             case TR::sconst: _shiftValue = shiftVal->getShortInt(); break;
             case TR::iconst: _shiftValue = shiftVal->getInt(); break;
             case TR::lconst: _shiftValue = shiftVal->getLongInt(); break;
@@ -965,7 +963,6 @@ int64_t TR_arraycopySequentialStores::constVal()
       switch (_val[entry]->getValNode()->getOpCodeValue())
          {
          case TR::bconst: curVal = (uint64_t) (_val[entry]->getValNode()->getByte() & 0xFF); break;
-         case TR::cconst: curVal = (uint64_t) (_val[entry]->getValNode()->getConst<uint16_t>() & 0xFF); break;
          case TR::sconst: curVal = (uint64_t) (_val[entry]->getValNode()->getShortInt() & 0xFF); break;
          case TR::iconst: curVal = (uint64_t) (_val[entry]->getValNode()->getInt() & 0xFF); break;
          case TR::lconst: curVal = (uint64_t) (_val[entry]->getValNode()->getLongInt() & 0xFF); break;
@@ -1102,7 +1099,7 @@ static TR::TreeTop* generateArraycopyFromSequentialStores(TR::Compilation* comp,
       {
       switch(numBytes)
          {
-         case 2: opcode = TR::cstorei; break;
+         case 2: opcode = TR::sstorei; break;
          case 4: opcode = TR::istorei; break;
          case 8: opcode = TR::lstorei; break;
          default: TR_ASSERT(0, " number of bytes unexpected\n"); break;
@@ -1127,7 +1124,7 @@ static TR::TreeTop* generateArraycopyFromSequentialLoads(TR::Compilation* comp, 
 
    TR::CodeGenerator* codeGen = comp->cg();
 
-   if (TR::Compiler->target.cpu.isLittleEndian())
+   if (comp->target().cpu.isLittleEndian())
       return currentTreeTop;
 
    int32_t numBytes = 0;
@@ -1577,12 +1574,12 @@ static TR::TreeTop* generateArraysetFromSequentialStores(TR::Compilation* comp, 
          TR_ASSERT((numBytes <= 8), "number of bytes is greater than 8 and we cannot use a single store to achieve this\n");
          usingArrayset = false;
          }
-      else if (TR::Compiler->target.cpu.isPower() && numBytes < 32) // tm - The threshold needs to be adjusted for PPC
+      else if (comp->target().cpu.isPower() && numBytes < 32) // tm - The threshold needs to be adjusted for PPC
          {
          //traceMsg(comp, "arrayset istore did not encounter large enough storage range. Range is: %d\n", numBytes);
          return istoreTreeTop;
          }
-      else if ((numBytes < 8)  || ((numBytes < 12) && TR::Compiler->target.is64Bit())) // msf - change to codeGen->arrayInitMinimumNumberOfBytes())
+      else if ((numBytes < 8)  || ((numBytes < 12) && comp->target().is64Bit())) // msf - change to codeGen->arrayInitMinimumNumberOfBytes())
          {
          //traceMsg(comp, "arrayset istore did not encounter large enough storage range. Range is: %d\n", numBytes);
          return istoreTreeTop;
@@ -1682,7 +1679,7 @@ static TR::TreeTop* generateArraysetFromSequentialStores(TR::Compilation* comp, 
 
       TR::Node* aloadNode = arrayset.getALoad();
       TR::Node *offsetNode, *arrayRefNode;
-      if (TR::Compiler->target.is64Bit())
+      if (comp->target().is64Bit())
          {
          offsetNode = TR::Node::create(istoreNode, TR::lconst);
          offsetNode->setLongInt((int64_t)arrayset.getBaseOffset());
@@ -1764,7 +1761,7 @@ static TR::TreeTop* generateArraysetFromSequentialStores(TR::Compilation* comp, 
                }
             case 2:
                {
-               opcode = TR::cstorei;
+               opcode = TR::sstorei;
                int32_t constValue = (int32_t)arrayset.getConstant();
                if (istoreNode->getOpCodeValue() == TR::bstorei ||
                    istoreNode->getOpCodeValue() == TR::bustorei)
@@ -1774,7 +1771,7 @@ static TR::TreeTop* generateArraysetFromSequentialStores(TR::Compilation* comp, 
                   constValue = ((constValue << 8) | constValue);
                   }
 
-               constValueNode = TR::Node::cconst(istoreNode, constValue);
+               constValueNode = TR::Node::sconst(istoreNode, constValue);
                break;
                }
             case 4:
@@ -2274,8 +2271,8 @@ static TR::TreeTop * reduceArrayLoad(TR_ArrayShiftTreeCollection * storeTrees, T
          // between 2 and 3 bytes go into here, and we will transform the first 2 bytes
          newDataType = TR::Int16;
          numValidTrees = 2 / storeTrees->getTree(0)->getRootNode()->getOpCode().getSize();
-         storeOpCode = TR::cstorei;
-         loadOpCode = TR::cloadi;
+         storeOpCode = TR::sstorei;
+         loadOpCode = TR::sloadi;
          }
 
       if (numValidTrees < 2 ||

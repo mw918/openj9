@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,7 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "codegen/CodeGenerator.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/SymbolReferenceTable.hpp"
 #include "control/Options.hpp"
@@ -34,6 +34,7 @@
 #include "env/CompilerEnv.hpp"
 #include "env/TRMemory.hpp"
 #include "env/jittypes.h"
+#include "il/AutomaticSymbol.hpp"
 #include "il/Block.hpp"
 #include "il/DataTypes.hpp"
 #include "il/ILOpCodes.hpp"
@@ -45,7 +46,6 @@
 #include "il/SymbolReference.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/AutomaticSymbol.hpp"
 #include "infra/Assert.hpp"
 #include "infra/BitVector.hpp"
 #include "infra/Cfg.hpp"
@@ -1954,7 +1954,7 @@ makeTRT2ByteGraph(TR::Compilation *c, int32_t ctrl)
    TR_PCISCNode *nullChk = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::NULLCHK, TR::NoType,  tgt->incNumNodes(), 1, 1, 1, entry, charArray); tgt->addNode(nullChk); // optional
    TR_PCISCNode *bndChk = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::BNDCHK, TR::NoType,  tgt->incNumNodes(), 1, 1, 2, nullChk, arrayLen, iv);
    tgt->addNode(bndChk); // optional
-   TR_PCISCNode *arrayLoad  = createIdiomArrayLoadInLoop(tgt, ctrl, 1, bndChk, TR::cloadi, TR::Int16,  charArray, iv, aHeader, mulFactor);
+   TR_PCISCNode *arrayLoad  = createIdiomArrayLoadInLoop(tgt, ctrl, 1, bndChk, TR::sloadi, TR::Int16,  charArray, iv, aHeader, mulFactor);
    TR_PCISCNode *c2iNode  = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::su2i, TR::Int32,  tgt->incNumNodes(), 1, 1, 1, arrayLoad, arrayLoad);  tgt->addNode(c2iNode);
    TR_PCISCNode *boolTable  = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR_booltable, TR::NoType, tgt->incNumNodes(), 1, 2, 1, c2iNode, c2iNode);  tgt->addNode(boolTable);
    TR_PCISCNode *ivStore  = createIdiomDecVarInLoop(tgt, ctrl, 1, boolTable, iv, increment);
@@ -2081,7 +2081,7 @@ CISCTransform2NestedArrayFindBytes(TR_CISCTransformer *trans)
       // Prepare TR::arraytranslate
       //
       TR::Node * inputNode = createArrayTopAddressTree(comp, trans->isGenerateI2L(), outerBaseRepNode);
-      TR::Node * outputNode = TR::Node::aconst(baseRepNode, (uintptrj_t)tableOuterResult);
+      TR::Node * outputNode = TR::Node::aconst(baseRepNode, (uintptr_t)tableOuterResult);
       TR::Node * termCharNode = TR::Node::create( baseRepNode, TR::iconst, 0, 0xff);
       TR::Node * lengthNode = TR::Node::create( baseRepNode, TR::iconst, 0, lenForDynamic);
       TR::Node * stoppingNode = TR::Node::create( baseRepNode, TR::iconst, 0, 0xffffffff);
@@ -2119,7 +2119,7 @@ CISCTransform2NestedArrayFindBytes(TR_CISCTransformer *trans)
       }
    else
       {
-      tableNode = TR::Node::create( baseRepNode, TR::aconst, (uintptrj_t)tableOuterResult);
+      tableNode = TR::Node::create( baseRepNode, TR::aconst, (uintptr_t)tableOuterResult);
       }
    ////findBytesNode->setSymbolReference(comp->getSymRefTab()->findOrCreateFindBytesSymbol());
    findBytesNode->setSymbolReference(comp->getSymRefTab()->findOrCreateArrayTranslateAndTestSymbol());
@@ -3176,7 +3176,7 @@ makeCopyingTROOSpecialGraph(TR::Compilation *c, int32_t ctrl)
    tgt->setMinCounts(1, 2, 1);  // minimum ifCount, indirectLoadCount, indirectStoreCount
    tgt->setHotness(warm, false);
    static char *versionLengthStr = feGetEnv("TR_CopyingTROOSpecialGraph_versionLength");
-   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (TR::Compiler->target.cpu.isPower() ? 0 : 19);
+   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (c->target().cpu.isPower() ? 0 : 19);
    tgt->setVersionLength(versionLength);   // depending on each architecture
    tgt->setPatternType(1); // dest. induction variable is updated by incrementing
    return tgt;
@@ -3285,7 +3285,7 @@ makeCopyingTROxGraph(TR::Compilation *c, int32_t ctrl, int pattern)
    tgt->setMinCounts(1, 1, 1);  // minimum ifCount, indirectLoadCount, indirectStoreCount
    tgt->setHotness(warm, false);
    static char *versionLengthStr = feGetEnv("TR_CopyingTROxGraph_versionLength");
-   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (TR::Compiler->target.cpu.isPower() ? 0 : 8);
+   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (c->target().cpu.isPower() ? 0 : 8);
    tgt->setVersionLength(versionLength);   // depending on each architecture
 
    tgt->setPatternType(pattern);
@@ -3369,7 +3369,7 @@ makeCopyingTROTInduction1Graph(TR::Compilation *c, int32_t ctrl, int32_t pattern
    tgt->setMinCounts(1, 1, 1);  // minimum ifCount, indirectLoadCount, indirectStoreCount
    tgt->setHotness(warm, false);
    static char *versionLengthStr = feGetEnv("TR_CopyingTROTInduction1Graph_versionLength");
-   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (TR::Compiler->target.cpu.isPower() ? 0 : 8);
+   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (c->target().cpu.isPower() ? 0 : 8);
    tgt->setVersionLength(versionLength);   // depending on each architecture
    return tgt;
    }
@@ -3669,7 +3669,7 @@ makeTROTArrayGraph(TR::Compilation *c, int32_t ctrl)
    tgt->setMinCounts(1, 1, 1);  // minimum ifCount, indirectLoadCount, indirectStoreCount
    tgt->setHotness(warm, false);
    static char *versionLengthStr = feGetEnv("TR_CopyingTRTOInduction1Graph_versionLength");
-   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (TR::Compiler->target.cpu.isPower() ? 0 : 8);
+   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (c->target().cpu.isPower() ? 0 : 8);
    tgt->setVersionLength(versionLength);   // depending on each architecture
    return tgt;
    }
@@ -4456,7 +4456,7 @@ makeCopyingTRTxGraph(TR::Compilation *c, int32_t ctrl, int pattern)
    tgt->setMinCounts(2, 1, 1);  // minimum ifCount, indirectLoadCount, indirectStoreCount
    tgt->setHotness(warm, false);
    static char *versionLengthStr = feGetEnv("TR_CopyingTRTxGraph_versionLength");
-   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (TR::Compiler->target.cpu.isPower() ? 0 : 15);
+   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (c->target().cpu.isPower() ? 0 : 15);
    tgt->setVersionLength(versionLength);   // depending on each architecture
 
    tgt->setPatternType(pattern);
@@ -4536,7 +4536,7 @@ makeCopyingTRTxThreeIfsGraph(TR::Compilation *c, int32_t ctrl)
    tgt->setMinCounts(3, 1, 1);  // minimum ifCount, indirectLoadCount, indirectStoreCount
    tgt->setHotness(warm, false);
    static char *versionLengthStr = feGetEnv("TR_CopyingTRTxThreeIfsGraph_versionLength");
-   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (TR::Compiler->target.cpu.isPower() ? 0 : 15);
+   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (c->target().cpu.isPower() ? 0 : 15);
    tgt->setVersionLength(versionLength);   // depending on each architecture
    return tgt;
    }
@@ -4596,7 +4596,7 @@ makeCopyingTRTOGraphSpecial(TR::Compilation *c, int32_t ctrl)
    tgt->setMinCounts(2, 1, 1);  // minimum ifCount, indirectLoadCount, indirectStoreCount
    tgt->setHotness(warm, false);
    static char *versionLengthStr = feGetEnv("TR_CopyingTRTOGraphSpecial_versionLength");
-   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (TR::Compiler->target.cpu.isPower() ? 0 : 15);
+   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (c->target().cpu.isPower() ? 0 : 15);
    tgt->setVersionLength(versionLength);   // depending on each architecture
 
    // needs induction variable init
@@ -4641,7 +4641,7 @@ makeCopyingTRTOInduction1Graph(TR::Compilation *c, int32_t ctrl, int32_t pattern
    TR_PCISCNode *c1  = createIdiomArrayRelatedConst(tgt, ctrl, tgt->incNumNodes(), 4, 1);                    // element size
    TR_PCISCNode *c2  = createIdiomArrayRelatedConst(tgt, ctrl, tgt->incNumNodes(), 3, 2);                    // element size
    TR_PCISCNode *ent = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR_entrynode, TR::NoType, tgt->incNumNodes(),  2,   1,   0);        tgt->addNode(ent);
-   TR_PCISCNode *n2  = createIdiomArrayLoadInLoop(tgt, ctrl, 1,   ent, TR::cloadi, TR::Int16,  v0, v1, cmah0, c2);
+   TR_PCISCNode *n2  = createIdiomArrayLoadInLoop(tgt, ctrl, 1,   ent, TR::sloadi, TR::Int16,  v0, v1, cmah0, c2);
    TR_PCISCNode *n3  = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR_conversion, TR::NoType, tgt->incNumNodes(), 1,   1,   1,   n2, n2);  tgt->addNode(n3);
    TR_PCISCNode *n4  = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR_booltable, TR::NoType, tgt->incNumNodes(),  1,   2,   1,   n3, n3);  tgt->addNode(n4);  // optional
    TR_PCISCNode *n5, *nn0, *op1, *n6;
@@ -4712,7 +4712,7 @@ makeCopyingTRTOInduction1Graph(TR::Compilation *c, int32_t ctrl, int32_t pattern
    tgt->setMinCounts(1, 1, 1);  // minimum ifCount, indirectLoadCount, indirectStoreCount
    tgt->setHotness(warm, false);
    static char *versionLengthStr = feGetEnv("TR_CopyingTRTOInduction1Graph_versionLength");
-   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (TR::Compiler->target.cpu.isPower() ? 0 : 8);
+   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (c->target().cpu.isPower() ? 0 : 8);
    tgt->setVersionLength(versionLength);   // depending on each architecture
    return tgt;
    }
@@ -4780,7 +4780,7 @@ makeCopyingTRTTSpecialGraph(TR::Compilation *c, int32_t ctrl)
    tgt->setMinCounts(2, 2, 1);  // minimum ifCount, indirectLoadCount, indirectStoreCount
    tgt->setHotness(warm, false);
    static char *versionLengthStr = feGetEnv("TR_CopyingTRTTSpecialGraph_versionLength");
-   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (TR::Compiler->target.cpu.isPower() ? 0 : 20);
+   static int   versionLength = versionLengthStr ? atoi(versionLengthStr) : (c->target().cpu.isPower() ? 0 : 20);
    tgt->setVersionLength(versionLength);   // depending on each architecture
    return tgt;
    }
@@ -4874,7 +4874,7 @@ CISCTransform2TRTOArray(TR_CISCTransformer *trans)
 
    // Prepare arraytranslate node
    TR::Node * tableNode = createLoad(mapBaseRepNode);
-   if (tableNode->getOpCode().isLong() && TR::Compiler->target.is32Bit())
+   if (tableNode->getOpCode().isLong() && comp->target().is32Bit())
       tableNode = TR::Node::create(TR::l2i, 1, tableNode);
    TR::Node * indexNode = TR::Node::createWithSymRef(indexRepNode, TR::iload, 0, indexVarSymRef);
    TR::Node * lengthNode = createI2LIfNecessary(comp, trans->isGenerateI2L(),
@@ -5196,7 +5196,7 @@ makeTRTOArrayGraph(TR::Compilation *c, int32_t ctrl)
    tgt->setNoAspects(call|bndchk|bitop1, 0, 0);
    tgt->setMinCounts(2, 2, 1);  // minimum ifCount, indirectLoadCount, indirectStoreCount
    tgt->setHotness(warm, false);
-   tgt->setVersionLength(TR::Compiler->target.cpu.isPower() ? 0 : 11);   // depending on each architecture
+   tgt->setVersionLength(c->target().cpu.isPower() ? 0 : 11);   // depending on each architecture
    return tgt;
    }
 
@@ -5284,7 +5284,7 @@ makeTRTOArrayGraphSpecial(TR::Compilation *c, int32_t ctrl)
    tgt->setNoAspects(call|bndchk|bitop1, 0, 0);
    tgt->setMinCounts(2, 1, 1);  // minimum ifCount, indirectLoadCount, indirectStoreCount
    tgt->setHotness(warm, false);
-   tgt->setVersionLength(TR::Compiler->target.cpu.isPower() ? 0 : 11);   // depending on each architecture
+   tgt->setVersionLength(c->target().cpu.isPower() ? 0 : 11);   // depending on each architecture
    return tgt;
    }
 
@@ -5308,7 +5308,7 @@ static StatusArrayStore checkArrayStore(TR::Compilation *comp, TR::Node *inputNo
    // and a typical arraycopy loop. loops like above cannot be reduced to an arraycopy
    // (look at the java semantics for arraycopy)
    //
-   if (TR::Compiler->target.cpu.isZ())
+   if (comp->target().cpu.isZ())
       return NO_NEED_TO_CHECK;       // On 390, MVC (which performs byte copies) is generated.
 
    if (inputNode->getFirstChild()->getSymbol()->getRegisterMappedSymbol() == outputNode->getFirstChild()->getSymbol()->getRegisterMappedSymbol())
@@ -6115,7 +6115,7 @@ CISCTransform2ArrayCopyB2CorC2B(TR_CISCTransformer *trans)
    List<TR_CISCNode> *P2T = trans->getP2T();
    TR::Compilation *comp = trans->comp();
 
-   bool bigEndian = TR::Compiler->target.cpu.isBigEndian();
+   bool bigEndian = comp->target().cpu.isBigEndian();
 
    TR_ASSERT(trans->getP()->getVersionLength() == 0, "Versioning code is not implemented yet");
 
@@ -6331,7 +6331,7 @@ makeMemCpyByteToCharGraph(TR::Compilation *c, int32_t ctrl)
    TR_PCISCNode *nl23= new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::bu2i, TR::Int32,      tgt->incNumNodes(),  1,   1,   1,   nl22, nl22); tgt->addNode(nl23);
    TR_PCISCNode *ns2 = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::ior, TR::Int32,       tgt->incNumNodes(),  1,   1,   2,   nl23, nl14, nl23); tgt->addNode(ns2);
    TR_PCISCNode *ns3 = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::i2s, TR::Int16,       tgt->incNumNodes(),  1,   1,   1,   ns2, ns2); tgt->addNode(ns3);
-   TR_PCISCNode *ns4 = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::cstorei, TR::Int16,   tgt->incNumNodes(),  1,   1,   2,   ns3, ns1, ns3); tgt->addNode(ns4);
+   TR_PCISCNode *ns4 = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::sstorei, TR::Int16,   tgt->incNumNodes(),  1,   1,   2,   ns3, ns1, ns3); tgt->addNode(ns4);
    TR_PCISCNode *n6  = createIdiomDecVarInLoop(tgt, ctrl, 1, ns4, v1, cm2);
    TR_PCISCNode *n7  = createIdiomDecVarInLoop(tgt, ctrl, 1, n6, v3, cm1);
    TR_PCISCNode *n8  = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::ificmpge, TR::NoType,  tgt->incNumNodes(),  1,   2,   2,   n7, v4, vorc);  tgt->addNode(n8);
@@ -6400,7 +6400,7 @@ makeMemCpyCharToByteGraph(TR::Compilation *c, int32_t ctrl)
    TR_PCISCNode *ns11= createIdiomArrayAddressInLoop(tgt, ctrl, 1, ns10, v2, ns10);
    TR_PCISCNode *nl0 = createIdiomArrayAddressIndexTreeInLoop(tgt, ctrl, 1, ns11, v1, cmah, c2);
    TR_PCISCNode *nl1 = createIdiomArrayAddressInLoop(tgt, ctrl, 1, nl0, v0, nl0);
-   TR_PCISCNode *nl2 = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::cloadi, TR::Int16,    tgt->incNumNodes(),  1,   1,   1,   nl1, nl1); tgt->addNode(nl2);
+   TR_PCISCNode *nl2 = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::sloadi, TR::Int16,    tgt->incNumNodes(),  1,   1,   1,   nl1, nl1); tgt->addNode(nl2);
    TR_PCISCNode *cvt0, *cvt1;
    if ((ctrl & CISCUtilCtl_BigEndian))
       {
@@ -6639,7 +6639,7 @@ makeMemCpyByteToCharBndchkGraph(TR::Compilation *c, int32_t ctrl)
    TR_PCISCNode *nl23= new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::bu2i, TR::Int32,      tgt->incNumNodes(),  1,   1,   1,   nl22, nl22); tgt->addNode(nl23);
    TR_PCISCNode *ns2 = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::iadd, TR::Int32,      tgt->incNumNodes(),  1,   1,   2,   nl23, nl14, nl23); tgt->addNode(ns2);
    TR_PCISCNode *ns3 = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::i2s, TR::Int16,       tgt->incNumNodes(),  1,   1,   1,   ns2, ns2); tgt->addNode(ns3);
-   TR_PCISCNode *ns4 = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::cstorei, TR::Int16,   tgt->incNumNodes(),  1,   1,   2,   ns3, ns1, ns3); tgt->addNode(ns4);
+   TR_PCISCNode *ns4 = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::sstorei, TR::Int16,   tgt->incNumNodes(),  1,   1,   2,   ns3, ns1, ns3); tgt->addNode(ns4);
    TR_PCISCNode *n6  = createIdiomDecVarInLoop(tgt, ctrl, 1, ns4, v3, cm1);
    TR_PCISCNode *n7  = createIdiomDecVarInLoop(tgt, ctrl, 1, n6, v4, cm1);
    TR_PCISCNode *n8  = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::ificmpge, TR::NoType,  tgt->incNumNodes(),  1,   2,   2,   n7, v4, vorc);  tgt->addNode(n8);
@@ -6740,7 +6740,7 @@ CISCTransform2ArrayCopyC2BMixed(TR_CISCTransformer *trans)
    TR_ASSERT(!searchNodeInBlock(flagIf->getSucc(1), LEloadMem) ||
           !searchNodeInBlock(flagIf->getSucc(1), BEloadMem), "error");
    bool LEalongJumpPath = searchNodeInBlock(flagIf->getSucc(1), LEloadMem);
-   bool isBig = TR::Compiler->target.cpu.isBigEndian();
+   bool isBig = comp->target().cpu.isBigEndian();
    if (!isBig) LEalongJumpPath = !LEalongJumpPath;
    if (DISPTRACE(trans)) traceMsg(comp, "LEalongJumpPath = %d\n",LEalongJumpPath);
 
@@ -6797,11 +6797,11 @@ CISCTransform2ArrayCopyC2BMixed(TR_CISCTransformer *trans)
       int childNum = -1;
       bool ret;
       TR::Node * LEStoreAddrTree2 = LEStoreAddrTree->duplicateTree();
-      TR::Node *arrayHeaderConst = createArrayHeaderConst(comp, TR::Compiler->target.is64Bit(), trNode);
+      TR::Node *arrayHeaderConst = createArrayHeaderConst(comp, comp->target().is64Bit(), trNode);
       ret = trans->searchNodeInTrees(isBig ? LEStoreAddrTree2 : LEStoreAddrTree,
                                      arrayHeaderConst, &replaceParent, &childNum);
       TR_ASSERT(ret, "error");
-      if (TR::Compiler->target.is64Bit())
+      if (comp->target().is64Bit())
          {
          arrayHeaderConst->setLongInt(arrayHeaderConst->getLongInt()-1);
          }
@@ -7223,7 +7223,7 @@ makeMEMCPYChar2ByteGraph2(TR::Compilation *c, int32_t ctrl)
    TR_PCISCNode *ns11= createIdiomArrayAddressInLoop(tgt, ctrl, 1, ns10, v2, ns10);
    TR_PCISCNode *nl0 = createIdiomArrayAddressIndexTreeInLoop(tgt, ctrl, 1, ns11, lv1, cmah, c2);
    TR_PCISCNode *nl1 = createIdiomArrayAddressInLoop(tgt, ctrl, 1, nl0, v0, nl0);
-   TR_PCISCNode *nl2 = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::cloadi, TR::Int16,    tgt->incNumNodes(),  1,   1,   1,   nl1, nl1); tgt->addNode(nl2);
+   TR_PCISCNode *nl2 = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR::sloadi, TR::Int16,    tgt->incNumNodes(),  1,   1,   1,   nl1, nl1); tgt->addNode(nl2);
    TR_PCISCNode *cvt0, *cvt1;
    if ((ctrl & CISCUtilCtl_BigEndian))
       {
@@ -7706,7 +7706,7 @@ CISCTransform2PtrArraySet(TR_CISCTransformer *trans)
    // all good..  now actual transformations
    auto startPtr = TR::Node::createWithSymRef(TR::aload, 0, astoreNode->getSymbolReference());
    TR::Node *length, *arrayset;
-   bool use64bit = TR::Compiler->target.is64Bit();
+   bool use64bit = comp->target().is64Bit();
    bool equal = ifcmpNode->getOpCode().isCompareTrueIfEqual();  // fix off by one.
    if (increment < 0)
       {
@@ -8315,7 +8315,7 @@ n28n      BBEnd </block_5> =====                                                
 TR_PCISCGraph *
 makePtrArraySetGraph(TR::Compilation *c, int32_t ctrl)
    {
-   bool is64bit = TR::Compiler->target.is64Bit();
+   bool is64bit = c->target().is64Bit();
    TR_PCISCGraph *tgt = new (PERSISTENT_NEW) TR_PCISCGraph(c->trMemory(), "PtrArraySet", 0, 10);
    /******************************************************************************    opc          id         dagId #cfg #child other/pred/children */
    auto entry      = new (PERSISTENT_NEW) TR_PCISCNode(c->trMemory(), TR_entrynode, TR::NoType,  tgt->incNumNodes(), 9, 1, 0);
@@ -8920,7 +8920,7 @@ CISCTransform2ArrayCmp2Ifs(TR_CISCTransformer *trans)
       //
       TR::ILOpCodes mulOp = TR::imul;
 #if 0
-      if (TR::Compiler->target.is64Bit())
+      if (comp->target().is64Bit())
          {
          elementSizeNode = TR::Node::create(mulFactorNode, TR::lconst);
          elementSizeNode->setLongInt(elementSize);
@@ -9201,7 +9201,6 @@ CISCTransform2ArrayCmp(TR_CISCTransformer *trans)
       {
       case TR::ificmpne:
       case TR::ifbcmpne:
-      case TR::ifsucmpne:
       case TR::ifscmpne:
       case TR::iflcmpne:
       case TR::ifacmpne:
@@ -9462,7 +9461,7 @@ CISCTransform2ArrayCmp(TR_CISCTransformer *trans)
       //
       TR::ILOpCodes mulOp = TR::imul;
 #if 0
-      if (TR::Compiler->target.is64Bit())
+      if (comp->target().is64Bit())
          {
          elementSizeNode = TR::Node::create(mulFactorNode, TR::lconst);
          elementSizeNode->setLongInt(elementSize);
@@ -10125,7 +10124,7 @@ CISCTransform2BitOpMem(TR_CISCTransformer *trans)
    if (elementSize > 1)
       {
       TR::ILOpCodes mulOp = TR::imul;
-      if (TR::Compiler->target.is64Bit())
+      if (comp->target().is64Bit())
          {
          elementSizeNode = TR::Node::create(mulFactorNode, TR::lconst);
          elementSizeNode->setLongInt(elementSize);
@@ -10533,7 +10532,7 @@ static const struct ppcDigit10TableEnt ppcDigit10Table[64 + 1] =
 static TR::SymbolReference *
 getSymrefDigit10(TR::Compilation *comp, TR::Node *trNode)
    {
-   if (TR::Compiler->target.cpu.isZ())
+   if (comp->target().cpu.isZ())
       {
       return comp->getSymRefTab()->createKnownStaticDataSymbolRef((void *)digit10Table, TR::Address);
       }
@@ -10609,7 +10608,7 @@ CISCTransform2CountDecimalDigit(TR_CISCTransformer *trans)
 
 
    // The countDigitsEvaluator does not handle long (register pairs) on 31-bit.
-   if (inputVar->getDataType() == TR::Int64 && (!TR::Compiler->target.cpu.isPower() && TR::Compiler->target.is32Bit()))
+   if (inputVar->getDataType() == TR::Int64 && (!comp->target().cpu.isPower() && comp->target().is32Bit()))
       {
       return false;
       }
@@ -10837,7 +10836,7 @@ while(true) {
 static TR::SymbolReference *
 getSymrefLocalArray(TR::Compilation *comp, int size)
    {
-   if (TR::Compiler->target.cpu.isZ())
+   if (comp->target().cpu.isZ())
       {
       TR::SymbolReference *workSymRef = comp->getSymRefTab()->createLocalPrimArray(size, comp->getMethodSymbol(), 8);      // work area for CVD(G)
       workSymRef->setStackAllocatedArrayAccess();

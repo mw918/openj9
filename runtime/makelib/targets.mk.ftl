@@ -484,7 +484,7 @@ UMA_PASM_INCLUDES:=$(addprefix -I ,$(UMA_INCLUDES))
 <#if uma.spec.type.zos>
 #compilation rule for .m4 files
 %$(UMA_DOT_O): %.m4
-	m4 -DJ9ZOS390 -DJ9VM_TIERED_CODE_CACHE $(UMA_M4_FLAGS) $(UMA_C_INCLUDES) $< > $*.s
+	m4 -DJ9ZOS390 $(UMA_M4_FLAGS) $(UMA_C_INCLUDES) $< > $*.s
 	$(AS) -DJ9ZOS390=1 -Wa,goff -Wa,"SYSPARM(BIT64)" $(UMA_ASM_INCLUDES) -c -o $*.o $*.s
 	-mv -f $*.s $*.hold
 </#if>
@@ -567,7 +567,7 @@ MHInterpreter$(UMA_DOT_O):MHInterpreter.cpp
 	$(CXX) $(SPECIALCXXFLAGS) $(NEW_OPTIMIZATION_FLAG) -c $<
 
 endif
-<#if uma.spec.flags.env_littleEndian.enabled && !uma.spec.flags.env_gcc.enabled>
+<#if uma.spec.type.linux && !uma.spec.flags.env_gcc.enabled>
 # special handling of fltconv.c
 # This is a work around for a compiler defect (see JAZZ 76038)
 fltconv$(UMA_DOT_O):fltconv.c

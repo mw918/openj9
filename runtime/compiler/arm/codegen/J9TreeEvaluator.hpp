@@ -35,7 +35,7 @@ namespace J9 { typedef J9::ARM::TreeEvaluator TreeEvaluatorConnector; }
 #endif
 
 #include "compiler/codegen/J9TreeEvaluator.hpp"  // include parent
-#include "il/symbol/LabelSymbol.hpp"
+#include "il/LabelSymbol.hpp"
 
 namespace J9
 {
@@ -47,6 +47,9 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
    {
    public:
 
+   static TR::Register *NULLCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *resolveAndNULLCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *evaluateNULLCHKWithPossibleResolve(TR::Node *node, bool needResolution, TR::CodeGenerator *cg);
    static void genWrtbarForArrayCopy(TR::Node *node, TR::Register *srcObjReg, TR::Register *dstObjReg, TR::CodeGenerator *cg);
 
    /*

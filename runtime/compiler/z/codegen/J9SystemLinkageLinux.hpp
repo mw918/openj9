@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -35,18 +35,22 @@ namespace TR { class Register; }
 namespace TR { class RegisterDependencyConditions; }
 namespace TR { class SystemLinkage; }
 
-namespace TR {
+namespace J9
+{
 
-class J9S390zLinuxSystemLinkage : public TR::S390zLinuxSystemLinkage
+namespace Z
+{
+
+class zLinuxSystemLinkage : public TR::S390zLinuxSystemLinkage
    {
 public:
-   J9S390zLinuxSystemLinkage(TR::CodeGenerator * codeGen);
+   zLinuxSystemLinkage(TR::CodeGenerator * codeGen);
 
-   virtual void generateInstructionsForCall(TR::Node * callNode, TR::RegisterDependencyConditions * deps, intptrj_t targetAddress,
+   virtual void generateInstructionsForCall(TR::Node * callNode, TR::RegisterDependencyConditions * deps, intptr_t targetAddress,
 		   TR::Register * methodAddressReg, TR::Register * javaLitOffsetReg, TR::LabelSymbol * returnFromJNICallLabel,
 		   TR::S390JNICallDataSnippet * jniCallDataSnippet, bool isJNIGCPoint);
 
-	virtual void setupRegisterDepForLinkage(TR::Node *, TR_DispatchType, TR::RegisterDependencyConditions * &,
+   virtual void setupRegisterDepForLinkage(TR::Node *, TR_DispatchType, TR::RegisterDependencyConditions * &,
          int64_t &, TR::SystemLinkage *, TR::Node * &, bool &, TR::Register **, TR::Register *&);
 
    virtual void setupBuildArgForLinkage(TR::Node *, TR_DispatchType, TR::RegisterDependencyConditions *, bool, bool,
@@ -62,6 +66,9 @@ public:
          bool isFastJNI, int32_t stackOffset, int8_t gprSize, uint32_t &numIntegerArgs);
 
    };
+
+}
+
 }
 
 #endif

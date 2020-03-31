@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -29,6 +29,7 @@
 #include "j9consts.h"
 #include "codegen/CodeGenerator.hpp"
 #include "codegen/Linkage_inlines.hpp"
+#include "codegen/S390CHelperLinkage.hpp"
 #include "codegen/TreeEvaluator.hpp"
 #include "env/VMJ9.h"
 #include "il/ILOps.hpp"
@@ -41,7 +42,6 @@
 #include "z/codegen/S390GenerateInstructions.hpp"
 #include "z/codegen/S390Instruction.hpp"
 #include "z/codegen/S390Register.hpp"
-#include "z/codegen/J9S390CHelperLinkage.hpp"
 
 #define OPT_DETAILS "O^O REDUCE SYNCHRONIZED FIELD LOAD: "
 
@@ -74,7 +74,7 @@ ReduceSynchronizedFieldLoad::inlineSynchronizedFieldLoad(TR::Node* node, TR::Cod
    // Generate a dynamic debug counter for the fallback path whose execution should be extremely rare
    cg->generateDebugCounter(TR::DebugCounter::debugCounterName(cg->comp(), "codegen/z/ReduceSynchronizedFieldLoad/success/OOL/%s", cg->comp()->signature()));
 
-   TR::S390CHelperLinkage* helperLink = static_cast<TR::S390CHelperLinkage*>(cg->getLinkage(TR_CHelper));
+   J9::Z::CHelperLinkage* helperLink = static_cast<J9::Z::CHelperLinkage*>(cg->getLinkage(TR_CHelper));
 
    // Calling helper with call node which should NULL
    helperLink->buildDirectDispatch(monentSymbolReferenceNode);
@@ -119,7 +119,7 @@ ReduceSynchronizedFieldLoad::inlineSynchronizedFieldLoad(TR::Node* node, TR::Cod
 
    const bool generateCompressedLockWord = static_cast<TR_J9VMBase*>(cg->comp()->fe())->generateCompressedLockWord();
 
-   const bool is32BitLock = TR::Compiler->target.is32Bit() || generateCompressedLockWord;
+   const bool is32BitLock = cg->comp()->target().is32Bit() || generateCompressedLockWord;
    const bool is32BitLoad = J9::DataType::getSize(loadNode->getDataType()) == 4;
 
    bool lockRegisterRequiresZeroExt = false;
@@ -254,7 +254,7 @@ ReduceSynchronizedFieldLoad::perform()
    {
    bool transformed = false;
 
-   if (TR::Compiler->target.cpu.getSupportsArch(TR::CPU::z196))
+   if (cg->comp()->target().cpu.getSupportsArch(TR::CPU::z196))
       {
       if (!cg->comp()->getOption(TR_DisableSynchronizedFieldLoad) && cg->comp()->getMethodSymbol()->mayContainMonitors())
          {
@@ -319,7 +319,7 @@ ReduceSynchronizedFieldLoad::performOnTreeTops(TR::TreeTop* startTreeTop, TR::Tr
                   if (loadNode != NULL)
                      {
                      // Disallow this optimization for 64-bit loads on 31-bit JVM due to register pairs
-                     if (TR::Compiler->target.is32Bit() && J9::DataType::getSize(loadNode->getDataType()) == 8)
+                     if (cg->comp()->target().is32Bit() && J9::DataType::getSize(loadNode->getDataType()) == 8)
                         {
                         TR::DebugCounter::incStaticDebugCounter(cg->comp(), TR::DebugCounter::debugCounterName(cg->comp(), "codegen/z/ReduceSynchronizedFieldLoad/failure/31-bit-register-pairs/%s", cg->comp()->signature()));
 

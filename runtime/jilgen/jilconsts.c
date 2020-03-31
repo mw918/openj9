@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -39,19 +39,14 @@ static jint
 writeHeader(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 {
 	jint rc = JNI_OK;
-	char const *changequote = "changequote({,})dnl\n";
-	char const *j9Const = "define({J9CONST},{{$1}ifelse($2,,,{{($2}ifelse($3,,,{,$3}){)}})})dnl\n";
-	if (0 != omrfile_write_text(fd, changequote, strlen(changequote))) {
-fail:
-		omrtty_printf("ERROR: Failed to write changequote\n");
+	char const *headertext =
+		"changequote({,})dnl\n"
+		"define({J9CONST},{define({$1},{{$2}ifelse($}{#,0,,($}{@))})})dnl\n";
+
+	if (0 != omrfile_write_text(fd, headertext, strlen(headertext))) {
 		rc = JNI_ERR;
-		goto done;
-	}
-	if (0 != omrfile_write_text(fd, j9Const, strlen(j9Const))) {
-		goto fail;
 	}
 
-done:
 	return rc;
 }
 
@@ -70,7 +65,7 @@ static IDATA
 createConstant(OMRPortLibrary *OMRPORTLIB, char const *name, UDATA value)
 {
 	if (values) {
-		return omrstr_printf(line, sizeof(line), "define({%s},{J9CONST(%zu,$1,$2)})dnl\n", name, value);
+		return omrstr_printf(line, sizeof(line), "J9CONST({%s},%zu)dnl\n", name, value);
 	}
 #if defined(J9VM_ARCH_POWER) || defined(J9VM_ARCH_ARM)
 	return omrstr_printf(line, sizeof(line), "#define %s %zu\n", name, value);
@@ -312,6 +307,9 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 #if defined(J9VM_JIT_32BIT_USES64BIT_REGISTERS)
 			writeConstant(OMRPORTLIB, fd, "ASM_J9VM_JIT_32BIT_USES64BIT_REGISTERS", 1) |
 #endif /* J9VM_JIT_32BIT_USES64BIT_REGISTERS */
+#if defined(J9VM_JIT_FREE_SYSTEM_STACK_POINTER)
+			writeConstant(OMRPORTLIB, fd, "ASM_J9VM_JIT_FREE_SYSTEM_STACK_POINTER", 1) |
+#endif /* J9VM_JIT_FREE_SYSTEM_STACK_POINTER */
 #if defined(J9VM_PORT_ZOS_CEEHDLRSUPPORT)
 			writeConstant(OMRPORTLIB, fd, "ASM_J9VM_PORT_ZOS_CEEHDLRSUPPORT", 1) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_ELS_ceehdlrGPRBase", offsetof(J9VMEntryLocalStorage, ceehdlrGPRBase)) |
@@ -634,6 +632,9 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitReportStaticFieldRead", offsetof(J9JITConfig, old_slow_jitReportStaticFieldRead)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitReportStaticFieldWrite", offsetof(J9JITConfig, old_slow_jitReportStaticFieldWrite)) |
 
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitAcmpHelper", offsetof(J9JITConfig, old_fast_jitAcmpHelper)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_fast_jitNewValue", offsetof(J9JITConfig, fast_jitNewValue)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_fast_jitNewValueNoZeroInit", offsetof(J9JITConfig, fast_jitNewValueNoZeroInit)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_fast_jitNewObject", offsetof(J9JITConfig, fast_jitNewObject)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_fast_jitNewObjectNoZeroInit", offsetof(J9JITConfig, fast_jitNewObjectNoZeroInit)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_fast_jitANewArray", offsetof(J9JITConfig, fast_jitANewArray)) |
@@ -674,6 +675,8 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 			writeConstant(OMRPORTLIB, fd, "J9TR_J9Object_class", offsetof(J9Object, clazz)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_ObjectHeader_class", offsetof(J9Object, clazz)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_IndexableObjectContiguous_objectData", sizeof(J9IndexableObjectContiguous)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_IndexableObjectContiguousCompressed_objectData", sizeof(J9IndexableObjectContiguousCompressed)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_IndexableObjectContiguousFull_objectData", sizeof(J9IndexableObjectContiguousFull)) |
 
 			/* J9SFJNICallInFrame */
 			writeConstant(OMRPORTLIB, fd, "J9TR_J9SFJNICallInFrame_exitAddress", offsetof(J9SFJNICallInFrame, exitAddress)) |

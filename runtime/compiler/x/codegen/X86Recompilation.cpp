@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,11 +26,13 @@
 #include "codegen/Machine.hpp"
 #include "codegen/Linkage.hpp"
 #include "codegen/Linkage_inlines.hpp"
+#include "codegen/PrivateLinkage.hpp"
 #include "codegen/Snippet.hpp"
 #include "codegen/PreprologueConst.hpp"
 #include "compile/ResolvedMethod.hpp"
 #include "env/CompilerEnv.hpp"
 #include "env/jittypes.h"
+#include "env/j9method.h"
 #include "env/VMJ9.h"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
@@ -71,9 +73,8 @@ TR_PersistentMethodInfo *TR_X86Recompilation::getExistingMethodInfo(TR_ResolvedM
    // start PC address. The mechanism is different depending on whether the
    // method was compiled for sampling or counting.
    //
-   void *startPC = method->startAddressForInterpreterOfJittedMethod();
-   TR_PersistentMethodInfo *info = getMethodInfoFromPC(startPC);
-   return info;
+   TR_PersistentJittedBodyInfo *bodyInfo = ((TR_ResolvedJ9Method*) method)->getExistingJittedBodyInfo();
+   return bodyInfo ? bodyInfo->getMethodInfo() : NULL;
    }
 
 TR::Instruction *TR_X86Recompilation::generatePrePrologue()
@@ -87,7 +88,7 @@ TR::Instruction *TR_X86Recompilation::generatePrePrologue()
    TR::Instruction *prev = 0;
 
    uint8_t alignmentMargin = useSampling()? SAMPLING_CALL_SIZE /* allow for the helper call */ : 0;
-   if (TR::Compiler->target.is64Bit())
+   if (cg()->comp()->target().is64Bit())
       alignmentMargin += SAVE_AREA_SIZE +JITTED_BODY_INFO_SIZE + LINKAGE_INFO_SIZE; // save area for the first two bytes of the method + jitted body info pointer + linkageinfo
    else
       alignmentMargin += JITTED_BODY_INFO_SIZE + LINKAGE_INFO_SIZE; // jitted body info pointer + linkageinfo
@@ -109,7 +110,7 @@ TR::Instruction *TR_X86Recompilation::generatePrePrologue()
       prev = generateAlignmentInstruction(prev, alignmentBoundary, alignmentMargin, cg());
       }
 
-   if (TR::Compiler->target.is64Bit())
+   if (cg()->comp()->target().is64Bit())
       {
       // A copy of the first two bytes of the method, in case we need to un-patch them
       //
@@ -130,18 +131,18 @@ TR::Instruction *TR_X86Recompilation::generatePrePrologue()
    // information. If the method is not to be compiled again a null value is
    // inserted.
    //
-   if (TR::Compiler->target.is64Bit())
+   if (cg()->comp()->target().is64Bit())
       {
       // TODO:AMD64: This ought to be a relative address, but that requires
       // binary-encoding-time support.  If you change this, be sure to adjust
       // the alignmentMargin above.
       //
-      prev = new (trHeapMemory()) TR::AMD64Imm64Instruction(prev, DQImm64, (uintptrj_t)getJittedBodyInfo(), cg());
+      prev = new (trHeapMemory()) TR::AMD64Imm64Instruction(prev, DQImm64, (uintptr_t)getJittedBodyInfo(), cg());
       prev->setNeedsAOTRelocation();
       }
    else
       {
-      prev = new (trHeapMemory()) TR::X86ImmInstruction(prev, DDImm4, (uint32_t)(uintptrj_t)getJittedBodyInfo(), cg());
+      prev = new (trHeapMemory()) TR::X86ImmInstruction(prev, DDImm4, (uint32_t)(uintptr_t)getJittedBodyInfo(), cg());
       prev->setNeedsAOTRelocation();
       }
 
@@ -165,17 +166,17 @@ TR::Instruction *TR_X86Recompilation::generatePrologue(TR::Instruction *cursor)
          //
       TR::MemoryReference *mRef;
 
-         if (TR::Compiler->target.is64Bit())
+         if (cg()->comp()->target().is64Bit())
             {
             TR_ASSERT(linkage->getMinimumFirstInstructionSize() <= 10, "Can't satisfy first instruction size constraint");
             TR::RealRegister *scratchReg = machine->getRealRegister(TR::RealRegister::edi);
-            cursor = new (trHeapMemory()) TR::AMD64RegImm64Instruction(cursor, MOV8RegImm64, scratchReg, (uintptrj_t)getCounterAddress(), cg());
+            cursor = new (trHeapMemory()) TR::AMD64RegImm64Instruction(cursor, MOV8RegImm64, scratchReg, (uintptr_t)getCounterAddress(), cg());
             mRef = generateX86MemoryReference(scratchReg, 0, cg());
             }
          else
             {
             TR_ASSERT(linkage->getMinimumFirstInstructionSize() <= 5, "Can't satisfy first instruction size constraint");
-            mRef = generateX86MemoryReference((intptrj_t)getCounterAddress(), cg());
+            mRef = generateX86MemoryReference((intptr_t)getCounterAddress(), cg());
             }
 
          if (!isProfilingCompilation())
@@ -227,7 +228,7 @@ void TR_X86Recompilation::setMethodReturnInfoBits()
    //    instruction of the method (this is done by OMR::Recompilation::methodCannotBeRecompiled)
    //
    uint8_t  *startPC = _compilation->cg()->getCodeStart();
-   TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get(startPC);
+   J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
 
    if (useSampling())
       {

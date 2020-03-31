@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -228,20 +228,20 @@ class ClientSessionData
 
    struct ClassInfo
       {
+      ClassInfo();
       void freeClassInfo(); // this method is in place of a destructor. We can't have destructor
       // because it would be called after inserting ClassInfo into the ROM map, freeing romClass
+
       J9ROMClass *_romClass; // romClass content exists in persistentMemory at the server
       J9ROMClass *_remoteRomClass; // pointer to the corresponding ROM class on the client
       J9Method *_methodsOfClass;
       // Fields meaningful for arrays
       TR_OpaqueClassBlock *_baseComponentClass;
       int32_t _numDimensions;
-      PersistentUnorderedMap<TR_RemoteROMStringKey, std::string> *_remoteROMStringsCache; // cached strings from the client
-      PersistentUnorderedMap<int32_t, std::string> *_fieldOrStaticNameCache;
       TR_OpaqueClassBlock *_parentClass;
       PersistentVector<TR_OpaqueClassBlock *> *_interfaces;
       bool _classHasFinalFields;
-      uintptrj_t _classDepthAndFlags;
+      uintptr_t _classDepthAndFlags;
       bool _classInitialized;
       uint32_t _byteOffsetToLockword;
       TR_OpaqueClassBlock * _leafComponentClass;
@@ -249,18 +249,27 @@ class ClientSessionData
       TR_OpaqueClassBlock * _hostClass;
       TR_OpaqueClassBlock * _componentClass; // caching the componentType of the J9ArrayClass
       TR_OpaqueClassBlock * _arrayClass;
-      uintptrj_t _totalInstanceSize;
-      PersistentUnorderedMap<int32_t, TR_OpaqueClassBlock *> *_classOfStaticCache;
-      PersistentUnorderedMap<int32_t, TR_OpaqueClassBlock *> *_constantClassPoolCache;
-      TR_FieldAttributesCache *_fieldAttributesCache;
-      TR_FieldAttributesCache *_staticAttributesCache;
-      TR_FieldAttributesCache *_fieldAttributesCacheAOT;
-      TR_FieldAttributesCache *_staticAttributesCacheAOT;
+      uintptr_t _totalInstanceSize;
       J9ConstantPool *_constantPool;
-      TR_JitFieldsCache *_jitFieldsCache;
-      uintptrj_t _classFlags;
-      PersistentUnorderedMap<int32_t, TR_OpaqueClassBlock *> *_fieldOrStaticDeclaringClassCache;
-      PersistentUnorderedMap<int32_t, J9MethodNameAndSignature> *_J9MethodNameCache; // key is a cpIndex
+      uintptr_t _classFlags;
+      uintptr_t _classChainOffsetOfIdentifyingLoaderForClazz;
+      PersistentUnorderedMap<TR_RemoteROMStringKey, std::string> _remoteROMStringsCache; // cached strings from the client
+      PersistentUnorderedMap<int32_t, std::string> _fieldOrStaticNameCache;
+      PersistentUnorderedMap<int32_t, TR_OpaqueClassBlock *> _classOfStaticCache;
+      PersistentUnorderedMap<int32_t, TR_OpaqueClassBlock *> _constantClassPoolCache;
+      TR_FieldAttributesCache _fieldAttributesCache;
+      TR_FieldAttributesCache _staticAttributesCache;
+      TR_FieldAttributesCache _fieldAttributesCacheAOT;
+      TR_FieldAttributesCache _staticAttributesCacheAOT;
+      TR_JitFieldsCache _jitFieldsCache;
+      PersistentUnorderedMap<int32_t, TR_OpaqueClassBlock *> _fieldOrStaticDeclaringClassCache;
+      // The following cache is very similar to _fieldOrStaticDeclaringClassCache but it uses
+      // a different API to populate it. In the future we may want to unify these two caches
+      PersistentUnorderedMap<int32_t, TR_OpaqueClassBlock *> _fieldOrStaticDefiningClassCache;
+      PersistentUnorderedMap<int32_t, J9MethodNameAndSignature> _J9MethodNameCache; // key is a cpIndex
+
+      char* getROMString(int32_t& len, void *basePtr, std::initializer_list<size_t> offsets);
+      char* getRemoteROMString(int32_t& len, void *basePtr, std::initializer_list<size_t> offsets);
       }; // struct ClassInfo
 
 
@@ -271,6 +280,7 @@ class ClientSessionData
    struct J9MethodInfo
       {
       J9ROMMethod *_romMethod; // pointer to local/server cache
+      J9ROMMethod *_origROMMethod; // pointer to the client-side method
       // The following is a hashtable that maps a bcIndex to IProfiler data
       // The hashtable is created on demand (NULL means it is missing)
       IPTable_t *_IPData;
@@ -286,7 +296,7 @@ class ClientSessionData
    struct VMInfo
       {
       void *_systemClassLoader;
-      uintptrj_t _processID;
+      uintptr_t _processID;
       bool _canMethodEnterEventBeHooked;
       bool _canMethodExitEventBeHooked;
       bool _usesDiscontiguousArraylets;
@@ -295,12 +305,13 @@ class ClientSessionData
       int32_t _arrayletLeafSize;
       uint64_t _overflowSafeAllocSize;
       int32_t _compressedReferenceShift;
-      UDATA _cacheStartAddress;
+      J9SharedClassCacheDescriptor *_j9SharedClassCacheDescriptorList;
       bool _stringCompressionEnabled;
       bool _hasSharedClassCache;
       bool _elgibleForPersistIprofileInfo;
-      TR_OpaqueClassBlock *_arrayTypeClasses[8];
       bool _reportByteCodeInfoAtCatchBlock;
+      TR_OpaqueClassBlock *_arrayTypeClasses[8];
+      TR_OpaqueClassBlock *_byteArrayClass;
       MM_GCReadBarrierType _readBarrierType;
       MM_GCWriteBarrierType _writeBarrierType;
       bool _compressObjectReferences;
@@ -313,6 +324,12 @@ class ClientSessionData
       void *_floatInvokeExactThunkHelper;
       void *_doubleInvokeExactThunkHelper;
       size_t _interpreterVTableOffset;
+      J9Method *_jlrMethodInvoke;
+      uint32_t _enableGlobalLockReservation;
+#if defined(J9VM_OPT_SIDECAR)
+      TR_OpaqueClassBlock *_srMethodAccessorClass;
+      TR_OpaqueClassBlock *_srConstructorAccessorClass;
+#endif // J9VM_OPT_SIDECAR
       }; // struct VMInfo
 
    TR_PERSISTENT_ALLOC(TR_Memory::ClientSessionData)
@@ -326,7 +343,7 @@ class ClientSessionData
    PersistentUnorderedMap<J9Class*, ClassInfo> & getROMClassMap() { return _romClassMap; }
    PersistentUnorderedMap<J9Method*, J9MethodInfo> & getJ9MethodMap() { return _J9MethodMap; }
    PersistentUnorderedMap<ClassLoaderStringPair, TR_OpaqueClassBlock*> & getClassByNameMap() { return _classByNameMap; }
-   PersistentUnorderedMap<J9Class *, UDATA *> & getClassClainDataCache() { return _classChainDataMap; }
+   PersistentUnorderedMap<J9Class *, UDATA *> & getClassChainDataCache() { return _classChainDataMap; }
    PersistentUnorderedMap<J9ConstantPool *, TR_OpaqueClassBlock*> & getConstantPoolToClassMap() { return _constantPoolToClassMap; }
    void processUnloadedClasses(JITServer::ServerStream *stream, const std::vector<TR_OpaqueClassBlock*> &classes);
    TR::Monitor *getROMMapMonitor() { return _romMapMonitor; }
@@ -383,7 +400,10 @@ class ClientSessionData
    PersistentUnorderedSet<std::pair<std::string, bool>> &getRegisteredInvokeExactJ2IThunkSet() { return _registeredInvokeExactJ2IThunksSet; }
 
    template <typename map, typename key>
-   void purgeCache(std::vector<ClassUnloadedData> *unloadedClasses, map m, key ClassUnloadedData::*k);
+   void purgeCache(std::vector<ClassUnloadedData> *unloadedClasses, map& m, key ClassUnloadedData::*k);
+
+   J9SharedClassCacheDescriptor * reconstructJ9SharedClassCacheDescriptorList(const std::vector<uintptr_t> &listOfCacheStartAddress, const std::vector<uintptr_t> &listOfCacheSizeBytes);
+   void destroyJ9SharedClassCacheDescriptorList();
 
    private:
    const uint64_t _clientUID;
@@ -467,3 +487,4 @@ class ClientSessionHT
    }; // class ClientSessionHT
 
 #endif /* defined(JIT_CLIENT_SESSION_H) */
+

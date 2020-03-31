@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,9 +24,11 @@
 
 #include <limits.h>
 #include <stdint.h>
+#include "codegen/PrivateLinkage.hpp"
 #include "env/jittypes.h"
 #include "env/VMJ9.h"
 #include "z/codegen/SystemLinkage.hpp"
+#include "control/CompilationRuntime.hpp"
 
 // Recompilation Support Runtime methods
 //
@@ -72,7 +74,7 @@ s390compareAndExchange4(int32_t * addr, uint32_t oldInsn, uint32_t newInsn)
    }
 
 static uint32_t
-getJitEntryOffset(TR_LinkageInfo * linkageInfo)
+getJitEntryOffset(J9::PrivateLinkage::LinkageInfo * linkageInfo)
    {
    return linkageInfo->getReservedWord() & 0x0ffff;
    }
@@ -82,8 +84,12 @@ getJitEntryOffset(TR_LinkageInfo * linkageInfo)
 TR_PersistentJittedBodyInfo *
 J9::Recompilation::getJittedBodyInfoFromPC(void * startPC)
    {
+#if defined(J9VM_OPT_JITSERVER)
+   TR_ASSERT_FATAL(!TR::CompilationInfo::getStream(), "This routine must not be used on the Server for a remote compile!");
+#endif
+
    TR_ASSERT(startPC, "startPC is null");
-   TR_LinkageInfo * linkageInfo = TR_LinkageInfo::get(startPC);
+   J9::PrivateLinkage::LinkageInfo * linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
    if (!linkageInfo->isRecompMethodBody())
       {
       return NULL;
@@ -99,7 +105,7 @@ J9::Recompilation::getJittedBodyInfoFromPC(void * startPC)
          linkageInfo);
       }
 
-   info = (*(TR_PersistentJittedBodyInfo * *) ((int8_t *) startPC + -(sizeof(uint32_t) + sizeof(intptrj_t))));
+   info = (*(TR_PersistentJittedBodyInfo * *) ((int8_t *) startPC + -(sizeof(uint32_t) + sizeof(intptr_t))));
 
    if (false && DEBUGIT)
       {
@@ -113,7 +119,7 @@ J9::Recompilation::getJittedBodyInfoFromPC(void * startPC)
 bool
 J9::Recompilation::isAlreadyPreparedForRecompile(void * startPC)
    {
-   TR_LinkageInfo * linkageInfo = TR_LinkageInfo::get(startPC);
+   J9::PrivateLinkage::LinkageInfo * linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
    int32_t jitEntryOffset = getJitEntryOffset(linkageInfo);
    int32_t * jitEntry = (int32_t *) ((uint8_t *) startPC + jitEntryOffset);
    uint32_t startInsn = *jitEntry;
@@ -146,7 +152,7 @@ J9::Recompilation::fixUpMethodCode(void * startPC)
 #else
    const bool is64Bit = false;
 #endif
-   TR_LinkageInfo * linkageInfo = TR_LinkageInfo::get(startPC);
+   J9::PrivateLinkage::LinkageInfo * linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
    if (DEBUGIT)
       {
       printf("fixup: 0x%p %s %s\n", linkageInfo, linkageInfo->isSamplingMethodBody() ? "samplingSet" : "",
@@ -205,8 +211,8 @@ J9::Recompilation::fixUpMethodCode(void * startPC)
 void
 J9::Recompilation::methodHasBeenRecompiled(void * oldStartPC, void * newStartPC, TR_FrontEnd * fe)
    {
-   TR_LinkageInfo * linkageInfo = TR_LinkageInfo::get(oldStartPC);
-   intptrj_t distance, * patchAddr, newInstr, * codePtrAddr;
+   J9::PrivateLinkage::LinkageInfo * linkageInfo = J9::PrivateLinkage::LinkageInfo::get(oldStartPC);
+   intptr_t distance, * patchAddr, newInstr, * codePtrAddr;
    int32_t bytesToSaveAtStart;
    int32_t jitEntryOffset = getJitEntryOffset(linkageInfo);
 
@@ -264,8 +270,8 @@ J9::Recompilation::methodHasBeenRecompiled(void * oldStartPC, void * newStartPC,
       }
    else
       {
-      intptrj_t oldAsmAddr = 0;
-      intptrj_t newAsmAddr = 0;
+      intptr_t oldAsmAddr = 0;
+      intptr_t newAsmAddr = 0;
       // Turn the call from samplingMethodRecompile to a call to samplingPatchCallSite
       // basically, the address following the BASR gets patched
       // BASR R4,0
@@ -275,15 +281,15 @@ J9::Recompilation::methodHasBeenRecompiled(void * oldStartPC, void * newStartPC,
       int32_t startPCToAsmOffset = OFFSET_INTEP_SAMPLING_RECOMPILE_METHOD_ADDRESS;
       int32_t requiredPad; // pad can vary between methods, so must calculate each time
 
-      requiredPad = (startPCToAsmOffset + jitEntryOffset) % sizeof(intptrj_t);
+      requiredPad = (startPCToAsmOffset + jitEntryOffset) % sizeof(intptr_t);
       if (requiredPad)
          {
-         requiredPad = sizeof(intptrj_t) - requiredPad;
+         requiredPad = sizeof(intptr_t) - requiredPad;
          }
 
-      patchAddr = (intptrj_t *) ((uint8_t *) oldStartPC + -(startPCToAsmOffset + requiredPad));
+      patchAddr = (intptr_t *) ((uint8_t *) oldStartPC + -(startPCToAsmOffset + requiredPad));
       oldAsmAddr = *patchAddr;
-      newAsmAddr = (intptrj_t) runtimeHelpers.getFunctionEntryPointOrConst(TR_S390samplingPatchCallSite);
+      newAsmAddr = (intptr_t) runtimeHelpers.getFunctionEntryPointOrConst(TR_S390samplingPatchCallSite);
 
       if (debug("traceRecompilation"))
          {
@@ -296,9 +302,9 @@ J9::Recompilation::methodHasBeenRecompiled(void * oldStartPC, void * newStartPC,
          }
 
 #if defined(TR_HOST_64BIT)
-      TR_ASSERT(0 == ((uint64_t) patchAddr % sizeof(intptrj_t)), "Address %p is not word aligned\n", patchAddr);
+      TR_ASSERT(0 == ((uint64_t) patchAddr % sizeof(intptr_t)), "Address %p is not word aligned\n", patchAddr);
 #else
-      TR_ASSERT(0 == ((uint32_t) patchAddr % sizeof(intptrj_t)), "Address %p is not word aligned\n", patchAddr);
+      TR_ASSERT(0 == ((uint32_t) patchAddr % sizeof(intptr_t)), "Address %p is not word aligned\n", patchAddr);
 #endif
       *patchAddr = newAsmAddr;
 
@@ -331,7 +337,7 @@ J9::Recompilation::methodHasBeenRecompiled(void * oldStartPC, void * newStartPC,
 void
 J9::Recompilation::methodCannotBeRecompiled(void * oldStartPC, TR_FrontEnd * fe)
    {
-   TR_LinkageInfo * linkageInfo = TR_LinkageInfo::get(oldStartPC);
+   J9::PrivateLinkage::LinkageInfo * linkageInfo = J9::PrivateLinkage::LinkageInfo::get(oldStartPC);
    TR_J9VMBase *fej9 = (TR_J9VMBase *)fe;
    int32_t * patchAddr, distance;
    TR_ASSERT( linkageInfo->isSamplingMethodBody() && !linkageInfo->isCountingMethodBody() ||
@@ -465,7 +471,7 @@ J9::Recompilation::invalidateMethodBody(void * startPC, TR_FrontEnd * fe)
    // Pre-existence assumptions for this method have been violated. Make the
    // method no-longer runnable and schedule it for sync recompilation
    //
-   TR_LinkageInfo * linkageInfo = TR_LinkageInfo::get(startPC);
+   J9::PrivateLinkage::LinkageInfo * linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
    //linkageInfo->setInvalidated();
    TR_PersistentJittedBodyInfo* bodyInfo = getJittedBodyInfoFromPC(startPC);
    bodyInfo->setIsInvalidated(); // bodyInfo must exist

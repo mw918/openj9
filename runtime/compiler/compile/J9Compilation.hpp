@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -57,6 +57,9 @@ class TR_J9VM;
 class TR_AccessedProfileInfo;
 class TR_RelocationRuntime;
 namespace TR { class IlGenRequest; }
+#ifdef J9VM_OPT_JITSERVER
+struct SerializedRuntimeAssumption;
+#endif
 
 #define COMPILATION_AOT_HAS_INVOKEHANDLE -9
 #define COMPILATION_RESERVE_RESOLVED_TRAMPOLINE_FATAL_ERROR -10
@@ -144,7 +147,7 @@ class OMR_EXTENSIBLE Compilation : public OMR::CompilationConnector
 
    TR::Node *findNullChkInfo(TR::Node *node);
 
-   bool isAlignStackMaps() { return TR::Compiler->target.cpu.isARM(); }
+   bool isAlignStackMaps() { return J9::Compilation::target().cpu.isARM(); }
 
    void changeOptLevel(TR_Hotness);
 
@@ -313,6 +316,14 @@ class OMR_EXTENSIBLE Compilation : public OMR::CompilationConnector
 
    bool incompleteOptimizerSupportForReadWriteBarriers();
 
+#if defined(J9VM_OPT_JITSERVER)
+   static bool isOutOfProcessCompilation() { return _outOfProcessCompilation; } // server side
+   static void setOutOfProcessCompilation() { _outOfProcessCompilation = true; }
+   bool isRemoteCompilation() const { return _remoteCompilation; } // client side
+   void setRemoteCompilation() { _remoteCompilation = true; }
+   TR::list<SerializedRuntimeAssumption*>& getSerializedRuntimeAssumptions() { return _serializedRuntimeAssumptions; }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
    TR::SymbolValidationManager *getSymbolValidationManager() { return _symbolValidationManager; }
 
    // Flag to record if any optimization has prohibited OSR over a range of trees
@@ -401,6 +412,18 @@ private:
    bool _skippedJProfilingBlock;
 
    TR_RelocationRuntime *_reloRuntime;
+
+#if defined(J9VM_OPT_JITSERVER)
+   // This list contains assumptions created during the compilation at the JITServer
+   // It needs to be sent to the client at the end of compilation
+   TR::list<SerializedRuntimeAssumption*> _serializedRuntimeAssumptions;
+   // The following flag is set when this compilation is performed in a
+   // VM that does not have the runtime part (server side in JITServer)
+   static bool _outOfProcessCompilation;
+   // The following flag is set when a request to complete this compilation
+   // has been sent to a remote VM (client side in JITServer)
+   bool _remoteCompilation;
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
    TR::SymbolValidationManager *_symbolValidationManager;
    bool _osrProhibitedOverRangeOfTrees;

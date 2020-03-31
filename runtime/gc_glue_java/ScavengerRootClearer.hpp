@@ -1,6 +1,5 @@
-
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -186,10 +185,11 @@ public:
 	virtual void
 	doMonitorReference(J9ObjectMonitor *objectMonitor, GC_HashTableIterator *monitorReferenceIterator)
 	{
+		bool const compressed = _extensions->compressObjectReferences();
 		J9ThreadAbstractMonitor * monitor = (J9ThreadAbstractMonitor*)objectMonitor->monitor;
 		omrobjectptr_t objectPtr = (omrobjectptr_t )monitor->userData;
 		if(_scavenger->isObjectInEvacuateMemory(objectPtr)) {
-			MM_ForwardedHeader forwardedHeader(objectPtr);
+			MM_ForwardedHeader forwardedHeader(objectPtr, compressed);
 			omrobjectptr_t forwardPtr = forwardedHeader.getForwardedObject();
 			if(NULL != forwardPtr) {
 				monitor->userData = (uintptr_t)forwardPtr;
@@ -222,7 +222,7 @@ public:
 		 * However Concurrent Scavenger runs might be interlaced with STW Scavenger time to time
 		 * (for example for reducing amount of floating garbage)
 		 */
-		if (!_scavenger->isConcurrentInProgress())
+		if (!_scavenger->isConcurrentCycleInProgress())
 #endif /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
 		{
 			MM_RootScanner::scanJNIWeakGlobalReferences(env);
@@ -232,9 +232,10 @@ public:
 	virtual void
 	doJNIWeakGlobalReference(omrobjectptr_t *slotPtr)
 	{
+		bool const compressed = _extensions->compressObjectReferences();
 		omrobjectptr_t objectPtr = *slotPtr;
 		if(objectPtr && _scavenger->isObjectInEvacuateMemory(objectPtr)) {
-			MM_ForwardedHeader forwardedHeader(objectPtr);
+			MM_ForwardedHeader forwardedHeader(objectPtr, compressed);
 			*slotPtr = forwardedHeader.getForwardedObject();
 		}
 	}
@@ -243,9 +244,10 @@ public:
 	virtual void
 	doJVMTIObjectTagSlot(omrobjectptr_t *slotPtr, GC_JVMTIObjectTagTableIterator *objectTagTableIterator)
 	{
+		bool const compressed = _extensions->compressObjectReferences();
 		omrobjectptr_t objectPtr = *slotPtr;
 		if(objectPtr && _scavenger->isObjectInEvacuateMemory(objectPtr)) {
-			MM_ForwardedHeader forwardedHeader(objectPtr);
+			MM_ForwardedHeader forwardedHeader(objectPtr, compressed);
 			*slotPtr = forwardedHeader.getForwardedObject();
 		}
 	}

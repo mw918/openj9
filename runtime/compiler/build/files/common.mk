@@ -1,4 +1,4 @@
-# Copyright (c) 2000, 2019 IBM Corp. and others
+# Copyright (c) 2000, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,6 +26,7 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     compiler/optimizer/DataAccessAccelerator.cpp \
     compiler/optimizer/DynamicLiteralPool.cpp \
     compiler/optimizer/EscapeAnalysis.cpp \
+    compiler/optimizer/EscapeAnalysisTools.cpp \
     compiler/optimizer/PreEscapeAnalysis.cpp \
     compiler/optimizer/PostEscapeAnalysis.cpp \
     compiler/optimizer/FearPointAnalysis.cpp \
@@ -70,7 +71,7 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/codegen/CodeGenPrep.cpp \
     omr/compiler/codegen/CodeGenRA.cpp \
     omr/compiler/codegen/ELFGenerator.cpp \
-    omr/compiler/codegen/FrontEnd.cpp \
+    omr/compiler/env/FrontEnd.cpp \
     omr/compiler/codegen/LiveRegister.cpp \
     omr/compiler/codegen/NodeEvaluation.cpp \
     omr/compiler/codegen/OMRAheadOfTimeCompile.cpp \
@@ -133,14 +134,14 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/il/OMRNode.cpp \
     omr/compiler/il/OMRSymbolReference.cpp \
     omr/compiler/il/OMRTreeTop.cpp \
-    omr/compiler/il/symbol/OMRAutomaticSymbol.cpp \
-    omr/compiler/il/symbol/OMRLabelSymbol.cpp \
-    omr/compiler/il/symbol/OMRMethodSymbol.cpp \
-    omr/compiler/il/symbol/OMRParameterSymbol.cpp \
-    omr/compiler/il/symbol/OMRRegisterMappedSymbol.cpp \
-    omr/compiler/il/symbol/OMRResolvedMethodSymbol.cpp \
-    omr/compiler/il/symbol/OMRStaticSymbol.cpp \
-    omr/compiler/il/symbol/OMRSymbol.cpp \
+    omr/compiler/il/OMRAutomaticSymbol.cpp \
+    omr/compiler/il/OMRLabelSymbol.cpp \
+    omr/compiler/il/OMRMethodSymbol.cpp \
+    omr/compiler/il/OMRParameterSymbol.cpp \
+    omr/compiler/il/OMRRegisterMappedSymbol.cpp \
+    omr/compiler/il/OMRResolvedMethodSymbol.cpp \
+    omr/compiler/il/OMRStaticSymbol.cpp \
+    omr/compiler/il/OMRSymbol.cpp \
     omr/compiler/ilgen/IlGenRequest.cpp \
     omr/compiler/infra/Assert.cpp \
     omr/compiler/infra/BitVector.cpp \
@@ -315,10 +316,10 @@ JIT_PRODUCT_SOURCE_FILES+=\
     compiler/il/J9IL.cpp \
     compiler/il/J9Node.cpp \
     compiler/il/J9SymbolReference.cpp \
-    compiler/il/symbol/J9MethodSymbol.cpp \
-    compiler/il/symbol/J9ResolvedMethodSymbol.cpp \
-    compiler/il/symbol/J9StaticSymbol.cpp \
-    compiler/il/symbol/J9Symbol.cpp \
+    compiler/il/J9MethodSymbol.cpp \
+    compiler/il/J9ResolvedMethodSymbol.cpp \
+    compiler/il/J9StaticSymbol.cpp \
+    compiler/il/J9Symbol.cpp \
     compiler/ilgen/ClassLookahead.cpp \
     compiler/ilgen/IlGenerator.cpp \
     compiler/ilgen/J9ByteCodeIterator.cpp \
@@ -334,6 +335,7 @@ JIT_PRODUCT_SOURCE_FILES+=\
     compiler/optimizer/InterProceduralAnalyzer.cpp \
     compiler/optimizer/J9EstimateCodeSize.cpp \
     compiler/optimizer/J9Inliner.cpp \
+    compiler/optimizer/InterpreterEmulator.cpp \
     compiler/ras/DebugExt.cpp \
     compiler/ras/DebugExtSegmentProvider.cpp \
     compiler/ras/HashTable.cpp \
@@ -353,7 +355,6 @@ JIT_PRODUCT_SOURCE_FILES+=\
     compiler/runtime/J9JitPersistentMemory.cpp \
     compiler/runtime/J9Profiler.cpp \
     compiler/runtime/JitRuntime.cpp \
-    compiler/runtime/LMGuardedStorage.cpp \
     compiler/runtime/MetaData.cpp \
     compiler/runtime/MetaDataDebug.cpp \
     compiler/runtime/MethodMetaData.c \
@@ -373,7 +374,6 @@ JIT_PRODUCT_SOURCE_FILES+=\
     omr/compiler/env/OMRCompilerEnv.cpp \
     omr/compiler/env/OMRIO.cpp \
     omr/compiler/env/OMRKnownObjectTable.cpp \
-    omr/compiler/runtime/Alignment.cpp \
     omr/compiler/runtime/CodeCacheTypes.cpp \
     omr/compiler/runtime/OMRCodeCache.cpp \
     omr/compiler/runtime/OMRCodeCacheConfig.cpp \
@@ -381,12 +381,20 @@ JIT_PRODUCT_SOURCE_FILES+=\
     omr/compiler/runtime/OMRCodeCacheMemorySegment.cpp \
     omr/compiler/runtime/OMRRuntimeAssumptions.cpp
 
-ifneq ($(JITSERVER_SUPPORT),)
+ifneq ($(J9VM_OPT_JITSERVER),)
 JIT_PRODUCT_SOURCE_FILES+=\
+    compiler/control/JITClientCompilationThread.cpp \
     compiler/control/JITServerCompilationThread.cpp \
+    compiler/control/JITServerHelpers.cpp \
+    compiler/env/j9methodServer.cpp \
+    compiler/env/JITServerCHTable.cpp \
+    compiler/env/JITServerPersistentCHTable.cpp \
+    compiler/env/VMJ9Server.cpp \
     compiler/net/ClientStream.cpp \
     compiler/net/CommunicationStream.cpp \
-    compiler/net/ProtobufTypeConvert.cpp \
+    compiler/net/LoadSSLLibs.cpp \
+    compiler/net/MessageBuffer.cpp \
+    compiler/net/Message.cpp \
     compiler/net/ServerStream.cpp \
     compiler/runtime/CompileService.cpp \
     compiler/runtime/JITClientSession.cpp \
@@ -400,6 +408,3 @@ include $(JIT_MAKE_DIR)/files/host/$(HOST_ARCH).mk
 include $(JIT_MAKE_DIR)/files/target/$(TARGET_ARCH).mk
 -include $(JIT_MAKE_DIR)/files/host/$(HOST_ARCH)-extra.mk
 -include $(JIT_MAKE_DIR)/files/target/$(TARGET_ARCH)-extra.mk
-ifneq ($(JITSERVER_SUPPORT),)
-include $(JIT_MAKE_DIR)/files/net.mk
-endif

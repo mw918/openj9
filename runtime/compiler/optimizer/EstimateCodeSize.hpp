@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -85,6 +85,11 @@ class TR_EstimateCodeSize
    bool isLeaf()                       { return _isLeaf; }
 
    int32_t getNumOfEstimatedCalls()    { return _numOfEstimatedCalls; }
+   /*
+    * \brief
+    *    tell whether this callsite has inlineable target
+    */
+   bool isInlineable(TR_CallStack *, TR_CallSite *callsite);
 
    TR::Compilation *comp()              { return _inliner->comp(); }
    TR_InlinerTracer *tracer()          { return _tracer; }
@@ -93,19 +98,14 @@ class TR_EstimateCodeSize
 
    virtual bool estimateCodeSize(TR_CallTarget *, TR_CallStack * , bool recurseDown = true) = 0;
 
-   bool isInlineable(TR_CallStack *, TR_CallSite *callsite);
 
-   void markIsCold(flags8_t * flags, int32_t i);
-
-   bool returnCleanup(int32_t);      // common tasks requiring completion before returning from estimation
-
-   enum
-      {
-      bbStart        = 0x01,
-      isCold         = 0x02,
-      isBranch         = 0x04,
-      isUnsanitizeable = 0x08,
-      };
+   /*
+    *  \brief common tasks requiring completion before returning from estimation
+    *
+    *  \param errorNumber
+    *       an unique number used to identify where estimate code size bailed out
+    */
+   bool returnCleanup(int32_t errorNumber );
 
    /* Fields */
 

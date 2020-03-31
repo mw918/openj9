@@ -139,6 +139,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="gc_debugAsserts" value="true"/>
 		<flag id="gc_idleHeapManager" value="true"/>
 		<flag id="gc_inlinedAllocFields" value="true"/>
+		<flag id="gc_enableDoubleMap" value="true"/>
 		<flag id="gc_minimumObjectSize" value="true"/>
 		<flag id="gc_subpoolsAlias" value="true"/>
 		<flag id="graph_cmdLineTester" value="true"/>
@@ -225,8 +226,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="opt_debugJsr45Support" value="true"/>
 		<flag id="opt_deprecatedMethods" value="true"/>
 		<flag id="opt_dynamicLoadSupport" value="true"/>
-		<flag id="opt_icbuilderSupport" value="true"/>
-		<flag id="opt_infoServer" value="true"/>
 		<flag id="opt_invariantInterning" value="true"/>
 		<flag id="opt_jvmti" value="true"/>
 		<flag id="opt_jxeLoadSupport" value="true"/>

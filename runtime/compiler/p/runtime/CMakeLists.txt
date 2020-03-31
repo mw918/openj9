@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2018 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -22,31 +22,25 @@
 
 if(OMR_HOST_OS STREQUAL "aix")
 	set(PPC_HW_PROFILER PPCHWProfilerAIX.cpp)
-	set(PPC_LM_GUARDED_STORAGE PPCLMGuardedStorageAIX.cpp)
 #
 #	ifeq ($(I5_VERSION),I5_V6R1)
 #		PPC_HW_PROFILER=
-#		PPC_LM_GUARDED_STORAGE=
 #	endif
 #	ifeq ($(I5_VERSION),I5_V7R2)
 #		PPC_HW_PROFILER=
-#		PPC_LM_GUARDED_STORAGE=
 #	endif
 endif()
 
 if(OMR_HOST_OS STREQUAL "linux")
 	set(PPC_HW_PROFILER PPCHWProfilerLinux.cpp)
-	set(PPC_LM_GUARDED_STORAGE PPCLMGuardedStorageLinux.cpp)
 endif()
 
 
 j9jit_files(
 	p/runtime/${PPC_HW_PROFILER}
-	p/runtime/${PPC_LM_GUARDED_STORAGE}
 	${omr_SOURCE_DIR}/compiler/p/runtime/VirtualGuardRuntime.spp
 	${omr_SOURCE_DIR}/compiler/p/runtime/OMRCodeCacheConfig.cpp
 	p/runtime/J9PPCArrayCopy.spp
-	p/runtime/J9PPCArrayCmp.spp
 	p/runtime/J9PPCArrayTranslate.spp
 	p/runtime/J9PPCEncodeUTF16.spp
 	p/runtime/J9PPCCompressString.spp
@@ -59,7 +53,6 @@ j9jit_files(
 	p/runtime/Recomp.cpp
 	p/runtime/Recompilation.spp
 	p/runtime/PPCHWProfiler.cpp
-	p/runtime/PPCLMGuardedStorage.cpp
 	p/runtime/ebb.spp
 	p/runtime/Emulation.c
 )

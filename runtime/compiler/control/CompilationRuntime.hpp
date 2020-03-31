@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -40,10 +40,10 @@
 #include "infra/Statistics.hpp"
 #include "control/rossa.h"
 #include "runtime/RelocationRuntime.hpp"
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
 #include "env/PersistentCollections.hpp"
 #include "net/ServerStream.hpp"
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 extern "C" {
 struct J9Method;
@@ -60,7 +60,6 @@ namespace TR { class CompilationInfoPerThreadBase; }
 class TR_FilterBST;
 class TR_FrontEnd;
 class TR_HWProfiler;
-class TR_LMGuardedStorage;
 class TR_J9VMBase;
 class TR_LowPriorityCompQueue;
 class TR_OptimizationPlan;
@@ -75,11 +74,9 @@ struct TR_JitPrivateConfig;
 struct TR_MethodToBeCompiled;
 template <typename T> class TR_PersistentArray;
 typedef J9JITExceptionTable TR_MethodMetaData;
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
 class ClientSessionHT;
-
-namespace JITServer { class ServerStream; }
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 struct TR_SignatureCountPair
 {
@@ -100,17 +97,6 @@ struct TR_SignatureCountPair
    int32_t count;
 };
 
-// Must be less than 8 because in some parts of the code (CHTable) we keep flags on a byte variable
-// Also, if this increases past 10, we need to expand the _activeThreadName and _suspendedThreadName
-// fields in TR::CompilationInfoPerThread as currently they have 1 char available for the thread number.
-//
-#define MAX_USABLE_COMP_THREADS 7
-#define MAX_DIAGNOSTIC_COMP_THREADS 1
-#define MAX_TOTAL_COMP_THREADS (MAX_USABLE_COMP_THREADS + MAX_DIAGNOSTIC_COMP_THREADS)
-#if (MAX_TOTAL_COMP_THREADS > 8)
-#error "MAX_TOTAL_COMP_THREADS should be less than 8"
-#endif
-
 #ifndef J9_INVOCATION_COUNT_MASK
 #define J9_INVOCATION_COUNT_MASK                   0x00000000FFFFFFFF
 #endif
@@ -122,6 +108,7 @@ class TR_LowPriorityCompQueue
       TR_PERSISTENT_ALLOC(TR_Memory::PersistentInfo); // TODO: define its own category
       static const uint32_t HT_SIZE = (1 << 13); // power of two for cheap modulo
       TR_LowPriorityCompQueue();
+      ~TR_LowPriorityCompQueue();
 
       void setCompInfo(TR::CompilationInfo *compInfo) { _compInfo = compInfo; }
       bool hasLowPriorityRequest() const { return (_firstLPQentry != NULL); }
@@ -142,7 +129,7 @@ class TR_LowPriorityCompQueue
 
       // The following refer to the mechanism that schedules low priority
       // compilation requests based on the Iprofiler
-      static uint32_t hash(J9Method *j9method) { return ((uintptrj_t)j9method >> 3) & (HT_SIZE - 1); }
+      static uint32_t hash(J9Method *j9method) { return ((uintptr_t)j9method >> 3) & (HT_SIZE - 1); }
       bool isTrackingEnabled() const { return _trackingEnabled; }
       void startTrackingIProfiledCalls(int32_t threshold);
       bool isTrackableMethod(J9Method *j9method) const;
@@ -158,12 +145,12 @@ class TR_LowPriorityCompQueue
 
       struct Entry
          {
-         uintptrj_t _j9method; // this is the key; Initialized by IProfiler thread; reset by compilation thread
+         uintptr_t _j9method; // this is the key; Initialized by IProfiler thread; reset by compilation thread
          uint32_t   _count; // updated by IProfiler thread
          bool       _queuedForCompilation; // used to avoid duplicates in the queue; set by IProfiler thread
          bool isInvalid() const { return !_j9method; }
          void setInvalid() { _j9method = 0; }
-         void initialize(J9Method *m, uint32_t c) { _j9method = (uintptrj_t)m; _count = c; _queuedForCompilation = false; }
+         void initialize(J9Method *m, uint32_t c) { _j9method = (uintptr_t)m; _count = c; _queuedForCompilation = false; }
          };
    private:
       TR::CompilationInfo*    _compInfo;
@@ -459,145 +446,147 @@ public:
    static void freeCompilationInfo(J9JITConfig *jitConfig);
    static TR::CompilationInfo *get(J9JITConfig * = 0) { return _compilationRuntime; }
    static bool shouldRetryCompilation(TR_MethodToBeCompiled *entry, TR::Compilation *comp);
+   static bool shouldAbortCompilation(TR_MethodToBeCompiled *entry, TR::PersistentInfo *persistentInfo);
+   static bool canRelocateMethod(TR::Compilation * comp);
    static bool useSeparateCompilationThread();
    static int computeCompilationThreadPriority(J9JavaVM *vm);
    static void *compilationEnd(J9VMThread *context, TR::IlGeneratorMethodDetails & details, J9JITConfig *jitConfig, void * startPC,
                                void *oldStartPC, TR_FrontEnd *vm=0, TR_MethodToBeCompiled *entry=NULL, TR::Compilation *comp=NULL);
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
    static JITServer::ServerStream *getStream();
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
    static bool isInterpreted(J9Method *method) { return !isCompiled(method); }
    static bool isCompiled(J9Method *method)
       {
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
       if (auto stream = getStream())
          {
          stream->write(JITServer::MessageType::CompInfo_isCompiled, method);
          return std::get<0>(stream->read<bool>());
          }
-#endif /* defined(JITSERVER_SUPPORT) */
-      return (((uintptrj_t)method->extra) & J9_STARTPC_NOT_TRANSLATED) == 0;
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      return (((uintptr_t)method->extra) & J9_STARTPC_NOT_TRANSLATED) == 0;
       }
    static bool isJNINative(J9Method *method)
       {
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
       if (auto stream = getStream())
          {
          stream->write(JITServer::MessageType::CompInfo_isJNINative, method);
          return std::get<0>(stream->read<bool>());
          }
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
       // Note: This query is only concerned with the method to be compiled
       // and so we don't have to care if the VM has a FastJNI version
-      return (((uintptrj_t)method->constantPool) & J9_STARTPC_JNI_NATIVE) != 0;
+      return (((uintptr_t)method->constantPool) & J9_STARTPC_JNI_NATIVE) != 0;
       }
 
    static int32_t getInvocationCount(J9Method *method)
       {
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
       if (auto stream = getStream())
          {
          stream->write(JITServer::MessageType::CompInfo_getInvocationCount, method);
          return std::get<0>(stream->read<int32_t>());
          }
-#endif /* defined(JITSERVER_SUPPORT) */
-      if (((intptrj_t)method->extra & J9_STARTPC_NOT_TRANSLATED) == 0)
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      if (((intptr_t)method->extra & J9_STARTPC_NOT_TRANSLATED) == 0)
          return -1;
       int32_t count = getJ9MethodVMExtra(method);
       if (count < 0)
          return count;
       return count >> 1;
       }
-   static intptrj_t getJ9MethodExtra(J9Method *method)
+   static intptr_t getJ9MethodExtra(J9Method *method)
       {
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
       if (auto stream = getStream())
          {
          stream->write(JITServer::MessageType::CompInfo_getJ9MethodExtra, method);
-         return (intptrj_t) std::get<0>(stream->read<uint64_t>());
+         return (intptr_t) std::get<0>(stream->read<uint64_t>());
          }
-#endif /* defined(JITSERVER_SUPPORT) */
-      return (intptrj_t)method->extra;
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      return (intptr_t)method->extra;
       }
    static int32_t getJ9MethodVMExtra(J9Method *method)
       {
-#if defined(JITSERVER_SUPPORT)
-      TR_ASSERT(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
-#endif /* defined(JITSERVER_SUPPORT) */
-      return (int32_t)((intptrj_t)method->extra);
+#if defined(J9VM_OPT_JITSERVER)
+      TR_ASSERT_FATAL(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      return (int32_t)((intptr_t)method->extra);
       }
    static uint32_t getJ9MethodJITExtra(J9Method *method)
       {
-#if defined(JITSERVER_SUPPORT)
-      TR_ASSERT(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
-#endif /* defined(JITSERVER_SUPPORT) */
-      TR_ASSERT((intptrj_t)method->extra & J9_STARTPC_NOT_TRANSLATED, "MethodExtra Already Jitted!");
-      return (uint32_t)((uintptrj_t)method->extra >> 32);
+#if defined(J9VM_OPT_JITSERVER)
+      TR_ASSERT_FATAL(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      TR_ASSERT((intptr_t)method->extra & J9_STARTPC_NOT_TRANSLATED, "MethodExtra Already Jitted!");
+      return (uint32_t)((uintptr_t)method->extra >> 32);
       }
    static void * getJ9MethodStartPC(J9Method *method)
       {
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
       if (auto stream = getStream())
          {
          stream->write(JITServer::MessageType::CompInfo_getJ9MethodStartPC, method);
          return std::get<0>(stream->read<void*>());
          }
       else
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
          {
-         TR_ASSERT(!((intptrj_t)method->extra & J9_STARTPC_NOT_TRANSLATED), "Method NOT Jitted!");
+         TR_ASSERT(!((intptr_t)method->extra & J9_STARTPC_NOT_TRANSLATED), "Method NOT Jitted!");
          return (void *)method->extra;
          }
       }
-   static void setJ9MethodExtra(J9Method *method, intptrj_t newValue)
+   static void setJ9MethodExtra(J9Method *method, intptr_t newValue)
       {
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
       if (auto stream = getStream())
          {
          stream->write(JITServer::MessageType::CompInfo_setJ9MethodExtra, method, (uint64_t) newValue);
          std::get<0>(stream->read<JITServer::Void>());
          }
       else
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
          {
          method->extra = (void *)newValue;
          }
       }
-   static bool setJ9MethodExtraAtomic(J9Method *method, intptrj_t oldValue, intptrj_t newValue)
+   static bool setJ9MethodExtraAtomic(J9Method *method, intptr_t oldValue, intptr_t newValue)
       {
-#if defined(JITSERVER_SUPPORT)
-      TR_ASSERT(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
-#endif /* defined(JITSERVER_SUPPORT) */
+#if defined(J9VM_OPT_JITSERVER)
+      TR_ASSERT_FATAL(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
+#endif /* defined(J9VM_OPT_JITSERVER) */
       return oldValue == VM_AtomicSupport::lockCompareExchange((UDATA*)&method->extra, oldValue, newValue);
       }
-   static bool setJ9MethodExtraAtomic(J9Method *method, intptrj_t newValue)
+   static bool setJ9MethodExtraAtomic(J9Method *method, intptr_t newValue)
       {
-#if defined(JITSERVER_SUPPORT)
-      TR_ASSERT(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
-#endif /* defined(JITSERVER_SUPPORT) */
-      intptrj_t oldValue = (intptrj_t)method->extra;
+#if defined(J9VM_OPT_JITSERVER)
+      TR_ASSERT_FATAL(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      intptr_t oldValue = (intptr_t)method->extra;
       return setJ9MethodExtraAtomic(method, oldValue, newValue);
       }
    static bool setJ9MethodVMExtra(J9Method *method, int32_t value)
       {
-#if defined(JITSERVER_SUPPORT)
-      TR_ASSERT(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
-#endif /* defined(JITSERVER_SUPPORT) */
-      intptrj_t oldValue = (intptrj_t)method->extra;
-      //intptrj_t newValue = oldValue & (intptrj_t)~J9_INVOCATION_COUNT_MASK;
-      //newValue |= (intptrj_t)value;
-      intptrj_t newValue = (intptrj_t)value;
+#if defined(J9VM_OPT_JITSERVER)
+      TR_ASSERT_FATAL(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      intptr_t oldValue = (intptr_t)method->extra;
+      //intptr_t newValue = oldValue & (intptr_t)~J9_INVOCATION_COUNT_MASK;
+      //newValue |= (intptr_t)value;
+      intptr_t newValue = (intptr_t)value;
       return setJ9MethodExtraAtomic(method, oldValue, newValue);
       }
    static bool setInvocationCount(J9Method *method, int32_t newCount)
       {
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
       if (auto stream = getStream())
          {
          stream->write(JITServer::MessageType::CompInfo_setInvocationCount, method, newCount);
          return std::get<0>(stream->read<bool>());
          }
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
       newCount = (newCount << 1) | 1;
       if (newCount < 1)
          return false;
@@ -605,19 +594,19 @@ public:
       }
    static bool setInvocationCount(J9Method *method, int32_t oldCount, int32_t newCount)
       {
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
       if (auto stream = getStream())
          {
          stream->write(JITServer::MessageType::CompInfo_setInvocationCountAtomic, method, oldCount, newCount);
          return std::get<0>(stream->read<bool>());
          }
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
       newCount = (newCount << 1) | 1;
       oldCount = (oldCount << 1) | 1;
       if (newCount < 0)
          return false;
-      intptrj_t oldMethodExtra = (intptrj_t) method->extra & (intptrj_t)(~J9_INVOCATION_COUNT_MASK);
-      intptrj_t newMethodExtra = oldMethodExtra | newCount;
+      intptr_t oldMethodExtra = (intptr_t) method->extra & (intptr_t)(~J9_INVOCATION_COUNT_MASK);
+      intptr_t newMethodExtra = oldMethodExtra | newCount;
       oldMethodExtra = oldMethodExtra | oldCount;
       bool success = setJ9MethodExtraAtomic(method, oldMethodExtra, newMethodExtra);
       if (success)
@@ -630,9 +619,9 @@ public:
       }
    static void setInitialInvocationCountUnsynchronized(J9Method *method, int32_t value)
       {
-#if defined(JITSERVER_SUPPORT)
-      TR_ASSERT(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
-#endif /* defined(JITSERVER_SUPPORT) */
+#if defined(J9VM_OPT_JITSERVER)
+      TR_ASSERT_FATAL(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
+#endif /* defined(J9VM_OPT_JITSERVER) */
       value = (value << 1) | 1;
       if (value < 0)
           value = INT_MAX;
@@ -646,13 +635,9 @@ public:
    static bool isJSR292(const J9ROMMethod *romMethod);
    static bool isJSR292(J9Method *j9method);
 
-#if defined(J9VM_INTERP_AOT_COMPILE_SUPPORT) && defined(J9VM_OPT_SHARED_CLASSES) && (defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM))
+#if defined(J9VM_INTERP_AOT_COMPILE_SUPPORT) && defined(J9VM_OPT_SHARED_CLASSES) && (defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM) || defined(TR_HOST_ARM64))
    static void disableAOTCompilations();
 #endif
-
-#if defined(JITSERVER_SUPPORT)
-   static void replenishInvocationCount(J9Method* method, TR::Compilation* comp);
-#endif /* defined(JITSERVER_SUPPORT) */
 
    void * operator new(size_t s, void * p) throw() { return p; }
    CompilationInfo (J9JITConfig *jitConfig);
@@ -669,14 +654,14 @@ public:
 
    TR_MethodToBeCompiled *addMethodToBeCompiled(TR::IlGeneratorMethodDetails &details, void *pc, CompilationPriority priority,
       bool async, TR_OptimizationPlan *optPlan, bool *queued, TR_YesNoMaybe methodIsInSharedCache);
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
    TR_MethodToBeCompiled *addOutOfProcessMethodToBeCompiled(JITServer::ServerStream *stream);
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
    void                   queueEntry(TR_MethodToBeCompiled *entry);
    void                   recycleCompilationEntry(TR_MethodToBeCompiled *cur);
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
    void                   requeueOutOfProcessEntry(TR_MethodToBeCompiled *entry);
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
    TR_MethodToBeCompiled *adjustCompilationEntryAndRequeue(TR::IlGeneratorMethodDetails &details,
                                                            TR_PersistentMethodInfo *methodInfo,
                                                            TR_Hotness newOptLevel, bool useProfiling,
@@ -693,6 +678,16 @@ public:
    int32_t computeCompThreadSleepTime(int32_t compilationTimeMs);
    bool                   isQueuedForCompilation(J9Method *, void *oldStartPC);
    void *                 startPCIfAlreadyCompiled(J9VMThread *, TR::IlGeneratorMethodDetails & details, void *oldStartPC);
+
+   static int32_t getCompThreadSuspensionThreshold(int32_t threadID) { return _compThreadSuspensionThresholds[threadID]; }
+
+   // updateNumUsableCompThreads() is called before startCompilationThread() to update TR::Options::_numUsableCompilationThreads.
+   // It makes sure the number of usable compilation threads is within allowed bounds.
+   // If not, set it to the upper bound based on the mode: JITClient/non-JITServer or JITServer.
+   void updateNumUsableCompThreads(int32_t &numUsableCompThreads);
+   bool allocateCompilationThreads(int32_t numUsableCompThreads);
+   void freeAllCompilationThreads();
+   void freeAllResources();
 
    uintptr_t startCompilationThread(int32_t priority, int32_t id, bool isDiagnosticThread);
    bool initializeCompilationOnApplicationThread();
@@ -834,14 +829,12 @@ public:
    void     setAotRelocationTime(uint32_t reloTime) { _statTotalAotRelocationTime = reloTime; }
    void    incrementNumMethodsFoundInSharedCache() { _numMethodsFoundInSharedCache++; }
    int32_t numMethodsFoundInSharedCache() { return _numMethodsFoundInSharedCache; }
-   bool isRomClassForMethodInSharedCache(J9Method *method, J9JavaVM *vm);
-   TR_YesNoMaybe isMethodInSharedCache(J9Method *method, J9JavaVM *vm);
    int32_t getNumInvRequestsInCompQueue() const { return _numInvRequestsInCompQueue; }
    TR::CompilationInfoPerThreadBase *getCompInfoForCompOnAppThread() const { return _compInfoForCompOnAppThread; }
    J9JITConfig *getJITConfig() { return _jitConfig; }
    TR::CompilationInfoPerThread *getCompInfoForThread(J9VMThread *vmThread);
-   int32_t getNumUsableCompilationThreads() const { return _compThreadIndex; }
-   int32_t getNumTotalCompilationThreads() const { return _compThreadIndex + _numDiagnosticThreads; }
+   int32_t getNumUsableCompilationThreads() const { return _numCompThreads; }
+   int32_t getNumTotalCompilationThreads() const { return _numCompThreads + _numDiagnosticThreads; }
    TR::CompilationInfoPerThreadBase *getCompInfoWithID(int32_t ID);
    TR::Compilation *getCompilationWithID(int32_t ID);
    TR::CompilationInfoPerThread *getFirstSuspendedCompilationThread();
@@ -948,8 +941,6 @@ public:
 
    TR_HWProfiler *getHWProfiler() const;
 
-   TR_LMGuardedStorage *getLMGuardedStorage() const;
-
    TR_JProfilerThread *getJProfilerThread() const;
 
    int32_t calculateCodeSize(TR_MethodMetaData *metaData);
@@ -963,7 +954,7 @@ public:
                              or OMRPORT_MEMINFO_NOT_AVAILABLE in case of error
    */
    uint64_t computeFreePhysicalMemory(bool &incompleteInfo);
- 
+
    /**
    * @brief Compute free physical memory taking into account container limits and caches it for later use
    *
@@ -973,7 +964,7 @@ public:
    *
    * @param incompleteInfo   [OUTPUT] Boolean indicating that cached/buffered memory couldn't be read
    * @param updatePeriodMs   Indicates how often the cached values are refreshed
-   * @return                 A value representing the free physicalMemory 
+   * @return                 A value representing the free physicalMemory
                              or OMRPORT_MEMINFO_NOT_AVAILABLE in case of error
    */
    uint64_t computeAndCacheFreePhysicalMemory(bool &incompleteInfo, int64_t updatePeriodMs=-1);
@@ -1000,7 +991,7 @@ public:
    bool getSuspendThreadDueToLowPhysicalMemory() const { return _suspendThreadDueToLowPhysicalMemory; }
    void setSuspendThreadDueToLowPhysicalMemory(bool b) { _suspendThreadDueToLowPhysicalMemory = b; }
 
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
    ClientSessionHT *getClientSessionHT() const { return _clientSessionHT; }
    void setClientSessionHT(ClientSessionHT *ht) { _clientSessionHT = ht; }
    PersistentVector<TR_OpaqueClassBlock*> *getUnloadedClassesTempList() const { return _unloadedClassesTempList; }
@@ -1020,14 +1011,6 @@ public:
    void markCHTableUpdateDone(uint8_t threadId) { _chTableUpdateFlags |= (1 << threadId); }
    void resetCHTableUpdateDone(uint8_t threadId) { _chTableUpdateFlags &= ~(1 << threadId); }
    uint8_t getCHTableUpdateDone() const { return _chTableUpdateFlags; }
-   uint32_t getLocalGCCounter() const { return _localGCCounter; }
-   void incrementLocalGCCounter() { _localGCCounter++; }
-
-   static void addJ9HookVMDynamicCodeLoadForAOT(J9VMThread * vmThread, J9Method * method, J9JITConfig *jitConfig, TR_MethodMetaData* relocatedMetaData);
-
-#if defined(J9VM_INTERP_AOT_COMPILE_SUPPORT) && defined(J9VM_OPT_SHARED_CLASSES) && (defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM))
-   static void storeAOTInSharedCache(J9VMThread *vmThread, J9ROMMethod *romMethod, const U_8 *dataStart, UDATA dataSize, const U_8 *codeStart, UDATA codeSize, TR::Compilation *comp, J9JITConfig *jitConfig, TR_MethodToBeCompiled *entry);
-#endif
 
    const PersistentVector<std::string> &getJITServerSslKeys() const { return _sslKeys; }
    void  addJITServerSslKey(const std::string &key) { _sslKeys.push_back(key); }
@@ -1035,7 +1018,15 @@ public:
    void  addJITServerSslCert(const std::string &cert) { _sslCerts.push_back(cert); }
    const std::string &getJITServerSslRootCerts() const { return _sslRootCerts; }
    void  setJITServerSslRootCerts(const std::string &cert) { _sslRootCerts = cert; }
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+   static void replenishInvocationCount(J9Method* method, TR::Compilation* comp);
+
+   static void addJ9HookVMDynamicCodeLoadForAOT(J9VMThread * vmThread, J9Method * method, J9JITConfig *jitConfig, TR_MethodMetaData* relocatedMetaData);
+
+#if defined(J9VM_INTERP_AOT_COMPILE_SUPPORT) && defined(J9VM_OPT_SHARED_CLASSES) && (defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM) || defined(TR_HOST_ARM64))
+   static void storeAOTInSharedCache(J9VMThread *vmThread, J9ROMMethod *romMethod, const U_8 *dataStart, UDATA dataSize, const U_8 *codeStart, UDATA codeSize, TR::Compilation *comp, J9JITConfig *jitConfig, TR_MethodToBeCompiled *entry);
+#endif
 
    static int32_t         VERY_SMALL_QUEUE;
    static int32_t         SMALL_QUEUE;
@@ -1048,6 +1039,12 @@ public:
    struct CompilationStatistics _stats;
    struct CompilationStatsPerInterval _intervalStats;
    TR_PersistentArray<TR_SignatureCountPair *> *_persistedMethods;
+
+   // Must be less than 8 at the JITClient or non-JITServer mode.
+   // Because in some parts of the code (CHTable) we keep flags on a byte variable.
+   static const uint32_t MAX_CLIENT_USABLE_COMP_THREADS = 7;  // For JITClient and non-JITServer mode
+   static const uint32_t MAX_SERVER_USABLE_COMP_THREADS = 63; // JITServer
+   static const uint32_t MAX_DIAGNOSTIC_COMP_THREADS = 1;
 
 private:
 
@@ -1080,7 +1077,11 @@ private:
 
    static TR::CompilationInfo * _compilationRuntime;
 
-   TR::CompilationInfoPerThread *_arrayOfCompilationInfoPerThread[MAX_TOTAL_COMP_THREADS]; // first NULL entry means end of the array
+   static int32_t *_compThreadActivationThresholds;
+   static int32_t *_compThreadSuspensionThresholds;
+   static int32_t *_compThreadActivationThresholdsonStarvation;
+
+   TR::CompilationInfoPerThread **_arrayOfCompilationInfoPerThread; // First NULL entry means end of the array
    TR::CompilationInfoPerThread *_compInfoForDiagnosticCompilationThread; // compinfo for dump compilation thread
    TR::CompilationInfoPerThreadBase *_compInfoForCompOnAppThread; // This is NULL for separate compilation thread
    TR_MethodToBeCompiled *_methodQueue;
@@ -1182,7 +1183,7 @@ private:
 #ifdef DEBUG
    bool                   _traceCompiling;
 #endif
-   int32_t                _compThreadIndex;
+   int32_t                _numCompThreads; // Number of usable compilation threads that does not include the diagnostic thread
    int32_t                _numDiagnosticThreads;
    int32_t                _iprofilerMaxCount;
    int32_t                _numGCRQueued; // how many GCR requests are in the queue
@@ -1217,7 +1218,7 @@ private:
    bool _suspendThreadDueToLowPhysicalMemory;
    TR_InterpreterSamplingTracking *_interpSamplTrackingInfo;
 
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
    ClientSessionHT               *_clientSessionHT; // JITServer hashtable that holds session information about JITClients
    PersistentVector<TR_OpaqueClassBlock*> *_unloadedClassesTempList; // JITServer list of classes unloaded
    TR::Monitor                   *_sequencingMonitor; // Used for ordering outgoing messages at the client
@@ -1228,7 +1229,7 @@ private:
    std::string                   _sslRootCerts;
    PersistentVector<std::string> _sslKeys;
    PersistentVector<std::string> _sslCerts;
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
    }; // CompilationInfo
 }
 

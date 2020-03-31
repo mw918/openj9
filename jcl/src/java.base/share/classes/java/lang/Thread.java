@@ -1,4 +1,4 @@
-/*[INCLUDE-IF Sidecar16]*/
+/*[INCLUDE-IF Sidecar18-SE]*/
 package java.lang;
 
 /*******************************************************************************
@@ -27,7 +27,9 @@ import java.util.Map;
 import java.security.AccessControlContext;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
-/*[IF Sidecar19-SE]
+import sun.security.util.SecurityConstants;
+/*[IF Java11]
+import jdk.internal.misc.TerminatingThreadLocal;
 import jdk.internal.reflect.CallerSensitive;
 /*[ELSE]*/
 import sun.reflect.CallerSensitive;
@@ -118,6 +120,11 @@ public class Thread implements Runnable {
 	long threadLocalRandomSeed;
 	int threadLocalRandomProbe;
 	int threadLocalRandomSecondarySeed;
+
+	/*[IF Java13 & !Java14]*/
+	/* The flag to indicate if this thread is suspended. */
+	private volatile boolean isSuspended;
+	/*[ENDIF] Java 13 & !Java14 */
 
 /**
  * 	Constructs a new Thread with no runnable object and a newly generated name.
@@ -524,16 +531,40 @@ public final void checkAccess() {
  * 	Returns the number of stack frames in this thread.
  *
  * @return		Number of stack frames
+ * 
+/*[IF Java14]
+ * @exception	UnsupportedOperationException
+/*[ELSE] Java14 
+/*[IF Java13]
+ * @exception	IllegalThreadStateException
+ *					if this thread has not been suspended.
+/*[ENDIF] Java13
+/*[ENDIF] Java14 
  *
  * @deprecated	The semantics of this method are poorly defined and it uses the deprecated suspend() method.
  */
-/*[IF Sidecar19-SE]*/
+/*[IF Java11]*/
 @Deprecated(forRemoval=true, since="1.2")
-/*[ELSE]*/
+/*[ELSE] Java11 */
 @Deprecated
-/*[ENDIF]*/
+/*[ENDIF] Java11 */
 public int countStackFrames() {
-	return 0;
+/*[IF Java14]*/
+	throw new UnsupportedOperationException();
+/*[ELSE] Java14 */
+/*[IF Java13]*/
+	if (isAlive()) {
+		if (isSuspended) {
+			return 0;
+		}
+		throw new IllegalThreadStateException();
+	} else {
+/*[ENDIF] Java13 */
+		return 0;
+/*[IF Java13]*/
+	}
+/*[ENDIF] Java13 */
+/*[ENDIF] Java14 */
 }
 
 /**
@@ -607,7 +638,7 @@ public ClassLoader getContextClassLoader() {
 	if (currentManager != null) {
 		ClassLoader callerClassLoader = ClassLoader.callerClassLoader();
 		if (ClassLoader.needsClassLoaderPermissionCheck(callerClassLoader, contextClassLoader)) {
-			currentManager.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionGetClassLoader);
+			currentManager.checkPermission(SecurityConstants.GET_CLASSLOADER_PERMISSION);
 		}	
 	}	
 	return contextClassLoader;
@@ -879,16 +910,23 @@ private synchronized static String newName() {
  *
  * @deprecated	Used with deprecated method Thread.suspend().
  */
-/*[IF Sidecar19-SE]*/
+/*[IF Java11]*/
+/*[IF Java14]*/
+@Deprecated(forRemoval=true, since="1.2")
+/*[ELSE] Java14 */
 @Deprecated(forRemoval=false, since="1.2")
-/*[ELSE]*/
+/*[ENDIF] Java14 */
+/*[ELSE] Java11 */
 @Deprecated
-/*[ENDIF]*/
+/*[ENDIF] Java11 */
 public final void resume() {
 	checkAccess();
 	synchronized(lock) {
 		resumeImpl();
 	}
+/*[IF Java13 & !Java14]*/
+	isSuspended = false;
+/*[ENDIF] Java13 & !Java14 */
 }
 
 /**
@@ -1158,7 +1196,7 @@ private final synchronized void stopWithThrowable(Throwable throwable) {
 	if (currentThread() != this || !(throwable instanceof ThreadDeath)) {
 		SecurityManager currentManager = System.getSecurityManager();
 		if (currentManager != null)	{
-			currentManager.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionStopThread);
+			currentManager.checkPermission(SecurityConstants.STOP_THREAD_PERMISSION);
 		}
 	}
 
@@ -1200,11 +1238,15 @@ private native void stopImpl(Throwable throwable);
  *
  * @deprecated May cause deadlocks.
  */
-/*[IF Sidecar19-SE]*/
+/*[IF Java11]*/
+/*[IF Java14]*/
+@Deprecated(forRemoval=true, since="1.2")
+/*[ELSE] Java14 */
 @Deprecated(forRemoval=false, since="1.2")
-/*[ELSE]*/
+/*[ENDIF] Java14 */
+/*[ELSE] Java11 */
 @Deprecated
-/*[ENDIF]*/
+/*[ENDIF] Java11 */
 public final void suspend() { 
 	checkAccess();
 	/*[PR 106321]*/
@@ -1214,6 +1256,9 @@ public final void suspend() {
 			suspendImpl();
 		}
 	}
+/*[IF Java13 & !Java14]*/
+	isSuspended = true;
+/*[ENDIF] Java13 & !Java14 */
 }
 
 /**
@@ -1290,7 +1335,7 @@ public StackTraceElement[] getStackTrace() {
 	if (Thread.currentThread() != this) {
 		SecurityManager security = System.getSecurityManager();
 		if (security != null)
-			security.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionGetStackTrace); //$NON-NLS-1$
+			security.checkPermission(SecurityConstants.GET_STACK_TRACE_PERMISSION); //$NON-NLS-1$
 	}
 	Throwable t;
 
@@ -1317,8 +1362,8 @@ public StackTraceElement[] getStackTrace() {
 public static Map<Thread, StackTraceElement[]> getAllStackTraces() {
 	SecurityManager security = System.getSecurityManager();
 	if (security != null) {
-		security.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionGetStackTrace);
-		security.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionModifyThreadGroup);
+		security.checkPermission(SecurityConstants.GET_STACK_TRACE_PERMISSION);
+		security.checkPermission(SecurityConstants.MODIFY_THREADGROUP_PERMISSION);
 	}
 	// Allow room for more Threads to be created before calling enumerate()
 	int count = systemThreadGroup.activeCount() + 20;
@@ -1480,6 +1525,12 @@ void uncaughtException(Throwable e) {
  * @see J9VMInternals#threadCleanup()
  */
 void cleanup() {
+/*[IF Java11]*/
+	if (threadLocals != null && TerminatingThreadLocal.REGISTRY.isPresent()) {
+		TerminatingThreadLocal.threadTerminated();
+	}
+/*[ENDIF]*/
+
 	/*[PR 97317]*/
 	group = null;
 

@@ -211,7 +211,7 @@ public:
 	virtual IDATA aotMethodOperation(J9VMThread* currentThread, char* methodSpecs, UDATA action);
 
 	/* @see CacheMapStats.hpp */
-	IDATA startupForStats(J9VMThread* currentThread, SH_OSCache * oscache, U_64 * runtimeflags);
+	IDATA startupForStats(J9VMThread* currentThread, const char* ctrlDirName, UDATA groupPerm, SH_OSCache * oscache, U_64 * runtimeflags, J9Pool **lowerLayerList);
 
 	/* @see CacheMapStats.hpp */
 	IDATA shutdownForStats(J9VMThread* currentThread);
@@ -381,7 +381,7 @@ private:
 
 	const U_8* findAttachedData(J9VMThread* currentThread, const void* addressInCache, J9SharedDataDescriptor* data, IDATA *corruptOffset, const char** p_subcstr) ;
 
-	void updateROMSegmentList(J9VMThread* currentThread, bool hasClassSegmentMutex);
+	void updateROMSegmentList(J9VMThread* currentThread, bool hasClassSegmentMutex, bool topLayerOnly = true);
 
 	void updateROMSegmentListForCache(J9VMThread* currentThread, SH_CompositeCacheImpl* forCache);
 
@@ -504,14 +504,25 @@ private:
 	IDATA startupCacheletForStats(J9VMThread* currentThread, SH_CompositeCache* cachelet);
 #endif /*J9SHR_CACHELET_SUPPORT*/
 
-	IDATA getPrereqCache(J9VMThread* currentThread, const char* cacheDir, SH_CompositeCacheImpl* ccToUse, bool startupForStats, const char** prereqCacheID, UDATA* idLen);
+	IDATA getPrereqCache(J9VMThread* currentThread, const char* cacheDir, SH_CompositeCacheImpl* ccToUse, bool startupForStats, const char** prereqCacheID, UDATA* idLen, bool *isCacheUniqueIdStored);
 
-	void handleStartupError(J9VMThread* currentThread, SH_CompositeCacheImpl* ccToUse, IDATA errorCode, U_64 runtimeFlags, UDATA verboseFlags, bool *doRetry);
+	IDATA storeCacheUniqueID(J9VMThread* currentThread, const char* cacheDir, U_64 createtime, UDATA metadataBytes, UDATA classesBytes, UDATA lineNumTabBytes, UDATA varTabBytes, const char** prereqCacheID, UDATA* idLen);
+
+	void handleStartupError(J9VMThread* currentThread, SH_CompositeCacheImpl* ccToUse, IDATA errorCode, U_64 runtimeFlags, UDATA verboseFlags, bool *doRetry, IDATA *deleteRC);
 	
 	void setCacheAddressRangeArray(void);
 	
 	void getJ9ShrOffsetFromAddress(const void* address, J9ShrOffset* offset);
+	
+	UDATA getJavacoreData(J9JavaVM *vm, J9SharedClassJavacoreDataDescriptor* descriptor, bool topLayerOnly);
+	
+	void printCacheStatsTopLayerStatsHelper(J9VMThread* currentThread, UDATA showFlags, U_64 runtimeFlags, J9SharedClassJavacoreDataDescriptor *javacoreData, bool multiLayerStats);
+	
+	void printCacheStatsTopLayerSummaryStatsHelper(J9VMThread* currentThread, UDATA showFlags, U_64 runtimeFlags, J9SharedClassJavacoreDataDescriptor *javacoreData);
+	
+	void printCacheStatsAllLayersStatsHelper(J9VMThread* currentThread, UDATA showFlags, U_64 runtimeFlags, J9SharedClassJavacoreDataDescriptor *javacoreData, U_32 staleBytes);
 
+	IDATA startupLowerLayerForStats(J9VMThread* currentThread, const char* ctrlDirName, UDATA groupPerm, SH_OSCache *oscache, J9Pool** lowerLayerList);
 };
 
 #endif /* !defined(CACHEMAP_H_INCLUDED) */

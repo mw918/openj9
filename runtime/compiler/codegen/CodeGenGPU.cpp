@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -32,13 +32,13 @@
 #include "codegen/CodeGenerator.hpp"
 #include "codegen/CodeGenerator_inlines.hpp"
 #include "codegen/RecognizedMethods.hpp"
+#include "il/AutomaticSymbol.hpp"
 #include "il/Block.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/ParameterSymbol.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/AutomaticSymbol.hpp"
-#include "il/symbol/ParameterSymbol.hpp"
 #include "env/CompilerEnv.hpp"
 #include "env/StackMemoryRegion.hpp"
 #include "env/annotations/GPUAnnotation.hpp"
@@ -151,7 +151,6 @@ static const char * nvvmOpCodeNames[] =
    "fmul",        // TR::dmul
    "mul",         // TR::bmul
    "mul",         // TR::smul
-   "mul",         // TR::iumul
 
    "sdiv",        // TR::idiv
    "sdiv",        // TR::ldiv
@@ -448,13 +447,13 @@ static const char * nvvmOpCodeNames[] =
    NULL,          // TR::bRegStore
    NULL,          // TR::GlRegDeps
 
-   NULL,          // TR::iternary
-   NULL,          // TR::lternary
-   NULL,          // TR::bternary
-   NULL,          // TR::sternary
-   NULL,          // TR::aternary
-   NULL,          // TR::fternary
-   NULL,          // TR::dternary
+   NULL,          // TR::iselect
+   NULL,          // TR::lselect
+   NULL,          // TR::bselect
+   NULL,          // TR::sselect
+   NULL,          // TR::aselect
+   NULL,          // TR::fselect
+   NULL,          // TR::dselect
    NULL,          // TR::treetop
    NULL,          // TR::MethodEnterHook
    NULL,          // TR::MethodExitHook
@@ -492,7 +491,7 @@ static const char * nvvmOpCodeNames[] =
    NULL,          // TR::vicmpanyle
 
    NULL,          // TR::vnot
-   NULL,          // TR::vselect
+   NULL,          // TR::vbitselect
    NULL,          // TR::vperm
 
    NULL,          // TR::vsplats
@@ -565,7 +564,7 @@ static const char * nvvmOpCodeNames[] =
    NULL,          // TR::vreturn
    NULL,          // TR::vcall
    NULL,          // TR::vcalli
-   NULL,          // TR::vternary
+   NULL,          // TR::vselect
    NULL,          // TR::v2v
    NULL,          // TR::vl2vd
    NULL,          // TR::vconst
@@ -615,8 +614,6 @@ static const char * nvvmOpCodeNames[] =
    "sub",         // TR::busub
    "sub",         // TR::iuneg
    "sub",         // TR::luneg
-   "shl",         // TR::iushl
-   "shl",         // TR::lushl
    "fptoui",      // TR::f2iu
    "fptoui",      // TR::f2lu
    "fptoui",      // TR::f2bu
@@ -629,10 +626,6 @@ static const char * nvvmOpCodeNames[] =
    NULL,          // TR::luRegLoad
    NULL,          // TR::iuRegStore
    NULL,          // TR::luRegStore
-   NULL,          // TR::iuternary
-   NULL,          // TR::luternary
-   NULL,          // TR::buternary
-   NULL,          // TR::suternary
    NULL,          // TR::cconst
 
    "load",        // TR::cload
@@ -651,6 +644,7 @@ static const char * nvvmOpCodeNames[] =
    NULL,          // TR::checkcast
    NULL,          // TR::checkcastAndNULLCHK
    NULL,          // TR::New
+   NULL,          //TR::newvalue
    "INVALID",       // TR::newarray
    NULL,          // TR::anewarray
    NULL,          // TR::variableNew
@@ -786,15 +780,6 @@ static const char * nvvmOpCodeNames[] =
    NULL,          // TR::getstack
    NULL,          // TR::dealloca
 
-   NULL,          // TR::ishfl
-   NULL,          // TR::lshfl
-   NULL,          // TR::iushfl
-   NULL,          // TR::lushfl
-   NULL,          // TR::bshfl
-   NULL,          // TR::sshfl
-   NULL,          // TR::bushfl
-   NULL,          // TR::sushfl
-
    NULL,          // TR::idoz
 
    NULL,          // TR::dcos
@@ -815,7 +800,6 @@ static const char * nvvmOpCodeNames[] =
 
 
 
-   NULL,          // TR::imulover
 
    NULL,          // TR::dfloor
    NULL,          // TR::ffloor
@@ -1088,9 +1072,9 @@ static const char * nvvmOpCodeNames[] =
    NULL,          // TR::ddRegStore
    NULL,          // TR::deRegStore
 
-   NULL,          // TR::dfternary
-   NULL,          // TR::ddternary
-   NULL,          // TR::deternary
+   NULL,          // TR::dfselect
+   NULL,          // TR::ddselect
+   NULL,          // TR::deselect
 
    NULL,          // TR::dfexp
    NULL,          // TR::ddexp
@@ -3653,13 +3637,13 @@ J9::CodeGenerator::generateGPU()
       }
    }
 
-uintptrj_t
+uintptr_t
 J9::CodeGenerator::objectLengthOffset()
    {
    return self()->fe()->getOffsetOfContiguousArraySizeField();
    }
 
-uintptrj_t
+uintptr_t
 J9::CodeGenerator::objectHeaderInvariant()
    {
    return self()->objectLengthOffset() + 4 /*length*/ ;

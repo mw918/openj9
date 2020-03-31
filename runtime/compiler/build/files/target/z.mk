@@ -1,4 +1,4 @@
-# Copyright (c) 2000, 2019 IBM Corp. and others
+# Copyright (c) 2000, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -55,7 +55,6 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/z/codegen/UnaryEvaluator.cpp \
     omr/compiler/z/codegen/snippet/PPA1Snippet.cpp \
     omr/compiler/z/codegen/snippet/PPA2Snippet.cpp \
-    omr/compiler/z/codegen/snippet/XPLINKCallDescriptorSnippet.cpp \
     omr/compiler/z/env/OMRCPU.cpp
 
 JIT_PRODUCT_SOURCE_FILES+=\
@@ -68,8 +67,6 @@ JIT_PRODUCT_SOURCE_FILES+=\
     compiler/z/codegen/J9Instruction.cpp \
     compiler/z/codegen/J9Linkage.cpp \
     compiler/z/codegen/J9MemoryReference.cpp \
-    compiler/z/codegen/J9S390CHelperLinkage.cpp \
-    compiler/z/codegen/J9S390PrivateLinkage.cpp \
     compiler/z/codegen/J9S390Snippet.cpp \
     compiler/z/codegen/J9SystemLinkageLinux.cpp \
     compiler/z/codegen/J9SystemLinkagezOS.cpp \
@@ -79,7 +76,9 @@ JIT_PRODUCT_SOURCE_FILES+=\
     compiler/z/codegen/J9ZSnippet.cpp \
     compiler/z/codegen/ReduceSynchronizedFieldLoad.cpp \
     compiler/z/codegen/S390AOTRelocation.cpp \
+    compiler/z/codegen/S390CHelperLinkage.cpp \
     compiler/z/codegen/S390J9CallSnippet.cpp \
+    compiler/z/codegen/S390PrivateLinkage.cpp \
     compiler/z/codegen/S390Recompilation.cpp \
     compiler/z/codegen/S390Register.cpp \
     compiler/z/codegen/S390StackCheckFailureSnippet.cpp \

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2019 IBM Corp. and others
+ * Copyright (c) 2017, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -422,7 +422,7 @@ TR_JProfilingValue::lowerCalls()
  * | quickTestBlock                                |                                   |
  * |-----------------------------------------------|                                   |
  * |  treetop (incIndexTreeTop)                    |                                   |
- * |     l/iternary                                |                                   |
+ * |      l/iselect                                |                                   |
  * |        l/icmpeq (conditionNode)               |                                   |
  * |           value                               |                                   |
  * |           i/lloadi                            |                                   |
@@ -452,7 +452,7 @@ TR_JProfilingValue::lowerCalls()
  *          |    al/aiadd                  |                v                          |
  *          |       aconst <table address> |        |-------------------------------|  |
  *          |       l/imul                 |        | helper                        |  |
- *          |          l/iternary          |        |-------------------------------|  |
+ *          |           l/iselect          |        |-------------------------------|  |
  *          |          width               |        | call TR_jProfile32/64BitValue |  |
  *          |     iadd                     |        |    value                      |  |
  *          |        iloadi                |        |    table address              |  |
@@ -489,7 +489,7 @@ TR_JProfilingValue::addProfilingTrees(
    // Common types used in calculation
    TR::DataType counterType = TR::Int32;
    TR::DataType lockType    = TR::Int16;
-   TR::DataType systemType  = TR::Compiler->target.is64Bit() ? TR::Int64 : TR::Int32;
+   TR::DataType systemType  = comp->target().is64Bit() ? TR::Int64 : TR::Int32;
 
    // Type to use in calculations and table access
    TR::DataType roundedType    = value->getType();
@@ -605,8 +605,8 @@ TR_JProfilingValue::addProfilingTrees(
    TR::Node *conditionNode = TR::Node::create(value, comp->il.opCodeForCompareEquals(roundedType), 2, quickTestValue,
       loadValue(comp, roundedType, addressOfKeys, convertedHashIndex));
    
-   TR::Node *ternarySelectNode = TR::Node::create(comp->il.opCodeForTernarySelect(roundedType), 3, conditionNode, hashIndex, otherIndex);
-   TR::TreeTop *incIndexTreeTop = TR::TreeTop::create(comp, TR::Node::create(TR::treetop, 1, ternarySelectNode));
+   TR::Node *selectNode = TR::Node::create(comp->il.opCodeForSelect(roundedType), 3, conditionNode, hashIndex, otherIndex);
+   TR::TreeTop *incIndexTreeTop = TR::TreeTop::create(comp, TR::Node::create(TR::treetop, 1, selectNode));
    iter->append(incIndexTreeTop);
 
    TR::Block *quickTestBlock = iter->split(incIndexTreeTop, cfg, false, true);
@@ -633,7 +633,7 @@ TR_JProfilingValue::addProfilingTrees(
    TR::Node *counterOffset = TR::Node::iconst(value, table->getFreqOffset());
    TR::Node *counterBaseAddress = TR::Node::aconst(value, table->getBaseAddress() + table->getFreqOffset());
    TR::TreeTop *incTree = TR::TreeTop::create(comp, checkNodeTreeTop,
-      incrementMemory(comp, counterType, effectiveAddress(counterType, counterBaseAddress, convertType(ternarySelectNode, systemType, true))));
+      incrementMemory(comp, counterType, effectiveAddress(counterType, counterBaseAddress, convertType(selectNode, systemType, true))));
    TR::Block *quickInc = quickTestBlock->split(incTree, cfg, false, true);
    quickInc->setIsExtensionOfPreviousBlock();
    if (trace)
@@ -940,7 +940,7 @@ TR_JProfilingValue::incrementMemory(TR::Compilation *comp, TR::DataType counterT
 TR::Node *
 TR_JProfilingValue::systemConst(TR::Node *example, uint64_t value)
    {
-   TR::ILOpCodes constOp = TR::Compiler->target.is64Bit() ? TR::lconst : TR::iconst;
+   TR::ILOpCodes constOp = TR::comp()->target().is64Bit() ? TR::lconst : TR::iconst;
    return TR::Node::create(example, constOp, 0, value);
    }
 
@@ -978,8 +978,8 @@ TR_JProfilingValue::computeHash(TR::Compilation *comp, TR_AbstractHashTableProfi
    if (!baseAddr)
       baseAddr = TR::Node::aconst(value, (uintptr_t) table);
 
-   TR::ILOpCodes addSys   = TR::Compiler->target.is64Bit() ? TR::aladd : TR::aiadd;
-   TR::ILOpCodes constSys = TR::Compiler->target.is64Bit() ? TR::lconst : TR::iconst;
+   TR::ILOpCodes addSys   = comp->target().is64Bit() ? TR::aladd : TR::aiadd;
+   TR::ILOpCodes constSys = comp->target().is64Bit() ? TR::lconst : TR::iconst;
 
    TR::Node *hash = NULL;
    if (table->getHashType() == BitIndexHash)
@@ -990,9 +990,6 @@ TR_JProfilingValue::computeHash(TR::Compilation *comp, TR_AbstractHashTableProfi
       hash->setAndIncChild(0, value);
       hash->setAndIncChild(1, hashAddr);
       hash->setAndIncChild(2, TR::Node::iconst(value, table->getBits()));
-
-      // Convert to the platform address width
-      hash = convertType(hash, TR::Compiler->target.is64Bit() ? TR::Int64 : TR::Int32);
       }
    else if (table->getHashType() == BitShiftHash)
       {

@@ -1,4 +1,4 @@
-# Copyright (c) 2000, 2019 IBM Corp. and others
+# Copyright (c) 2000, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -30,8 +30,10 @@ OBJSUFF=.o
 ARSUFF=.a
 ifeq ($(OS),osx)
 SOSUFF=.dylib
+DBGSUFF=$(SOSUFF).dSYM
 else
 SOSUFF=.so
+DBGSUFF=.debuginfo
 endif
 EXESUFF=
 LIBPREFIX=lib
@@ -49,6 +51,11 @@ DEPSUFF=.depend.mk
 M4?=m4
 SED?=sed
 PERL?=perl
+ifeq ($(OS),osx)
+DSYMUTIL?=dsymutil
+else
+OBJCOPY?=objcopy
+endif
 
 #
 # z/Architecture arch and tune level
@@ -105,7 +112,7 @@ CX_FLAGS+=\
     -fno-strict-aliasing \
     -fstack-protector
 
-ifneq ($(JITSERVER_SUPPORT),)
+ifneq ($(J9VM_OPT_JITSERVER),)
     CXX_FLAGS+=\
         -std=c++11
 else
@@ -137,14 +144,6 @@ ifeq ($(HOST_ARCH),x)
     ifeq ($(HOST_BITS),64)
         CX_DEFINES+=J9HAMMER
         CX_FLAGS+=-m64 -fPIC
-    endif
-
-    ifneq ($(JITSERVER_SUPPORT),)
-        CX_DEFINES+=JITSERVER_SUPPORT
-
-        ifneq ($(JITSERVER_ENABLE_SSL),)
-            CX_DEFINES+=JITSERVER_ENABLE_SSL
-        endif
     endif
 endif
 
@@ -181,14 +180,6 @@ ifeq ($(HOST_ARCH),z)
     endif
 
     CX_FLAGS_DEBUG+=-gdwarf-2
-
-    ifneq ($(JITSERVER_SUPPORT),)
-        CX_DEFINES+=JITSERVER_SUPPORT
-
-        ifneq ($(JITSERVER_ENABLE_SSL),)
-            CX_DEFINES+=JITSERVER_ENABLE_SSL
-        endif
-    endif
 endif
 
 ifeq ($(HOST_ARCH),arm)
@@ -367,22 +358,8 @@ ifeq ($(HOST_ARCH),z)
     M4_INCLUDES=$(PRODUCT_INCLUDES)
 
     M4_DEFINES+=$(HOST_DEFINES) $(TARGET_DEFINES)
-    M4_DEFINES+=J9VM_TIERED_CODE_CACHE
 
-    ifeq ($(HOST_BITS),32)
-        ifneq (,$(shell grep 'define J9VM_JIT_32BIT_USES64BIT_REGISTERS' $(J9SRC)/include/j9cfg.h))
-            M4_DEFINES+=J9VM_JIT_32BIT_USES64BIT_REGISTERS
-        endif
-    endif
 
-    ifeq ($(HOST_BITS),64)
-        ifneq (,$(shell grep 'define J9VM_INTERP_COMPRESSED_OBJECT_HEADER' $(J9SRC)/include/j9cfg.h))
-            M4_DEFINES+=J9VM_INTERP_COMPRESSED_OBJECT_HEADER
-        endif
-        ifneq (,$(shell grep 'define J9VM_GC_COMPRESSED_POINTERS' $(J9SRC)/include/j9cfg.h))
-            M4_DEFINES+=OMR_GC_COMPRESSED_POINTERS
-        endif
-    endif
 
     ifeq ($(BUILD_CONFIG),debug)
         M4_DEFINES+=$(M4_DEFINES_DEBUG)
@@ -451,9 +428,6 @@ endif # HOST_ARCH == aarch64
 #
 SOLINK_CMD?=$(CXX)
 
-SOLINK_FLAGS+=
-SOLINK_FLAGS_PROD+=-Wl,-S
-
 SOLINK_LIBPATH+=$(PRODUCT_LIBPATH)
 SOLINK_SLINK+=$(PRODUCT_SLINK) j9thr$(J9_VERSION) j9hookable$(J9_VERSION)
 ifeq ($(HOST_ARCH),z)
@@ -510,6 +484,13 @@ ifeq ($(HOST_ARCH),z)
     endif
 endif
 
+ifeq ($(HOST_ARCH),aarch64)
+    SUPPORT_STATIC_LIBCXX = $(shell $(SOLINK_CMD) -static-libstdc++ 2>&1 | grep "unrecognized option" > /dev/null; echo $$?)
+    ifneq ($(SUPPORT_STATIC_LIBCXX),0)
+        SOLINK_FLAGS+=-static-libgcc -static-libstdc++
+    endif
+endif
+
 ifeq ($(HOST_ARCH),arm)
     SOLINK_SLINK+=c m gcc_s
 endif
@@ -537,39 +518,20 @@ endif
 
 SOLINK_FLAGS+=$(SOLINK_FLAGS_EXTRA)
 
-ifneq ($(JITSERVER_SUPPORT),)
-    #
-    # Setup protobuf
-    #
-    PROTO_CMD?=protoc
+ifneq ($(J9VM_OPT_JITSERVER),)
+    ifneq ($(OPENSSL_CFLAGS),)
+        C_FLAGS+=$(OPENSSL_CFLAGS)
+        CXX_FLAGS+=$(OPENSSL_CFLAGS)
+    endif
 
-    SOLINK_SLINK_STATIC=-l:libprotobuf.a
-    CXX_DEFINES+=GOOGLE_PROTOBUF_NO_RTTI
-
-    ifneq ($(JITSERVER_ENABLE_SSL),)
-        SOLINK_SLINK+=ssl
-
-        ifneq ($(OPENSSL_CFLAGS),)
-            ADD_OPENSSL_CFLAGS=false
-            # --with-openssl=system, OPENSSL_LIBS looks like "-L/path/to/system/openssllib -lssl -lcrypto"
-            ifneq ($(OPENSSL_LIBS),)
-                SOLINK_LIBPATH+=$(subst -L,,$(firstword $(OPENSSL_LIBS)))
-                ADD_OPENSSL_CFLAGS=true
-            # --with-openssl=fetched --enable-openssl-bundling
-            else ifneq ($(OPENSSL_BUNDLE_LIB_PATH),)
-                SOLINK_LIBPATH+=$(OPENSSL_BUNDLE_LIB_PATH)
-                SOLINK_FLAGS+=-Wl,-rpath,\$$ORIGIN/..
-                ADD_OPENSSL_CFLAGS=true
-            # --with-openssl=fetched only
-            else ifneq ($(OPENSSL_DIR),)
-                SOLINK_LIBPATH+=$(OPENSSL_DIR)
-                ADD_OPENSSL_CFLAGS=true
-            endif
-
-            ifeq (true, $(ADD_OPENSSL_CFLAGS))
-                C_INCLUDES+=$(subst -I,,$(OPENSSL_CFLAGS))
-                CXX_INCLUDES+=$(subst -I,,$(OPENSSL_CFLAGS))
-            endif
-        endif # OPENSSL_CFLAGS
-    endif # JITSERVER_ENABLE_SSL
-endif # JITSERVER_SUPPORT
+    # --with-openssl=fetched --enable-openssl-bundling
+    ifneq ($(OPENSSL_BUNDLE_LIB_PATH),)
+        SOLINK_FLAGS+=-Wl,-rpath,\$$ORIGIN/..
+        C_INCLUDES+=$(OPENSSL_BUNDLE_LIB_PATH)
+        CXX_INCLUDES+=$(OPENSSL_BUNDLE_LIB_PATH)
+    # --with-openssl=fetched only
+    else ifneq ($(OPENSSL_DIR),)
+        C_INCLUDES+=$(OPENSSL_DIR)
+        CXX_INCLUDES+=$(OPENSSL_DIR)
+    endif
+endif # J9VM_OPT_JITSERVER

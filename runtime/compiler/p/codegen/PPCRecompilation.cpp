@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -32,11 +32,11 @@
 #include "env/CompilerEnv.hpp"
 #include "env/VMJ9.h"
 #include "il/DataTypes.hpp"
+#include "il/LabelSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/LabelSymbol.hpp"
 #include "p/codegen/GenerateInstructions.hpp"
 #include "p/codegen/PPCInstruction.hpp"
 #include "p/codegen/PPCRecompilationSnippet.hpp"
@@ -96,18 +96,18 @@ TR::Instruction *TR_PPCRecompilation::generatePrePrologue()
       {
       // gr0 must contain the saved LR; see Recompilation.s
       cursor = new (cg()->trHeapMemory()) TR::PPCTrg1Instruction(TR::InstOpCode::mflr, firstNode, gr0, cursor, cg());
-      cursor = generateDepImmSymInstruction(cg(), TR::InstOpCode::bl, firstNode, (uintptrj_t)recompileMethodSymRef->getMethodAddress(), new (cg()->trHeapMemory()) TR::RegisterDependencyConditions(0,0, cg()->trMemory()), recompileMethodSymRef, NULL, cursor);
-      if (TR::Compiler->target.is64Bit())
+      cursor = generateDepImmSymInstruction(cg(), TR::InstOpCode::bl, firstNode, (uintptr_t)recompileMethodSymRef->getMethodAddress(), new (cg()->trHeapMemory()) TR::RegisterDependencyConditions(0,0, cg()->trMemory()), recompileMethodSymRef, NULL, cursor);
+      if (cg()->comp()->target().is64Bit())
          {
-         int32_t highBits = (int32_t)((intptrj_t)info>>32), lowBits = (int32_t)((intptrj_t)info);
+         int32_t highBits = (int32_t)((intptr_t)info>>32), lowBits = (int32_t)((intptr_t)info);
          cursor = generateImmInstruction(cg(), TR::InstOpCode::dd, firstNode,
-            TR::Compiler->target.cpu.isBigEndian()?highBits:lowBits, TR_BodyInfoAddress, cursor);
+            cg()->comp()->target().cpu.isBigEndian()?highBits:lowBits, TR_BodyInfoAddress, cursor);
          cursor = generateImmInstruction(cg(), TR::InstOpCode::dd, firstNode,
-            TR::Compiler->target.cpu.isBigEndian()?lowBits:highBits, cursor);
+            cg()->comp()->target().cpu.isBigEndian()?lowBits:highBits, cursor);
          }
       else
          {
-         cursor = generateImmInstruction(cg(), TR::InstOpCode::dd, firstNode, (int32_t)(intptrj_t)info, TR_BodyInfoAddress, cursor);
+         cursor = generateImmInstruction(cg(), TR::InstOpCode::dd, firstNode, (int32_t)(intptr_t)info, TR_BodyInfoAddress, cursor);
          }
       cursor = generateImmInstruction(cg(), TR::InstOpCode::dd, firstNode, 0, cursor);
       }
@@ -127,12 +127,12 @@ TR::Instruction *TR_PPCRecompilation::generatePrologue(TR::Instruction *cursor)
       TR::Register   *gr11 = machine->getRealRegister(TR::RealRegister::gr11);
       TR::Register   *cr0 = machine->getRealRegister(TR::RealRegister::cr0);
       TR::Node       *firstNode = _compilation->getStartTree()->getNode();
-      intptrj_t        addr = (intptrj_t)getCounterAddress();          // What is the RL category?
+      intptr_t        addr = (intptr_t)getCounterAddress();          // What is the RL category?
       TR::LabelSymbol *snippetLabel = generateLabelSymbol(cg());
 
-      if (TR::Compiler->target.is64Bit())
+      if (cg()->comp()->target().is64Bit())
          {
-         intptrj_t  adjustedAddr =  ((addr>>16) + ((addr&0x00008000)==0?0:1)) << 16 ;
+         intptr_t  adjustedAddr =  ((addr>>16) + ((addr&0x00008000)==0?0:1)) << 16 ;
          // lis gr11, upper 16-bits
          cursor = generateTrg1ImmInstruction(cg(), TR::InstOpCode::lis, firstNode, gr11,
                ((adjustedAddr>>48) & 0x0000FFFF), cursor );
@@ -179,7 +179,7 @@ TR::Instruction *TR_PPCRecompilation::generatePrologue(TR::Instruction *cursor)
       // this instruction is replaced after successful recompilation
       cursor = generateTrg1Src2Instruction   (cg(), TR::InstOpCode::OR,    firstNode, gr11,  gr11, gr11, cursor);
       cursor = generateConditionalBranchInstruction(cg(), TR::InstOpCode::blt, firstNode, snippetLabel, cr0, cursor);
-      TR::Snippet     *snippet = new (cg()->trHeapMemory()) TR::PPCRecompilationSnippet(snippetLabel, cursor, cg());
+      TR::Snippet     *snippet = new (cg()->trHeapMemory()) TR::PPCRecompilationSnippet(snippetLabel, cursor->getPPCConditionalBranchInstruction(), cg());
       cg()->addSnippet(snippet);
       }
    return(cursor);

@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -32,13 +32,15 @@ CONFIGURE_ARGS += \
 	--enable-OMR_GC_IDLE_HEAP_MANAGER \
 	--enable-OMR_GC_TLH_PREFETCH_FTA \
 	--enable-OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS \
-	--enable-OMR_PORT_NUMA_SUPPORT
+	--enable-OMR_PORT_NUMA_SUPPORT \
+	--enable-OMR_GC_CONCURRENT_SCAVENGER
 
 ifeq (osx_x86-64_cmprssptrs, $(SPEC))
 	CONFIGURE_ARGS += \
-		--enable-OMR_GC_COMPRESSED_POINTERS \
-		--enable-OMR_INTERP_COMPRESSED_OBJECT_HEADER \
-		--enable-OMR_INTERP_SMALL_MONITOR_SLOT                
+		OMR_GC_POINTER_MODE=compressed
+else
+	CONFIGURE_ARGS += \
+		OMR_GC_POINTER_MODE=full
 endif
 
 CONFIGURE_ARGS += libprefix=lib exeext= solibext=.dylib arlibext=.a objext=.o
@@ -61,5 +63,4 @@ CONFIGURE_ARGS += 'OMR_TARGET_DATASIZE=$(TEMP_TARGET_DATASIZE)'
 CONFIGURE_ARGS += 'OMR_TOOLCHAIN=gcc'
 
 CONFIGURE_ARGS+= 'GLOBAL_CFLAGS=-fstack-protector'
-CONFIGURE_ARGS+= 'GLOBAL_CPPFLAGS=-fstack-protector'
 CONFIGURE_ARGS+= 'GLOBAL_CXXFLAGS=-fstack-protector'

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corp. and others
+ * Copyright (c) 2000, 2019 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,17 +23,24 @@
 #ifndef IA32LINKAGE_INCL
 #define IA32LINKAGE_INCL
 
-#include "x/codegen/X86PrivateLinkage.hpp"
+#include "codegen/X86PrivateLinkage.hpp"
 
 namespace TR { class UnresolvedDataSnippet; }
 
-namespace TR {
+namespace J9
+{
 
-class IA32PrivateLinkage : public TR::X86PrivateLinkage
+namespace X86
+{
+
+namespace I386
+{
+
+class PrivateLinkage : public J9::X86::PrivateLinkage
    {
    public:
 
-   IA32PrivateLinkage(TR::CodeGenerator *cg);
+   PrivateLinkage(TR::CodeGenerator *cg);
 
    TR::Register *pushThis(TR::Node *child);
    TR::Register *pushIntegerWordArg(TR::Node *child);
@@ -53,12 +60,24 @@ class IA32PrivateLinkage : public TR::X86PrivateLinkage
    virtual void buildIPIC(TR::X86CallSite &site, TR::LabelSymbol *entryLabel, TR::LabelSymbol *doneLabel, uint8_t *thunk);
    };
 
-inline TR::IA32PrivateLinkage *toIA32PrivateLinkage(TR::Linkage *linkage)
-   {
-   return (TR::IA32PrivateLinkage*)linkage;
-   }
+}
+
+}
+
+}
+
+
+/**
+ * The following is only required to assist with refactoring because they are
+ * referenced in J9_PROJECT_SPECIFIC parts of OMR.  Once the IA32PrivateLinkage
+ * class moves into the J9 namespace they can be easily removed in OMR and will
+ * be subsequently deleted here.
+ */
+namespace J9
+{
+
+typedef J9::X86::I386::PrivateLinkage IA32PrivateLinkage;
 
 }
 
 #endif
-

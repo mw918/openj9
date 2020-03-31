@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -27,7 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "codegen/CodeGenerator.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "codegen/RecognizedMethods.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/CompilationTypes.hpp"
@@ -43,13 +43,13 @@
 #include "il/DataTypes.hpp"
 #include "il/ILOpCodes.hpp"
 #include "il/ILOps.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/MethodSymbol.hpp"
 #include "infra/Assert.hpp"
 #include "infra/BitVector.hpp"
 #include "infra/Cfg.hpp"
@@ -1047,11 +1047,17 @@ TR_CISCGraph::makePreparedCISCGraphs(TR::Compilation *c)
    bool genLDiv2Mul = c->cg()->getSupportsLoweringConstLDiv();
    // FIXME: We need getSupportsCountDecimalDigit() like interface
    // this idiom is only enabled on 390 for the moment
-   //
-   bool genDecimal = TR::Compiler->target.cpu.isZ();
-   bool genBitOpMem = TR::Compiler->target.cpu.isZ();
-   bool is64Bit = TR::Compiler->target.is64Bit();
-   bool isBig = TR::Compiler->target.cpu.isBigEndian();
+
+#if defined(J9VM_OPT_JITSERVER)
+   // Enabling genDecimal generates the TROT instruction on Z which is currently not
+   // relocatable for remote compiles. Thus we disable this option for remote compiles for now.
+   bool genDecimal = c->target().cpu.isZ() && !c->isOutOfProcessCompilation();
+#else
+   bool genDecimal = c->target().cpu.isZ();
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   bool genBitOpMem = c->target().cpu.isZ();
+   bool is64Bit = c->target().is64Bit();
+   bool isBig = c->target().cpu.isBigEndian();
    int32_t ctrl = (is64Bit ? CISCUtilCtl_64Bit : 0) | (isBig ? CISCUtilCtl_BigEndian : 0);
 
    // THESE ARE NOT GUARANTEED OR TESTED TO WORK ON WCODE.
@@ -1262,7 +1268,6 @@ TR_CISCGraph::addOpc2CISCNode(TR_CISCNode *n)
             if (!n->isValidOtherInfo()) break;
             // else fall through
          case TR_variable:
-         case TR::cconst:
          case TR::sconst:
          case TR::iconst:
          case TR::bconst:
@@ -2437,9 +2442,6 @@ TR_CISCTransformer::addAllSubNodes(TR_CISCGraph *const graph, TR::Block *const b
             case TR::iconst:
                val = node->getInt();
                break;
-            case TR::cconst:
-               val = node->getConst<uint16_t>();
-               break;
             case TR::sconst:
                val = node->getShortInt();
                break;
@@ -2933,8 +2935,8 @@ TR_CISCTransformer::makeCISCGraph(List<TR::Block> *pred,
 
    // add "iconst -ahsize" if nonexistent
    int32_t ahsize = -(int32_t)TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
-   uint32_t opcode = TR::Compiler->target.is64Bit() ? TR::lconst : TR::iconst;
-   TR::DataType nodeDataType = TR::Compiler->target.is64Bit() ? TR::Int64 : TR::Int32;
+   uint32_t opcode = comp()->target().is64Bit() ? TR::lconst : TR::iconst;
+   TR::DataType nodeDataType = comp()->target().is64Bit() ? TR::Int64 : TR::Int32;
 
    if (!graph->getCISCNode(opcode, true, ahsize))
       {
@@ -3007,7 +3009,7 @@ int32_t TR_CISCTransformer::perform()
    _cfg = comp()->getFlowGraph();
    _rootStructure = _cfg->getStructure();
    _nodesInCycle = new (trStackMemory()) TR_BitVector(_cfg->getNextNodeNumber(), trMemory(), stackAlloc);
-   _isGenerateI2L = TR::Compiler->target.is64Bit();
+   _isGenerateI2L = comp()->target().is64Bit();
    _showMesssagesStdout = (VERBOSE || showStdout);
 
    // make loop candidates
@@ -6220,11 +6222,9 @@ TR_CISCTransformer::compareTrNodeTree(TR::Node *a, TR::Node *b)
       {
       switch(a->getOpCodeValue())
          {
-         case TR::iuconst:
          case TR::iconst:
             if (a->getUnsignedInt() != b->getUnsignedInt()) return false;
             break;
-         case TR::luconst:
          case TR::lconst:
             if (a->getUnsignedLongInt() != b->getUnsignedLongInt()) return false;
             break;
@@ -6238,14 +6238,10 @@ TR_CISCTransformer::compareTrNodeTree(TR::Node *a, TR::Node *b)
             if (a->getDouble() != b->getDouble()) return false;
             break;
          case TR::bconst:
-         case TR::buconst:
             if (a->getUnsignedByte() != b->getUnsignedByte()) return false;
             break;
          case TR::sconst:
             if (a->getShortInt() != b->getShortInt()) return false;
-            break;
-         case TR::cconst:
-            if (a->getConst<uint16_t>() != b->getConst<uint16_t>()) return false;
             break;
          default:
             return false;
@@ -6588,7 +6584,6 @@ TR_CISCTransformer::analyzeBoolTable(TR_BitVector **bv, TR::TreeTop **retSameExi
                switch(n->getOpcode())
                   {
                   case TR::ifbcmpeq:
-                  case TR::ifsucmpeq:
                   case TR::ificmpeq:
                      takenBV.empty();
                      ntakenBV = *bv[tID];
@@ -6599,7 +6594,6 @@ TR_CISCTransformer::analyzeBoolTable(TR_BitVector **bv, TR::TreeTop **retSameExi
                         }
                      break;
                   case TR::ifbcmpne:
-                  case TR::ifsucmpne:
                   case TR::ificmpne:
                      takenBV = *bv[tID];
                      ntakenBV.empty();
@@ -6869,7 +6863,7 @@ TR_CISCTransformer::analyzeCharBoolTable(TR_CISCNode *boolTable, uint8_t *table6
       case TR::su2i:
          if (defNode->isOptionalNode()) defNode = defNode->getChild(0);
          // fall through
-      case TR::cloadi:
+      case TR::sloadi:
          defBV.setAll(0, 65535);
          break;
       default:

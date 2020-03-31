@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -28,10 +28,10 @@
 #include "compile/Compilation.hpp"
 #include "compile/Method.hpp"
 #include "env/CompilerEnv.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
 #include "il/Symbol.hpp"
-#include "il/symbol/MethodSymbol.hpp"
 #include "runtime/RuntimeAssumptions.hpp"
 #include "env/CHTable.hpp"
 #include "env/PersistentCHTable.hpp"
@@ -128,6 +128,20 @@ J9::Node::~Node()
    {
    _unionPropertyB = UnionPropertyB();
    }
+
+bool
+J9::Node::dontEliminateStores(bool isForLocalDeadStore)
+   {
+   // Disallow store sinking of BCD operations in Java because such operations may be under a BCDCHK node, implying that
+   // an exception path may be taken at runtime to evaluate the tree. Sinking such potentially exceptional operations
+   // violates the assumption that all such operations are to be anchored on a BCDCHK treetop, which the codegen expects
+   // to be able to generate the exception handling fallback code.
+   if (self()->getFirstChild()->getOpCode().isBinaryCodedDecimalOp())
+      return true;
+   else
+      return OMR::NodeConnector::dontEliminateStores(isForLocalDeadStore);
+   }
+
 
 void
 J9::Node::copyValidProperties(TR::Node *fromNode, TR::Node *toNode)
@@ -321,10 +335,19 @@ J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol
       }
 
 #if defined(TR_TARGET_POWER)
+   // Recognizing these methods on Power allows us to take a shortcut 
+   // in the JNI dispatch where we mangle the register dependencies and call 
+   // optimized helpers in the JIT library using what amounts to system/C dispatch.
+   // The addresses of the optimized helpers in the server process will not necessarily
+   // match the client-side addresses, so we can't take this shortcut in JITServer mode.
    if (((methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_update) ||
         (methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateBytes) ||
         (methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateByteBuffer)) &&
-       !comp->requiresSpineChecks())
+       !comp->requiresSpineChecks() 
+      #ifdef J9VM_OPT_JITSERVER
+         && !comp->isOutOfProcessCompilation()
+      #endif
+      )
       {
       self()->setPreparedForDirectJNI();
       return self();
@@ -411,12 +434,12 @@ J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol
 
       TR_ASSERT ((callerCP != -1 || callerSymbol->isNative()), "Cannot have cp index -1 for JNI calls other than JNI thunks.\n");
 
-      TR::Node *addressOfJ9Class = TR::Node::aconst(newNode, (uintptrj_t)resolvedMethod->containingClass());
+      TR::Node *addressOfJ9Class = TR::Node::aconst(newNode, (uintptr_t)resolvedMethod->containingClass());
       addressOfJ9Class->setIsClassPointerConstant(true);
       TR::Node *addressOfJavaLangClassReference;
 
       TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
-      if (TR::Compiler->target.is64Bit())
+      if (comp->target().is64Bit())
          {
          addressOfJavaLangClassReference =
                TR::Node::create(TR::aladd, 2,

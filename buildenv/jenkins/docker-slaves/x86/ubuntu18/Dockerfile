@@ -57,9 +57,6 @@ RUN apt-get update \
     xvfb \
   && rm -rf /var/lib/apt/lists/*
 
-# Install Docker module to run test framework
-RUN echo yes | cpan install JSON Text::CSV XML::Parser
-
 # Add user home/USER and copy authorized_keys and known_hosts
 RUN useradd -ms /bin/bash ${USER} \
   && mkdir /home/${USER}/.ssh/
@@ -80,7 +77,7 @@ RUN mkdir /var/run/sshd \
 RUN sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd
 
 # Install OpenSSL v1.1.1b
-# Required for JITaaS & Crypto functional testing
+# Required for JITServer & Crypto functional testing
 RUN cd /tmp \
   && wget https://github.com/openssl/openssl/archive/OpenSSL_1_1_1b.tar.gz \
   && tar -xzf OpenSSL_1_1_1b.tar.gz \
@@ -94,18 +91,17 @@ RUN cd /tmp \
   && echo "/usr/local/openssl-1.1.1b/lib" > /etc/ld.so.conf.d/openssl-1.1.1b.conf \
   && echo "PATH=/usr/local/openssl-1.1.1b/bin:$PATH" > /etc/environment
 
-# Install Protobuf v3.5.1
-# Required for JITaaS
+# Install Protobuf v3.7.1
 RUN cd /tmp \
-  && wget https://github.com/protocolbuffers/protobuf/releases/download/v3.5.1/protobuf-cpp-3.5.1.tar.gz \
-  && tar -xzf protobuf-cpp-3.5.1.tar.gz \
-  && rm -f protobuf-cpp-3.5.1.tar.gz \
-  && cd /tmp/protobuf-3.5.1 \
-  && ./configure \
+  && wget https://github.com/protocolbuffers/protobuf/releases/download/v3.7.1/protobuf-cpp-3.7.1.tar.gz \
+  && tar -xzf protobuf-cpp-3.7.1.tar.gz \
+  && rm -f protobuf-cpp-3.7.1.tar.gz \
+  && cd ./protobuf-3.7.1 \
+  && ./configure --disable-shared --with-pic \
   && make \
   && make install \
   && cd .. \
-  && rm -rf protobuf-3.5.1
+  && rm -rf /tmp/protobuf-3.7.1
 
 # Run ldconfig to create necessary links and cache to shared libraries
 RUN echo "/usr/local/lib" > /etc/ld.so.conf.d/usr-local.conf \

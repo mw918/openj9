@@ -26,6 +26,7 @@ j9jit_files(
 	optimizer/DataAccessAccelerator.cpp
 	optimizer/DynamicLiteralPool.cpp
 	optimizer/EscapeAnalysis.cpp
+	optimizer/EscapeAnalysisTools.cpp
 	optimizer/EstimateCodeSize.cpp
 	optimizer/FearPointAnalysis.cpp
 	optimizer/HCRGuardAnalysis.cpp
@@ -36,6 +37,7 @@ j9jit_files(
 	optimizer/InterProceduralAnalyzer.cpp
 	optimizer/J9CFGSimplifier.cpp
 	optimizer/J9EstimateCodeSize.cpp
+	optimizer/InterpreterEmulator.cpp
 	optimizer/J9Inliner.cpp
 	optimizer/J9LocalCSE.cpp
 	optimizer/J9OptimizationManager.cpp

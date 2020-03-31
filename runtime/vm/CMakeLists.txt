@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -55,13 +55,12 @@ add_library(j9vm SHARED
 	FastJNI_java_lang_Throwable.cpp
 	FastJNI_sun_misc_Unsafe.cpp
 	findmethod.c
+	FlushProcessWriteBuffers.cpp
 	gphandle.c
 	growstack.cpp
 	guardedstorage.c
 	hookableAsync.c
 	initsendtarget.cpp
-	#Only on z/OS?
-	#inlineleconditionhandler.c
 	intfunc.c
 	J9OMRHelpers.cpp
 	javaPriority.c
@@ -181,7 +180,11 @@ elseif(OMR_ARCH_S390)
 		if(OMR_ENV_DATA64)
 			target_sources(j9vm PRIVATE mz64/unsafeHelper.s)
 		else()
-			target_sources(j9vm PRIVATE mz31/unsafeHelper.s)
+			target_sources(j9vm PRIVATE
+				mz31/unsafeHelper.s
+				inlineleconditionhandler.c
+				leconditionexceptionsup.c
+			)
 		endif()
 	else()
 		message(SEND_ERROR "Unsupported platform")

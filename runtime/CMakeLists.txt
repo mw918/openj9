@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -33,6 +33,9 @@ project(j9vm VERSION ${J9VM_VERSION} LANGUAGES CXX C)
 
 set(J9VM_OMR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/omr" CACHE PATH "Path to the OMR directory")
 set(CMAKE_MODULE_PATH "${j9vm_SOURCE_DIR}/cmake/modules" "${J9VM_OMR_DIR}/cmake/modules" ${CMAKE_MODULE_PATH})
+
+# pull in definitions of what options we support
+include(cmake/options.cmake)
 
 ###
 ### End basic housekeeping
@@ -115,6 +118,8 @@ set(conditionalVersionString)
 configure_file(include/j9cfg.h.in j9cfg.h)
 configure_file(include/j9lib.h.in j9lib.h)
 configure_file(include/j9version.h.in j9version.h)
+configure_file(makelib/copyright.c.in copyright.c)
+
 
 # Definition of add_hookgen pulled in from omr/cmake/modules/OmrHookgen.cmake
 # Here we handle all the .hdf files which don't have a more logical home.
@@ -261,6 +266,13 @@ target_include_directories(j9vm_interface
 		${CMAKE_CURRENT_BINARY_DIR}
 		${CMAKE_BINARY_DIR}
 )
+# Inject copyright file if building a shared library or executable
+set(is_executable "$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTRABLE>")
+set(is_shlib "$<STREQUAL:$<TARGET_PROPERTY:TYPE>,SHARED_LIBRARY>")
+target_sources(j9vm_interface
+	INTERFACE
+		$<$<OR:${is_shlib},${is_executable}>:${CMAKE_CURRENT_BINARY_DIR}/copyright.c>
+)
 
 if(J9VM_IS_NON_STAGING)
 	target_include_directories(j9vm_interface INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/nls)
@@ -272,6 +284,7 @@ add_dependencies(j9vm_interface
 	j9vm_hookgen
 	j9vm_m4gen
 	j9vm_nlsgen
+	run_tracegen
 )
 
 # j9vm_gc_includes is used to track the include directories that are consumed by the various gc components
@@ -398,7 +411,6 @@ endif()
 if(J9VM_MODULE_CFDUMPER)
 	add_subdirectory(cfdumper)
 endif()
-add_subdirectory(clear_vmi)
 if(J9VM_MODULE_CODERT_VM)
 	add_subdirectory(codert_vm)
 endif()
@@ -481,10 +493,6 @@ endif()
 if(J9VM_MODULE_GCCHK)
 	add_subdirectory(gcchk)
 endif()
-if(J9VM_OPT_HARMONY)
-	add_subdirectory(harmony)
-	add_subdirectory(hyvm)
-endif()
 if(J9VM_MODULE_HOOKABLE)
 	add_subdirectory(hookable)
 endif()
@@ -542,7 +550,7 @@ endif()
 if(J9VM_MODULE_STACKMAP)
 	add_subdirectory(stackmap)
 endif()
-if(J9VM_OPT_SIDECAR OR J9VM_OPT_HARMONY)
+if(J9VM_OPT_SIDECAR)
 	add_subdirectory(sunvmi)
 endif()
 if(J9VM_MODULE_THREAD)
@@ -579,3 +587,7 @@ endif()
 
 # NOTE this is not conditional in the UMA module.xml
 add_subdirectory(tests)
+
+if (J9VM_OPT_JITSERVER)
+	add_subdirectory(jitserver_launcher)
+endif()

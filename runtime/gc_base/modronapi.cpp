@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -96,7 +96,7 @@ j9gc_modron_local_collect(J9VMThread *vmThread)
 {
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
 
-	((MM_MemorySpace *)vmThread->omrVMThread->memorySpace)->localGarbageCollect(env);
+	((MM_MemorySpace *)vmThread->omrVMThread->memorySpace)->localGarbageCollect(env, J9MMCONSTANT_IMPLICIT_GC_DEFAULT);
 
 	return 0;
 }
@@ -322,6 +322,10 @@ j9gc_is_managedpool_by_collector(J9JavaVM *javaVM, UDATA gcID, UDATA poolID)
 {
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(javaVM);
 	if (extensions->_HeapManagementMXBeanBackCompatibilityEnabled) {
+		if (J9_GC_MANAGEMENT_COLLECTOR_SCAVENGE == gcID) {
+			/* for BackCompatible mode scavenge does not try to reclaim memory from the whole heap, so we do not mark JavaHeap managed by scavenge */
+			return 0;
+		}
 		return 1;
 	}
 	UDATA managedPools = 0;
@@ -545,7 +549,7 @@ j9gc_pool_maxmemory(J9JavaVM *javaVM, UDATA poolID)
 			MM_MemorySubSpace *tenureMemorySubspace = defaultMemorySpace->getTenureMemorySubSpace();
 			MM_MemoryPoolLargeObjects *memoryPool = (MM_MemoryPoolLargeObjects *) tenureMemorySubspace->getMemoryPool();
 			UDATA loaSize = (UDATA) (memoryPool->getLOARatio() * extensions->maxOldSpaceSize);
-			loaSize = MM_Math::roundToFloor(extensions->heapAlignment, loaSize);
+			loaSize = MM_Math::roundToCeiling(extensions->heapAlignment, loaSize);
 			maxsize = extensions->maxOldSpaceSize - loaSize;
 		}
 		break;
@@ -555,7 +559,7 @@ j9gc_pool_maxmemory(J9JavaVM *javaVM, UDATA poolID)
 			MM_MemorySubSpace *tenureMemorySubspace = defaultMemorySpace->getTenureMemorySubSpace();
 			MM_MemoryPoolLargeObjects *memoryPool = (MM_MemoryPoolLargeObjects *) tenureMemorySubspace->getMemoryPool();
 			UDATA loaSize = (UDATA) (memoryPool->getLOARatio() * extensions->maxOldSpaceSize);
-			loaSize = MM_Math::roundToFloor(extensions->heapAlignment, loaSize);
+			loaSize = MM_Math::roundToCeiling(extensions->heapAlignment, loaSize);
 			maxsize = loaSize;
 		}
 		break;
@@ -597,6 +601,71 @@ j9gc_pool_maxmemory(J9JavaVM *javaVM, UDATA poolID)
 		break;
 	}
 	return maxsize;
+}
+
+/**
+ * retrieve the free, total and maximum memory size for the memory pools
+ * parm[in]  javaVM
+ * parm[in]  poolID the memory pool ID
+ * parm[out] total  total memory size
+ * parm[out] free   free memory size
+ * return           max memory size
+ */
+UDATA
+j9gc_pool_memoryusage(J9JavaVM *javaVM, UDATA poolID, UDATA *free, UDATA *total)
+{
+	MM_GCExtensionsBase *extensions = MM_GCExtensions::getExtensions(javaVM);
+	MM_HeapRegionManager *manager = extensions->getHeap()->getHeapRegionManager();
+	MM_HeapMemorySnapshot snapShot;
+	manager->getHeapMemorySnapshot(extensions, &snapShot, FALSE);
+
+	switch (poolID) {
+	case J9_GC_MANAGEMENT_POOL_TENURED :
+		*total = snapShot._totalTenuredSize;
+		*free = snapShot._freeTenuredSize;
+		break;
+	case J9_GC_MANAGEMENT_POOL_TENURED_SOA :
+		*total = snapShot._totalTenuredSOASize;
+		*free = snapShot._freeTenuredSOASize;
+		break;
+	case J9_GC_MANAGEMENT_POOL_TENURED_LOA :
+		*total = snapShot._totalTenuredLOASize;
+		*free = snapShot._freeTenuredLOASize;
+		break;
+	case J9_GC_MANAGEMENT_POOL_NURSERY_ALLOCATE :
+		*total = snapShot._totalNurseryAllocateSize;
+		*free = snapShot._freeNurseryAllocateSize;
+		break;
+	case J9_GC_MANAGEMENT_POOL_NURSERY_SURVIVOR :
+		*total = snapShot._totalNurserySurvivorSize;
+		*free = snapShot._freeNurserySurvivorSize;
+		break;
+	case J9_GC_MANAGEMENT_POOL_REGION_OLD :
+		*total = snapShot._totalRegionOldSize;
+		*free = snapShot._freeRegionOldSize;
+		break;
+	case J9_GC_MANAGEMENT_POOL_REGION_EDEN :
+		*total = snapShot._totalRegionEdenSize;
+		*free = snapShot._freeRegionEdenSize;
+		break;
+	case J9_GC_MANAGEMENT_POOL_REGION_SURVIVOR :
+		*total = snapShot._totalRegionSurvivorSize;
+		*free = snapShot._freeRegionSurvivorSize;
+		break;
+	case J9_GC_MANAGEMENT_POOL_REGION_RESERVED :
+		*total = snapShot._totalRegionReservedSize;
+		*free = snapShot._freeRegionReservedSize;
+		break;
+	case J9_GC_MANAGEMENT_POOL_JAVAHEAP :
+		*total = snapShot._totalHeapSize;
+		*free = snapShot._freeHeapSize;
+		break;
+	default :
+		*total = 0;
+		*free = 0;
+		break;
+	}
+	return j9gc_pool_maxmemory(javaVM, poolID);
 }
 
 /**
@@ -659,6 +728,9 @@ j9gc_get_gc_cause(OMR_VMThread *omrVMthread)
 			ret = "collect due to JVM becomes idle";
 			break;
 #endif
+		case J9MMCONSTANT_IMPLICIT_GC_COMPLETE_CONCURRENT :
+			ret = "concurrent collection must be completed";
+			break;
 		case J9MMCONSTANT_IMPLICIT_GC_PERCOLATE_CRITICAL_REGIONS :
 		default :
 			ret = "unknown";

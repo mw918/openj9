@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -114,7 +114,8 @@ public:
 		SCAN_CLASSLOADER_OBJECT = 6,
 		SCAN_ATOMIC_MARKABLE_REFERENCE_OBJECT = 7,
 		SCAN_OWNABLESYNCHRONIZER_OBJECT = 8,
-		SCAN_MIXED_OBJECT_LINKED = 9
+		SCAN_MIXED_OBJECT_LINKED = 9,
+		SCAN_FLATTENED_ARRAY_OBJECT = 10
 	};
 
 	/**
@@ -200,7 +201,11 @@ public:
 			break;
 		}
 		case OBJECT_HEADER_SHAPE_POINTERS:
-			result = SCAN_POINTER_ARRAY_OBJECT;
+			if (J9_IS_J9CLASS_FLATTENED(clazz)) {
+				result = SCAN_FLATTENED_ARRAY_OBJECT;
+			} else {
+				result = SCAN_POINTER_ARRAY_OBJECT;
+			}
 			break;
 		case OBJECT_HEADER_SHAPE_DOUBLES:
 		case OBJECT_HEADER_SHAPE_BYTES:
@@ -578,19 +583,23 @@ public:
 		 * pointer if another thread copied the object underneath us). In non-compressed, this field should still be readable
 		 * out of the heap.
 		 */
-		 uint32_t size = 0;
+		uint32_t size = 0;
 #if defined (OMR_GC_COMPRESSED_POINTERS)
 		if (compressObjectReferences()) {
 			size = forwardedHeader->getPreservedOverlap();
 		} else
 #endif /* defined (OMR_GC_COMPRESSED_POINTERS) */
 		{
-			size = ((J9IndexableObjectContiguous *)forwardedHeader->getObject())->size;
+			size = ((J9IndexableObjectContiguousFull *)forwardedHeader->getObject())->size;
 		}
 
 		if (0 == size) {
 			/* Discontiguous */
-			size = ((J9IndexableObjectDiscontiguous *)forwardedHeader->getObject())->size;
+			if (compressObjectReferences()) {
+				size = ((J9IndexableObjectDiscontiguousCompressed *)forwardedHeader->getObject())->size;
+			} else {
+				size = ((J9IndexableObjectDiscontiguousFull *)forwardedHeader->getObject())->size;
+			}
 		}
 
 		return size;
@@ -614,7 +623,7 @@ public:
 		} else
 #endif /* defined (OMR_GC_COMPRESSED_POINTERS) */
 		{
-			size = ((J9IndexableObjectContiguous *)forwardedHeader->getObject())->size;
+			size = ((J9IndexableObjectContiguousFull *)forwardedHeader->getObject())->size;
 		}
 		
 		if (0 != size) {

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -329,6 +329,8 @@ extern "C" {
 #define J9_EXTENDED_RUNTIME2_ENABLE_PREVIEW 0x4
 #define J9_EXTENDED_RUNTIME2_LOAD_AGENT_MODULE 0x8
 #define J9_EXTENDED_RUNTIME2_ENABLE_DEEPSCAN 0x10
+#define J9_EXTENDED_RUNTIME2_ENABLE_CLASS_RELATIONSHIP_VERIFIER 0x20
+#define J9_EXTENDED_RUNTIME2_ENABLE_START_JITSERVER 0x40
 
 
 /* TODO: Define this until the JIT removes it */
@@ -509,7 +511,7 @@ extern "C" {
 #define BCV_ERR_INIT_NOT_CALL_INIT						-15
 #define BCV_ERR_WRONG_RETURN_TYPE						-16
 #define BCV_ERR_INVALID_ARRAY_REFERENCE                 -17
-#define BCV_ERR_UNUSED_18					-18
+#define BCV_ERR_CLASS_RELATIONSHIP_RECORD_REQUIRED		-18
 #define BCV_ERR_UNUSED_19							-19
 #define BCV_ERR_WRONG_TOP_TYPE							-20
 #define BCV_ERR_EXPECT_STACKMAP_FRAME					-21
@@ -565,7 +567,8 @@ extern "C" {
 #define J9_STR_ANON_CLASS_NAME 0x20
 /* Determines whether a copied string result will be null terminated */
 #define J9_STR_NULL_TERMINATE_RESULT 0x40
-#define J9_STR_COMPRESSION_THRESHOLD 0xFF
+/* Determines whether the string contains only ASCII characters (ord <= 127) */
+#define J9_STR_ASCII 0x80
 
 #define J9_JCL_FLAG_REFERENCE_OBJECTS 0x1
 #define J9_JCL_FLAG_FINALIZATION 0x2
@@ -823,6 +826,24 @@ extern "C" {
 #define J9_ITABLE_OFFSET_DIRECT 1
 #define J9_ITABLE_OFFSET_VIRTUAL 2
 #define J9_ITABLE_OFFSET_TAG_BITS (J9_ITABLE_OFFSET_DIRECT | J9_ITABLE_OFFSET_VIRTUAL)
+
+/*
+ * These constants are declared only so that they are available in core files to retain
+ * compatibility with old DTFJ plugins, see https://github.com/eclipse/openj9/issues/6316.
+ *
+ * They should not be used for any other purpose.
+ */
+#define J9_JAVA_CLASS_ARRAY 0x10000
+#define J9_JAVA_CLASS_DEPTH_MASK 0xFFFF
+#define J9_JAVA_CLASS_DYING 0x8000000
+#define J9_JAVA_CLASS_GC_SPECIAL 0x800000
+#define J9_JAVA_CLASS_HOT_SWAPPED_OUT 0x4000000
+#define J9_JAVA_CLASS_RAM_ARRAY 0x10000
+#define J9_JAVA_CLASS_RAM_SHAPE_SHIFT 0x10
+#define J9_JAVA_CLASS_REFERENCE_MASK 0x30000000
+#define J9_JAVA_INTERFACE 0x200
+#define J9_JAVA_NATIVE 0x100
+#define J9_JAVA_STATIC 0x8
 
 #ifdef __cplusplus
 }

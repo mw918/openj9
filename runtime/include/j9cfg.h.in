@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -48,8 +48,10 @@ extern "C" {
 /* Note: The following defines record flags used to build the VM. */
 /* Changing them here does not remove the feature and may cause linking problems. */
 
+#cmakedefine J9VM_ARCH_AARCH64
 #cmakedefine J9VM_ARCH_ARM
 #cmakedefine J9VM_ARCH_POWER
+#cmakedefine J9VM_ARCH_RISCV
 #cmakedefine J9VM_ARCH_S390
 #cmakedefine J9VM_ARCH_X86
 #cmakedefine J9VM_BUILD__SE6_PACKAGE
@@ -111,6 +113,7 @@ extern "C" {
 #cmakedefine J9VM_GC_DEBUG_ASSERTS
 #cmakedefine J9VM_GC_DYNAMIC_CLASS_UNLOADING
 #cmakedefine J9VM_GC_DYNAMIC_NEW_SPACE_SIZING
+#cmakedefine J9VM_GC_ENABLE_DOUBLE_MAP
 #cmakedefine J9VM_GC_FINALIZATION
 #cmakedefine J9VM_GC_FRAGMENTED_HEAP
 #cmakedefine J9VM_GC_GENERATIONAL
@@ -145,6 +148,7 @@ extern "C" {
 #cmakedefine J9VM_INTERP_AOT_COMPILE_SUPPORT
 #cmakedefine J9VM_INTERP_AOT_RUNTIME_SUPPORT
 #cmakedefine J9VM_INTERP_ATOMIC_FREE_JNI
+#cmakedefine J9VM_INTERP_ATOMIC_FREE_JNI_USES_FLUSH
 #cmakedefine J9VM_INTERP_BYTECODE_PREVERIFICATION
 #cmakedefine J9VM_INTERP_BYTECODE_VERIFICATION
 #cmakedefine J9VM_INTERP_COMPRESSED_OBJECT_HEADER
@@ -170,6 +174,7 @@ extern "C" {
 #cmakedefine J9VM_INTERP_SIG_QUIT_THREAD_USES_SEMAPHORES
 #cmakedefine J9VM_INTERP_SMALL_MONITOR_SLOT
 #cmakedefine J9VM_INTERP_TRACING
+#cmakedefine J9VM_INTERP_TWO_PASS_EXCLUSIVE
 #cmakedefine J9VM_INTERP_UPDATE_VMCTRACING
 #cmakedefine J9VM_INTERP_USE_SPLIT_SIDE_TABLES
 #cmakedefine J9VM_INTERP_USE_UNSAFE_HELPER
@@ -211,12 +216,10 @@ extern "C" {
 #cmakedefine J9VM_OPT_DYNAMIC_LOAD_SUPPORT
 #cmakedefine J9VM_OPT_FIPS
 #cmakedefine J9VM_OPT_FRAGMENT_RAM_CLASSES
-#cmakedefine J9VM_OPT_HARMONY
-#cmakedefine J9VM_OPT_ICBUILDER_SUPPORT
-#cmakedefine J9VM_OPT_INFO_SERVER
 #cmakedefine J9VM_OPT_INLINE_JSRS
 #cmakedefine J9VM_OPT_INVARIANT_INTERNING
 #cmakedefine J9VM_OPT_JAVA_OFFLOAD_SUPPORT
+#cmakedefine J9VM_OPT_JITSERVER
 #cmakedefine J9VM_OPT_JVMTI
 #cmakedefine J9VM_OPT_JXE_LOAD_SUPPORT
 #cmakedefine J9VM_OPT_MEMORY_CHECK_SUPPORT
@@ -229,7 +232,6 @@ extern "C" {
 #cmakedefine J9VM_OPT_NEW_ROM_CLASS_BUILDER
 #cmakedefine J9VM_OPT_NO_CLASSLOADERS
 #cmakedefine J9VM_OPT_NRR
-#cmakedefine J9VM_OPT_PAAS
 #cmakedefine J9VM_OPT_PACKED
 #cmakedefine J9VM_OPT_PANAMA
 #cmakedefine J9VM_OPT_PHP_SUPPORT
@@ -244,7 +246,7 @@ extern "C" {
 #cmakedefine J9VM_OPT_TEMP_NEW_INTERFACE_INVOCATION
 #cmakedefine J9VM_OPT_USE_FFI
 #cmakedefine J9VM_OPT_USE_FFI_ONLY
-#cmakedefine J9VM_OPT_VALHALLA_MVT
+#cmakedefine J9VM_OPT_VALHALLA_VALUE_TYPES
 #cmakedefine J9VM_OPT_VEE_SUPPORT
 #cmakedefine J9VM_OPT_VM_LOCAL_STORAGE
 #cmakedefine J9VM_OPT_ZERO
@@ -275,8 +277,6 @@ extern "C" {
 #cmakedefine J9VM_THR_LOCK_RESERVATION
 #cmakedefine J9VM_THR_PREEMPTIVE
 #cmakedefine J9VM_THR_SMART_DEFLATION
-
-#undef J9VM_OPT_VALHALLA_VALUE_TYPES
 
 #if JAVA_SPEC_VERSION >= 11
 #define J9VM_OPT_VALHALLA_NESTMATES

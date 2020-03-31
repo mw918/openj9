@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2002, 2019 IBM Corp. and others
+ * Copyright (c) 2002, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -62,6 +62,11 @@
 #include "vmi.h"
 #include "vmzipcachehook.h"
 #endif
+#if defined(J9VM_OPT_JITSERVER)
+#include "jitserver_api.h"
+#include "jitserver_error.h"
+#endif /* J9VM_OPT_JITSERVER */
+
 
 /* Must include this after j9vm_internal.h */
 #include <string.h>
@@ -73,10 +78,6 @@
 #include "Xj9I5OSDebug.H"
 #include "Xj9I5OSInterface.H"
 #endif
-
-#ifdef J9VM_OPT_HARMONY
-#include "harmony_vm.h"
-#endif /* J9VM_OPT_HARMONY */
 
 #if defined(DEBUG)
 #define DBG_MSG(x) printf x
@@ -221,9 +222,6 @@ static UDATA monitor = 0;
 static J9InternalVMFunctions globalInvokeInterface;
 
 static struct J9PortLibrary j9portLibrary;
-#ifdef J9VM_OPT_HARMONY
-static struct HyPortLibrary * harmonyPortLibrary = NULL;
-#endif /* J9VM_OPT_HARMONY */
 static char * newPath = NULL;
 
 /* cannot be static because it's declared extern in vmi.c */
@@ -280,6 +278,7 @@ static void testBackupAndRestoreLibpath(void);
 extern OMRMemCategorySet j9MasterMemCategorySet;
 
 void exitHook(J9JavaVM *vm);
+static jint JNI_CreateJavaVM_impl(JavaVM **pvm, void **penv, void *vm_args, BOOLEAN isJITServer);
 static void* preloadLibrary(char* dllName, BOOLEAN inJVMDir);
 static UDATA protectedStrerror(J9PortLibrary* portLib, void* savedErrno);
 static UDATA strerrorSignalHandler(struct J9PortLibrary* portLibrary, U_32 gpType, void* gpInfo, void* userData);
@@ -292,6 +291,10 @@ static void truncatePath(char *inputPath);
 static jint formatErrorMessage(int errorCode, char *inBuffer, jint inBufferLength);
 #endif
 
+#if defined(J9VM_OPT_JITSERVER)
+static int32_t startJITServer(struct JITServer *);
+static int32_t waitForJITServerTermination(struct JITServer *);
+#endif /* J9VM_OPT_JITSERVER */
 
 /**
  * Preload the VM, Thread, and Port libraries using platform-specific
@@ -528,12 +531,6 @@ jint JNICALL DestroyJavaVM(JavaVM * javaVM)
 	rc = globalDestroyVM(javaVM);
 
 	if (JNI_OK == rc) {
-#ifdef J9VM_OPT_HARMONY
-		if ((NULL != harmonyPortLibrary) && (NULL != j9portLibrary.omrPortLibrary.mem_free_memory)) {
-			j9portLibrary.omrPortLibrary.mem_free_memory(&j9portLibrary.omrPortLibrary, harmonyPortLibrary);
-			harmonyPortLibrary = NULL;
-		}
-#endif /* J9VM_OPT_HARMONY */
 		if (NULL != j9portLibrary.port_shutdown_library) {
 			j9portLibrary.port_shutdown_library(&j9portLibrary);
 		}
@@ -728,18 +725,9 @@ preloadLibraries(void)
 	}
 	preloadLibrary(J9_ZIP_DLL_NAME, TRUE);
 
-#ifdef J9_CLEAR_VM_INTERFACE_DLL_NAME
-	/* CMVC 142575: Harmony JDWP sits apart for the JVM natives including the vmi.
-	 * We must preload the library so that it can be found when JDWP tries to load it. */
-	preloadLibrary(J9_CLEAR_VM_INTERFACE_DLL_NAME, TRUE);
-#endif
-
 #endif /* !CALL_BUNDLED_FUNCTIONS_DIRECTLY */
 	/* CMVC 152702: with other JVM on the path this library can get loaded from the wrong
 	 * location if not preloaded. */
-#ifdef J9VM_OPT_HARMONY
-	preloadLibrary(J9_HARMONY_PORT_LIBRARY_SHIM_DLL_NAME, TRUE);
-#endif /* J9VM_OPT_HARMONY */
 	return TRUE;
 }
 
@@ -1168,17 +1156,6 @@ preloadLibraries(void)
 		exit( -1 );	/* failed */
 	}
 
-#ifdef J9_CLEAR_VM_INTERFACE_DLL_NAME
-	/* CMVC 142575: Harmony JDWP sits apart for the JVM natives including the vmi.
-	 * We must preload the library so that it can be found when JDWP tries to load it. */
-	preloadLibrary(J9_CLEAR_VM_INTERFACE_DLL_NAME, TRUE);
-#endif /* J9_CLEAR_VM_INTERFACE_DLL_NAME */
-
-#ifdef J9VM_OPT_HARMONY
-	/* CMVC 152702: with other JVM on the path this library can get loaded from the wrong
-	 * location if not preloaded. */
-	preloadLibrary(J9_HARMONY_PORT_LIBRARY_SHIM_DLL_NAME, TRUE);
-#endif /* J9VM_OPT_HARMONY */
 	return TRUE;
 }
 #endif /* defined(J9UNIX) || defined(J9ZOS390) */
@@ -1347,21 +1324,6 @@ printVmArgumentsList(J9VMInitArgs *argList)
 	}
 }
 
-#ifdef J9VM_OPT_HARMONY
-static IDATA
-addHarmonyPortLibrary(J9PortLibrary * portLib, J9JavaVMArgInfoList *vmArgumentsList, UDATA verboseFlags)
-{
-	JavaVMInitArgs dummyArgs = {0, 0, NULL, FALSE}; /* In this case, addHarmonyPortLibToVMArgs looks only at nOptions */
-	J9JavaVMArgInfo *optArg = newJavaVMArgInfo(vmArgumentsList, NULL, CONSUMABLE_ARG);
-	if (NULL == optArg) {
-		return -1;
-	}
-
-	addHarmonyPortLibToVMArgs(portLib, &(optArg->vmOpt), &dummyArgs, &harmonyPortLibrary);
-	return 0;
-}
-#endif /* J9VM_OPT_HARMONY */
-
 static void
 setNLSCatalog(struct J9PortLibrary* portLib)
 {
@@ -1496,33 +1458,141 @@ static jint initializeReflectionGlobals(JNIEnv * env, BOOLEAN includeAccessors) 
 	return JNI_OK;
 }
 
-
-
 /**
- *  jint JNICALL JNI_CreateJavaVM(JavaVM **pvm, void **penv, void *vm_args)
- *  Load and initialize a virtual machine instance.
- *	This provides an invocation API that runs the J9 VM in BFU/sidecar mode
+ * jint JNICALL JNI_CreateJavaVM(JavaVM **pvm, void **penv, void *vm_args)
+ * Load and initialize a virtual machine instance.
+ * This provides an invocation API that runs the J9 VM in BFU/sidecar mode.
  *
- *  @param pvm pointer to the location where the JavaVM interface
+ * @param pvm pointer to the location where the JavaVM interface
  *			pointer will be placed
- *  @param penv pointer to the location where the JNIEnv interface
+ * @param penv pointer to the location where the JNIEnv interface
  *			pointer for the main thread will be placed
- *	@param vm_args java virtual machine initialization arguments
+ * @param vm_args java virtual machine initialization arguments
  *
- *  @returns zero on success; otherwise, return a negative number
+ * @returns zero on success; otherwise, return a negative number
  *
- *	DLL: jvm
+ * DLL: jvm
  */
 jint JNICALL JNI_CreateJavaVM(JavaVM **pvm, void **penv, void *vm_args) {
+	return JNI_CreateJavaVM_impl(pvm, penv, vm_args, FALSE);
+}
+
+#if defined(J9VM_OPT_JITSERVER)
+int32_t JNICALL
+JITServer_CreateServer(JITServer **jitServer, void *serverArgs)
+{
+	JNIEnv *env = NULL;
+	JITServer *server = NULL;
+	jint rc = JITSERVER_OK;
+
+	server = malloc(sizeof(JITServer));
+	if (NULL == server) {
+		rc = JITSERVER_OOM;
+		goto _end;
+	}
+	server->startJITServer = startJITServer;
+	server->waitForJITServerTermination = waitForJITServerTermination;
+	rc = JNI_CreateJavaVM_impl(&server->jvm, (void **)&env, serverArgs, TRUE);
+
+	if (JNI_OK != rc) {
+		rc = JITSERVER_CREATE_FAILED;
+		goto _end;
+	}
+	*jitServer = server;
+	rc = JITSERVER_OK; /* success */
+
+_end:
+	if ((JITSERVER_OK != rc) && (NULL != server)) {
+		free(server);
+	}
+	return rc;
+}
+
+/**
+ * Starts an instance of JITServer.
+ *
+ * @param jitServer pointer to the JITServer interface
+ *
+ * @returns zero on success, else negative error code
+ */
+static int32_t
+startJITServer(JITServer *jitServer)
+{
+	JavaVM *vm = jitServer->jvm;
+	JNIEnv *env = NULL;
+	int32_t rc = JITSERVER_OK;
+
+	rc = (*vm)->AttachCurrentThread(vm, (void **)&env, NULL);
+	if (JNI_OK == rc) {
+		J9JITConfig *jitConfig = ((J9JavaVM *)vm)->jitConfig;
+		rc = jitConfig->startJITServer(jitConfig);
+		if (0 != rc) {
+			rc = JITSERVER_STARTUP_FAILED;
+		} else {
+			rc = JITSERVER_OK;
+		}
+		(*vm)->DetachCurrentThread(vm);
+	} else {
+		rc = JITSERVER_THREAD_ATTACH_FAILED;
+	}
+	return rc;
+}
+
+/**
+ * Wait for JITServer to terminate.
+ *
+ * @param jitServer pointer to the JITServer interface
+ *
+ * @returns zero on success, else negative error code
+ */
+static int32_t
+waitForJITServerTermination(JITServer *jitServer)
+{
+	JavaVM *vm = jitServer->jvm;
+	JNIEnv *env = NULL;
+	int32_t rc = JITSERVER_OK;
+
+	rc = (*vm)->AttachCurrentThread(vm, (void **)&env, NULL);
+	if (JNI_OK == rc) {
+		J9JITConfig *jitConfig = ((J9JavaVM *)vm)->jitConfig;
+		rc = jitConfig->waitJITServerTermination(jitConfig);
+		if (0 != rc) {
+			rc = JITSERVER_WAIT_TERM_FAILED;
+		} else {
+			rc = JITSERVER_OK;
+		}
+		(*vm)->DetachCurrentThread(vm);
+	} else {
+		rc = JITSERVER_THREAD_ATTACH_FAILED;
+	}
+	return rc;
+}
+#endif /* J9VM_OPT_JITSERVER */
+
+/*
+ * Helper method to load and initialize a virtual machine instance.
+ *
+ * @param pvm pointer to the location where the JavaVM interface
+ *			pointer will be placed
+ * @param penv pointer to the location where the JNIEnv interface
+ *			pointer for the main thread will be placed
+ * @param vm_args java virtual machine initialization arguments
+ *
+ * @returns zero on success; otherwise, return a negative number
+ */
+static jint
+JNI_CreateJavaVM_impl(JavaVM **pvm, void **penv, void *vm_args, BOOLEAN isJITServer)
+{
 	J9JavaVM *j9vm = NULL;
 	jint result = JNI_OK;
 	IDATA xoss = -1;
 	IDATA ibmMallocTraceSet = FALSE;
  	char cwd[J9_MAX_PATH];
-#ifdef WIN32
+#if defined(WIN32)
 	wchar_t unicodeTemp[J9_MAX_PATH];
 	char *altLibraryPathBuffer = NULL;
-#endif /* WIN32 */
+	char *executableJarPath = NULL;
+#endif /* defined(WIN32) */
 	UDATA argEncoding = ARG_ENCODING_DEFAULT;
 	UDATA altJavaHomeSpecified = 0; /* not used on non-Windows */
 	J9PortLibraryVersion portLibraryVersion;
@@ -1778,6 +1848,11 @@ jint JNICALL JNI_CreateJavaVM(JavaVM **pvm, void **penv, void *vm_args) {
 	if (VERBOSE_INIT == localVerboseLevel) {
 		createParams.flags |= J9_CREATEJAVAVM_VERBOSE_INIT;
 	}
+#if defined(J9VM_OPT_JITSERVER)
+	if (isJITServer) {
+		createParams.flags |= J9_CREATEJAVAVM_START_JITSERVER;
+	}
+#endif /* J9VM_OPT_JITSERVER */
 
 	if (ibmMallocTraceSet) {
 		/* We have no access to the original command line, so cannot
@@ -1817,6 +1892,39 @@ jint JNICALL JNI_CreateJavaVM(JavaVM **pvm, void **penv, void *vm_args) {
 #else /* CALL_BUNDLED_FUNCTIONS_DIRECTLY */
 			zipFuncs = (J9ZipFunctionTable*) J9_GetInterface(IF_ZIPSUP, &j9portLibrary, j9binBuffer);
 #endif /* CALL_BUNDLED_FUNCTIONS_DIRECTLY */
+#if defined(WIN32)
+			{
+				BOOLEAN conversionSucceed = FALSE;
+				int32_t size = 0;
+				UDATA pathLen = strlen(specialArgs.executableJarPath);
+			
+				PORT_ACCESS_FROM_PORT(&j9portLibrary);
+				/* specialArgs.executableJarPath is retrieved from JavaVMInitArgs.options[i].optionString
+				 * which was set by Java Launcher in system default code page encoding.
+				 */
+				size = j9str_convert(J9STR_CODE_WINDEFAULTACP, J9STR_CODE_MUTF8, specialArgs.executableJarPath, pathLen, NULL, 0);
+				if (size > 0) {
+					size += 1; /* leave room for null */
+					executableJarPath = j9mem_allocate_memory(size, OMRMEM_CATEGORY_VM);
+					if (NULL != executableJarPath) {
+						size = j9str_convert(J9STR_CODE_WINDEFAULTACP, J9STR_CODE_MUTF8, specialArgs.executableJarPath, pathLen, executableJarPath, size);
+						if (size > 0) {
+							conversionSucceed = TRUE;
+						}
+					}
+				}
+				if (!conversionSucceed) {
+					result = JNI_ERR;
+					goto exit;
+				}
+				/* specialArgs.executableJarPath was assigned with javaCommandValue which is 
+				 * args->options[argCursor].optionString + strlen(javaCommand) within initialArgumentScan().
+				 * The optionString will be freed later at destroyJvmInitArgs().
+				 * Hence overwriting specialArgs.executableJarPath won't cause memory leak.
+				 */
+				specialArgs.executableJarPath = executableJarPath;
+			}
+#endif /* defined(WIN32) */
 		}
 		if (J2SE_CURRENT_VERSION >= J2SE_V11) {
 			optionsDefaultFileLocation = jvmBufferData(j9libBuffer);
@@ -1846,10 +1954,6 @@ jint JNICALL JNI_CreateJavaVM(JavaVM **pvm, void **penv, void *vm_args) {
 			|| (0 != addEnvironmentVariables(&j9portLibrary, args, &vmArgumentsList, localVerboseLevel))
 			|| (0 != addLauncherArgs(&j9portLibrary, args, launcherArgumentsSize, &vmArgumentsList,
 					&xServiceBuffer, argEncoding, localVerboseLevel))
-#ifdef J9VM_OPT_HARMONY
-			/* pass in the Harmony library */
-			|| (0 != addHarmonyPortLibrary(&j9portLibrary, &vmArgumentsList, localVerboseLevel))
-#endif /* J9VM_OPT_HARMONY */
 			|| (0 != addXserviceArgs(&j9portLibrary, &vmArgumentsList, xServiceBuffer, localVerboseLevel))
 		) {
 			result = JNI_ERR;
@@ -1912,19 +2016,14 @@ jint JNICALL JNI_CreateJavaVM(JavaVM **pvm, void **penv, void *vm_args) {
 		JavaVM * vm = (JavaVM*)BFUjavaVM;
 		*pvm = vm;
 
-#if !defined(HARMONY_VM)
 		/* Initialize the Sun VMI */
 		ENSURE_VMI();
-#endif
 
 		memcpy(&globalInvokeInterface, *vm, sizeof(J9InternalVMFunctions));
 		globalDestroyVM = globalInvokeInterface.DestroyJavaVM;
 		globalInvokeInterface.DestroyJavaVM = DestroyJavaVM;
 		issueWriteBarrier();
 		*vm = (struct JNIInvokeInterface_ *) &globalInvokeInterface;
-
-#if !defined(HARMONY_VM)
-		/* Harmony Select does not want any of the Win32 threading or reflection globals init. */
 
 #ifdef WIN32
 		result = initializeWin32ThreadEvents(BFUjavaVM);
@@ -1940,8 +2039,6 @@ jint JNICALL JNI_CreateJavaVM(JavaVM **pvm, void **penv, void *vm_args) {
 			(**pvm)->DestroyJavaVM(*pvm);
 			goto exit;
 		}
-#endif /* !defined(HARMONY_VM) */
-
 	} else {
 		freeGlobals();
 	}
@@ -1995,6 +2092,17 @@ exit:
 		f_threadDetach(attachedThread);
 	}
 #endif /* CALL_BUNDLED_FUNCTIONS_DIRECTLY */
+#if defined(WIN32)
+	if (NULL != executableJarPath) {
+		PORT_ACCESS_FROM_PORT(&j9portLibrary);
+		/* specialArgs.executableJarPath (overwritten with executableJarPath) is only used by 
+		 * addJarArguments(... specialArgs.executableJarPath, ...) which uses the path to load the jar files
+		 * and doesn't require the path afterwards.
+		 * So executableJarPath can be freed after that usage.
+		 */
+		j9mem_free_memory(executableJarPath);
+	}
+#endif /* defined(WIN32) */
 
 	return result;
 }
@@ -3324,10 +3432,9 @@ truncatePath(char *inputPath) {
 }
 
 /**********************************************************************
- * JVM_ functions start here (and aren't included for Harmony Select).
+ * JVM_ functions start here
  **********************************************************************/
 
-#if !defined(HARMONY_VM)
 /**
  *	void JNICALL JVM_OnExit(void *ptr)
  *	This function seems to be required by fontmanager.dll but is not
@@ -3470,69 +3577,31 @@ JVM_LoadSystemLibrary(const char *libName)
  *	DLL: jvm
  */
 
-/* NOTE THIS IS NOT REQUIRED FOR 1.4 */
+/* NOTE this is required by JDK15+ jdk.internal.loader.NativeLibraries.load().
+ *  it is only invoked by jdk.internal.loader.BootLoader.loadLibrary(),
+ */
 
 void* JNICALL
-JVM_LoadLibrary(const char *libName)
+JVM_LoadLibrary(const char* libName)
 {
-	JNIEnv *env;
-	JavaVM *vm = (JavaVM *) BFUjavaVM;
-	char errMsg[512];
-
-#ifdef WIN32
-	HINSTANCE dllHandle;
-	UINT prevMode;
+	void* result = NULL;
+	J9NativeLibrary* nativeLibrary = NULL;
+	J9JavaVM* javaVM = (J9JavaVM*)BFUjavaVM;
+	J9InternalVMFunctions* vmFuncs = javaVM->internalVMFunctions;
+	J9VMThread* currentThread = vmFuncs->currentVMThread(javaVM);
 
 	Trc_SC_LoadLibrary_Entry(libName);
-
-	prevMode = SetErrorMode( SEM_NOOPENFILEERRORBOX|SEM_FAILCRITICALERRORS );
-
-	/* LoadLibrary will try appending .DLL if necessary */
-	dllHandle = LoadLibrary ((LPCSTR)libName);
-	if (NULL == dllHandle) {
-		goto _end;
+	vmFuncs->internalEnterVMFromJNI(currentThread);
+	/* registerBootstrapLibrary can't have VM access */
+	vmFuncs->internalReleaseVMAccess(currentThread);
+	if (vmFuncs->registerBootstrapLibrary(currentThread, libName, &nativeLibrary, FALSE) == J9NATIVELIB_LOAD_OK) {
+		result = (void*)nativeLibrary->handle;
 	}
+	vmFuncs->internalAcquireVMAccess(currentThread);
+	vmFuncs->internalExitVMToJNI(currentThread);
 
-	SetErrorMode(prevMode);
-	Trc_SC_LoadLibrary_Exit(dllHandle);
-	return dllHandle;
-
-_end:
-	SetErrorMode(prevMode);
-
-#endif
-
-#if defined(J9UNIX) || defined(J9ZOS390)
-	void *dllHandle;
-#if defined(AIXPPC)
-	/* CMVC 137341:
-	 * dlopen() searches for libraries using the LIBPATH envvar as it was when the process
-	 * was launched.  This causes multiple issues such as:
-	 *  - finding 32 bit binaries for libomrsig.so instead of the 64 bit binary needed and vice versa
-	 *  - finding compressed reference binaries instead of non-compressed ref binaries
-	 *
-	 * calling loadAndInit(libname, 0 -> no flags, NULL -> use the currently defined LIBPATH) allows
-	 * us to load the library with the current libpath instead of the one at process creation
-	 * time. We can then call dlopen() as per normal and the just loaded library will be found.
-	 * */
-	loadAndInit((char *)libName, L_RTLD_LOCAL, NULL);
-#endif
-	dllHandle = dlopen( (char *)libName, RTLD_LAZY );
-	if(NULL != dllHandle) {
-		Trc_SC_LoadLibrary_Exit(dllHandle);
-		return dllHandle;
-	}
-#endif /* defined(J9UNIX) || defined(J9ZOS390) */
-
-	/* We are here means we failed to load library. Throw java.lang.UnsatisfiedLinkError */
- 	(*vm)->GetEnv(vm, (void **) &env, JNI_VERSION_1_2);
- 	if (NULL != env) {
- 		j9portLibrary.omrPortLibrary.str_printf(&j9portLibrary.omrPortLibrary, errMsg, sizeof(errMsg), "Failed to load library \"%s\"", libName);
- 		throwNewUnsatisfiedLinkError(env, errMsg);
- 	}
-
-	Trc_SC_LoadLibrary_Exit(NULL);
-	return NULL;
+	Trc_SC_LoadLibrary_Exit(result);
+	return result;
 }
 
 
@@ -5701,6 +5770,19 @@ JVM_GetEnclosingMethodInfo(JNIEnv *env, jclass theClass)
 	exit(204);
 }
 
+static jint JNICALL
+managementVMIVersion(JNIEnv *env)
+{
+	return JNI_VERSION_1_8;
+}
+
+typedef struct ManagementVMI {
+	void * unused1;
+	void * unused2;
+	jint (JNICALL *getManagementVMIVersion)(JNIEnv *env);
+} ManagementVMI;
+
+static ManagementVMI globalManagementVMI = {NULL, NULL, &managementVMIVersion};
 
 /**
  * void* JVM_GetManagement(jint)
@@ -5709,7 +5791,7 @@ void* JNICALL
 JVM_GetManagement(jint version)
 {
 	Trc_SC_GetManagement();
-	exit(203);
+	return &globalManagementVMI;
 }
 
 
@@ -5877,7 +5959,6 @@ JVM_Startup(JavaVM* vm, JNIEnv* env)
 {
 	return JNI_OK;
 }
-#endif /* #if !defined(HARMONY_VM) */
 
 #if defined(J9ZOS390)
 /**

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -45,14 +45,14 @@
 #include "il/DataTypes.hpp"
 #include "il/ILOpCodes.hpp"
 #include "il/ILOps.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
 #include "infra/Assert.hpp"
 #include "infra/BitVector.hpp"
 #include "infra/Cfg.hpp"
@@ -895,7 +895,7 @@ TR_ValueProfiler::addListOrArrayProfilingTrees(
 
    if (kind == BigDecimalInfo)
       {
-      TR::Node *bdarg = TR::Node::aconst(node, (uintptrj_t)_bdClass) ;
+      TR::Node *bdarg = TR::Node::aconst(node, (uintptr_t)_bdClass) ;
       bdarg->setIsClassPointerConstant(true);
 
       call->setAndIncChild(childNum++, bdarg);
@@ -908,7 +908,7 @@ TR_ValueProfiler::addListOrArrayProfilingTrees(
       call->setAndIncChild(childNum++, TR::Node::create(node, TR::iconst, 0, lengthOffset));
       }
 
-   TR::Node *arg = TR::Node::aconst(node, (uintptrj_t)valueInfo) ;
+   TR::Node *arg = TR::Node::aconst(node, (uintptr_t)valueInfo) ;
 
    call->setAndIncChild(childNum++, arg);
    call->setAndIncChild(childNum++, TR::Node::create(node, TR::iconst, 0, numExpandedValues));

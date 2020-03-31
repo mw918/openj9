@@ -27,11 +27,11 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.ibm.tools.attach.target.AttachHandler;
-import com.ibm.tools.attach.target.IPC;
+import openj9.internal.tools.attach.target.AttachHandler;
+import openj9.internal.tools.attach.target.DiagnosticProperties;
+import openj9.internal.tools.attach.target.DiagnosticUtils;
+import openj9.internal.tools.attach.target.IPC;
 import openj9.tools.attach.diagnostics.attacher.AttacherDiagnosticsProvider;
-import openj9.tools.attach.diagnostics.base.DiagnosticProperties;
-import openj9.tools.attach.diagnostics.base.DiagnosticUtils;
 
 /**
  * JMap A tool for listing heap information about another Java process
@@ -51,7 +51,7 @@ public class Jmap {
 			+ "    -histo: print statistics about classes on the heap, including number of objects and aggregate size%n"
 			+ "    -histo:live : Print only live objects%n"
 			+ "    -J: supply arguments to the Java VM running jmap%n"
-			+ "NOTE: this utility may significantly affect the performance of the target VM.%n"
+			+ "NOTE: this utility might significantly affect the performance of the target VM.%n"
 			+ "At least one option must be selected.%n";
 
 	/**

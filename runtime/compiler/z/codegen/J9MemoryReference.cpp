@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -31,16 +31,16 @@
 #include "codegen/Instruction.hpp"
 #include "codegen/Relocation.hpp"
 #include "codegen/S390Register.hpp"
+#include "il/AutomaticSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
-#include "il/symbol/AutomaticSymbol.hpp"
 
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include "codegen/CodeGenerator.hpp"
 #include "codegen/ConstantDataSnippet.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "codegen/InstOpCode.hpp"
 #include "codegen/Instruction.hpp"
 #include "codegen/Linkage.hpp"
@@ -72,16 +72,13 @@
 #include "il/DataTypes.hpp"
 #include "il/ILOpCodes.hpp"
 #include "il/ILOps.hpp"
-#include "il/Node.hpp"
-#include "il/Node_inlines.hpp"
+#include "il/RegisterMappedSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/AutomaticSymbol.hpp"
-#include "il/symbol/RegisterMappedSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "infra/Array.hpp"
 #include "infra/Assert.hpp"
 #include "infra/Bit.hpp"
@@ -351,11 +348,11 @@ J9::Z::MemoryReference::createPatchableDataInLitpool(TR::Node * node, TR::CodeGe
    TR::S390WritableDataSnippet * litpool = cg->CreateWritableConstant(node);
    litpool->setUnresolvedDataSnippet(uds);
 
-   if (TR::Compiler->target.cpu.getSupportsArch(TR::CPU::z10))
+   if (cg->comp()->target().cpu.getSupportsArch(TR::CPU::z10))
       {
       litpool->resetNeedLitPoolBasePtr();
       TR::S390RILInstruction * LRLinst;
-      LRLinst = (TR::S390RILInstruction *) generateRILInstruction(cg, TR::InstOpCode::getLoadRelativeLongOpCode(), node, tempReg, reinterpret_cast<uintptrj_t*>(0xBABE), 0);
+      LRLinst = (TR::S390RILInstruction *) generateRILInstruction(cg, TR::InstOpCode::getLoadRelativeLongOpCode(), node, tempReg, reinterpret_cast<uintptr_t*>(0xBABE), 0);
       uds->setDataReferenceInstruction(LRLinst);
       LRLinst->setSymbolReference(uds->getDataSymbolReference());
       LRLinst->setTargetSnippet(litpool);

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -36,9 +36,9 @@
 #include "env/jittypes.h"
 #include "env/VMJ9.h"
 #include "il/DataTypes.hpp"
+#include "il/LabelSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
-#include "il/symbol/LabelSymbol.hpp"
 #include "p/codegen/PPCEvaluator.hpp"
 #include "p/codegen/PPCInstruction.hpp"
 #include "p/codegen/GenerateInstructions.hpp"
@@ -53,1369 +53,6 @@ uint32_t getPPCCacheLineSize()
    return 32;
    }
 #endif
-
-TR::PPCMonitorEnterSnippet::PPCMonitorEnterSnippet(
-   TR::CodeGenerator   *codeGen,
-   TR::Node            *monitorNode,
-   int32_t             lwOffset,
-   bool                isPreserving,
-   TR::LabelSymbol      *incLabel,
-   TR::LabelSymbol      *callLabel,
-   TR::LabelSymbol      *restartLabel,
-   TR::Register        *objectClassReg)
-   : _incLabel(incLabel),
-     _lwOffset(lwOffset),
-     _isReservationPreserving(isPreserving),
-     _objectClassReg(objectClassReg),
-     TR::PPCHelperCallSnippet(codeGen, monitorNode, callLabel, monitorNode->getSymbolReference(), restartLabel)
-   {
-   // Helper call, preserves all registers
-   //
-   incLabel->setSnippet(this);
-   gcMap().setGCRegisterMask(0xFFFFFFFF);
-   }
-
-uint8_t *TR::PPCMonitorEnterSnippet::emitSnippetBody()
-   {
-
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg()->fe());
-
-   // The 32-bit code for the snippet looks like:
-   // incLabel:
-   //    rlwinm  threadReg, monitorReg, 0, LOCK_THREAD_PTR_AND_UPPER_COUNT_BIT_MASK
-   //    cmp     cr0, 0, metaReg, threadReg
-   //    bne     callLabel
-   //    addi    monitorReg, monitorReg, LOCK_INC_DEC_VALUE
-   //    stw     [objReg, monitor offset], monitorReg
-   //    b       restartLabel
-   // callLabel:
-   //    bl   jitMonitorEntry
-   //    b    restartLabel;
-
-   // for 64-bit the rlwinm is replaced with:
-   //    rldicr  threadReg, monitorReg, 0, (long) LOCK_THREAD_PTR_AND_UPPER_COUNT_BIT_MASK
-
-
-
-   // ReservationPreserving enter snippet looks like:
-   // incLabel:
-   //    li      tempReg, PRESERVE_ENTER_COMPLEMENT
-   //    andc    tempReg, monitorReg, tempReg
-   //    addi    threadReg, metaReg, RES
-   //    cmpl    cndReg, tempReg, threadReg
-   //    bne     callLabel
-   //    addi    monitorReg, monitorReg, INC
-   //    st      monitorReg, [objReg, lwOffset]
-   //    b       restartLabel
-   // callLabel:
-   //    bl      jitMonitorEntry
-   //    b       restartLabel
-
-   TR::RegisterDependencyConditions *deps = getRestartLabel()->getInstruction()->getDependencyConditions();
-
-   TR::RealRegister *metaReg  = cg()->getMethodMetaDataRegister();
-   TR::RealRegister *objReg;
-   if (_objectClassReg)
-      objReg = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(4)->getRealRegister());
-   else
-      objReg = cg()->machine()->getRealRegister(TR::RealRegister::gr3);
-   TR::RealRegister *cndReg = cg()->machine()->getRealRegister(TR::RealRegister::cr0);
-   TR::RealRegister *monitorReg = cg()->machine()->getRealRegister(TR::RealRegister::gr11);
-   TR::RealRegister *threadReg  = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(2)->getRealRegister());
-
-   TR::InstOpCode opcode;
-   TR::InstOpCode::Mnemonic opCodeValue;
-
-   uint8_t *buffer = cg()->getBinaryBufferCursor();
-
-   _incLabel->setCodeLocation(buffer);
-
-   if (isReservationPreserving())
-      {
-      TR::RealRegister *tempReg = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(4)->getRealRegister());
-
-      opcode.setOpCodeValue(TR::InstOpCode::li);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      tempReg->setRegisterFieldRT((uint32_t *)buffer);
-      *(int32_t *)buffer |= LOCK_RES_PRESERVE_ENTER_COMPLEMENT;
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::andc);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      tempReg->setRegisterFieldRA((uint32_t *)buffer);
-      monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-      tempReg->setRegisterFieldRB((uint32_t *)buffer);
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::addi);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      threadReg->setRegisterFieldRT((uint32_t *)buffer);
-      metaReg->setRegisterFieldRA((uint32_t *)buffer);
-      *(int32_t *)buffer |= LOCK_RESERVATION_BIT;
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::Op_cmpl);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldRT((uint32_t *)buffer);
-      tempReg->setRegisterFieldRA((uint32_t *)buffer);
-      threadReg->setRegisterFieldRB((uint32_t *)buffer);
-      buffer += PPC_INSTRUCTION_LENGTH;
-      }
-   else
-      {
-      if (TR::Compiler->target.is64Bit())
-         {
-         opcode.setOpCodeValue(TR::InstOpCode::rldicr);
-         buffer = opcode.copyBinaryToBuffer(buffer);
-         threadReg->setRegisterFieldRA((uint32_t *)buffer);
-         monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-         // sh = 0
-         // assumption here that thread pointer is in upper bits, so MB = 0
-         // ME = 32 + LOCK_LAST_RECURSION_BIT_NUMBER
-         int32_t ME = 32 + LOCK_LAST_RECURSION_BIT_NUMBER;
-         int32_t me_field_encoding = (ME >> 5) | ((ME & 0x1F) << 1);
-         *(int32_t *)buffer |= (me_field_encoding << 5);
-         }
-      else
-         {
-         opcode.setOpCodeValue(TR::InstOpCode::rlwinm);
-         buffer = opcode.copyBinaryToBuffer(buffer);
-         threadReg->setRegisterFieldRA((uint32_t *)buffer);
-         monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-         // SH = 0
-         // assumption here that thread pointer is in upper bits, so MB = 0
-         // ME = LOCK_LAST_RECURSION_BIT_NUMBER
-         *(int32_t *)buffer |= (LOCK_LAST_RECURSION_BIT_NUMBER << 1);
-         }
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::Op_cmp);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldRT((uint32_t *)buffer);
-      metaReg->setRegisterFieldRA((uint32_t *)buffer);
-      threadReg->setRegisterFieldRB((uint32_t *)buffer);
-      buffer += PPC_INSTRUCTION_LENGTH;
-      }
-
-   opcode.setOpCodeValue(TR::InstOpCode::bne);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   cndReg->setRegisterFieldBI((uint32_t *)buffer);
-   *(int32_t *)buffer |= 16;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::addi);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   monitorReg->setRegisterFieldRT((uint32_t *)buffer);
-   monitorReg->setRegisterFieldRA((uint32_t *)buffer);
-   *(int32_t *)buffer |= LOCK_INC_DEC_VALUE;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   if (TR::Compiler->target.is64Bit() && !fej9->generateCompressedLockWord())
-      opCodeValue = TR::InstOpCode::std;
-   else
-      opCodeValue = TR::InstOpCode::stw;
-   opcode.setOpCodeValue(opCodeValue);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-   objReg->setRegisterFieldRA((uint32_t *)buffer);
-   *(int32_t *)buffer |= _lwOffset & 0xFFFF;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::b);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   *(int32_t *)buffer |= (getRestartLabel()->getCodeLocation()-buffer) & 0x03FFFFFC;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   cg()->setBinaryBufferCursor(buffer);
-   buffer = TR::PPCHelperCallSnippet::emitSnippetBody();
-
-   return buffer;
-   }
-
-
-void
-TR::PPCMonitorEnterSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
-   {
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg()->fe());
-   uint8_t *cursor = getIncLabel()->getCodeLocation();
-
-   debug->printSnippetLabel(pOutFile, getIncLabel(), cursor, "Inc Monitor Counter");
-
-   TR::RegisterDependencyConditions *deps = getRestartLabel()->getInstruction()->getDependencyConditions();
-
-   TR::Machine *machine = cg()->machine();
-   TR::RealRegister *metaReg    = cg()->getMethodMetaDataRegister();
-   TR::RealRegister *objReg = _objectClassReg ?
-      machine->getRealRegister(deps->getPostConditions()->getRegisterDependency(4)->getRealRegister()) :
-      machine->getRealRegister(TR::RealRegister::gr3);
-   TR::RealRegister *condReg    = machine->getRealRegister(TR::RealRegister::cr0);
-   TR::RealRegister *monitorReg  = machine->getRealRegister(TR::RealRegister::gr11);
-   TR::RealRegister *threadReg = machine->getRealRegister(deps->getPostConditions()->getRegisterDependency(2)->getRealRegister());
-
-   if (isReservationPreserving())
-      {
-      TR::RealRegister *tempReg = machine->getRealRegister(deps->getPostConditions()->getRegisterDependency(4)->getRealRegister());
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "li \t%s, 0x%x\t;", debug->getName(tempReg), LOCK_RES_PRESERVE_ENTER_COMPLEMENT);
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "andc\t%s, %s, %s\t;", debug->getName(tempReg), debug->getName(monitorReg), debug->getName(tempReg));
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "addi\t%s, %s, %d\t;", debug->getName(threadReg), debug->getName(metaReg), LOCK_RESERVATION_BIT);
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "%s\t%s, %s, %s\t;", TR::InstOpCode::metadata[TR::InstOpCode::Op_cmpl].name, debug->getName(condReg), debug->getName(tempReg), debug->getName(threadReg));
-      cursor += 4;
-      }
-   else
-      {
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      if (TR::Compiler->target.is64Bit())
-         trfprintf(pOutFile, "rldicr \t%s, %s, 0, " INT64_PRINTF_FORMAT_HEX "; get thread value and high bit of count", debug->getName(threadReg), debug->getName(monitorReg), (int64_t) LOCK_THREAD_PTR_AND_UPPER_COUNT_BIT_MASK);
-      else
-         trfprintf(pOutFile, "rlwinm \t%s, %s, 0, 0x%x; get thread value and high bit of count", debug->getName(threadReg), debug->getName(monitorReg), LOCK_THREAD_PTR_AND_UPPER_COUNT_BIT_MASK);
-      cursor+= 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      if (TR::Compiler->target.is64Bit())
-         trfprintf(pOutFile, "cmp8 \t%s, %s, %s; Compare these two", debug->getName(condReg), debug->getName(metaReg), debug->getName(threadReg));
-      else
-         trfprintf(pOutFile, "cmp4 \t%s, %s, %s; Compare these two", debug->getName(condReg), debug->getName(metaReg), debug->getName(threadReg));
-      cursor+= 4;
-      }
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "bne \t");
-   debug->print(pOutFile, getSnippetLabel());
-   trfprintf(pOutFile, ", %s; Call Helper", debug->getName(condReg));
-   cursor+= 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "addi \t%s, %s, %d; Increment the count", debug->getName(monitorReg), debug->getName(monitorReg), LOCK_INC_DEC_VALUE);
-   cursor+= 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   if (TR::Compiler->target.is64Bit())
-      trfprintf(pOutFile, "std \t[%s, %d], %s; Store the new count", debug->getName(objReg), getLockWordOffset(), debug->getName(monitorReg));
-   else
-      trfprintf(pOutFile, "stw \t[%s, %d], %s; Store the new count", debug->getName(objReg), getLockWordOffset(), debug->getName(monitorReg));
-   cursor+= 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   int32_t distance = *((int32_t *) cursor) & 0x03fffffc;
-   distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t; ", (intptrj_t)cursor + distance);
-   debug->print(pOutFile, getRestartLabel());
-
-   debug->print(pOutFile, (TR::PPCHelperCallSnippet *)this);
-   }
-
-
-uint32_t TR::PPCMonitorEnterSnippet::getLength(int32_t estimatedSnippetStart)
-   {
-   int32_t len = isReservationPreserving()?32:24;
-   len += TR::PPCHelperCallSnippet::getLength(estimatedSnippetStart+len);
-   return len;
-   }
-
-int32_t TR::PPCMonitorEnterSnippet::setEstimatedCodeLocation(int32_t estimatedSnippetStart)
-   {
-   _incLabel->setEstimatedCodeLocation(estimatedSnippetStart);
-   getSnippetLabel()->setEstimatedCodeLocation(estimatedSnippetStart+ (isReservationPreserving()?32:24));
-   return(estimatedSnippetStart);
-   }
-
-TR::PPCMonitorExitSnippet::PPCMonitorExitSnippet(
-   TR::CodeGenerator   *codeGen,
-   TR::Node            *monitorNode,
-   int32_t            lwOffset,
-   bool               flag,
-   bool               isPreserving,
-   TR::LabelSymbol      *decLabel,
-   TR::LabelSymbol      *restoreAndCallLabel,
-   TR::LabelSymbol      *callLabel,
-   TR::LabelSymbol      *restartLabel,
-   TR::Register        *objectClassReg)
-   : _decLabel(decLabel),
-     _restoreAndCallLabel(restoreAndCallLabel),
-     _lwOffset(lwOffset),
-     _isReadOnly(flag),
-     _isReservationPreserving(isPreserving),
-     _objectClassReg(objectClassReg),
-     TR::PPCHelperCallSnippet(codeGen, monitorNode, callLabel, monitorNode->getSymbolReference(), restartLabel)
-   {
-   // Helper call, preserves all registers
-   //
-   decLabel->setSnippet(this);
-   gcMap().setGCRegisterMask(0xFFFFFFFF);
-   }
-
-uint8_t *TR::PPCMonitorExitSnippet::emitSnippetBody()
-   {
-
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg()->fe());
-
-   TR::RegisterDependencyConditions *deps = getRestartLabel()->getInstruction()->getDependencyConditions();
-
-   TR::RealRegister *metaReg  = cg()->getMethodMetaDataRegister();
-   TR::RealRegister *objReg;
-   if (_objectClassReg)
-      objReg = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(4)->getRealRegister());
-   else
-      objReg = cg()->machine()->getRealRegister(TR::RealRegister::gr3);
-   TR::RealRegister *cndReg = cg()->machine()->getRealRegister(TR::RealRegister::cr0);
-   TR::RealRegister *monitorReg = cg()->machine()->getRealRegister(TR::RealRegister::gr11);
-   TR::RealRegister *threadReg  = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(2)->getRealRegister());
-
-   TR::InstOpCode opcode;
-   TR::InstOpCode::Mnemonic opCodeValue;
-
-   uint8_t *buffer = cg()->getBinaryBufferCursor();
-
-   if (_isReadOnly)
-      {
-      // THIS CODE IS CURRENTLY DISABLED
-      // BEFORE THIS CODE CAN BE ENABLED IT MUST BE UPDATED FOR THE NEW LOCK FIELDS
-      // decLabel (actual restoreAndCallLabel):
-      //    andi    threadReg, monitorReg, 0x3
-      //    or      threadReg, metaReg, threadReg
-      //    stwcx.  [objReg, offsetReg], threadReg
-      //    beq     callLabel
-      //    b       loopLabel
-      // callLabel:
-      //    bl   jitMonitorExit
-      //    b    doneLabel;
-
-      TR::RealRegister *offsetReg = cg()->machine()->getRealRegister(TR::RealRegister::gr4);
-      _decLabel->setCodeLocation(buffer);
-
-      opcode.setOpCodeValue(TR::InstOpCode::andi_r);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-      threadReg->setRegisterFieldRA((uint32_t *)buffer);
-      *(int32_t *)buffer |= (0x3);
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::OR);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      threadReg->setRegisterFieldRA((uint32_t *)buffer);
-      threadReg->setRegisterFieldRS((uint32_t *)buffer);
-      metaReg->setRegisterFieldRB((uint32_t *)buffer);
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      if (TR::Compiler->target.is64Bit() && !fej9->generateCompressedLockWord())
-         opCodeValue = TR::InstOpCode::stdcx_r;
-      else
-         opCodeValue = TR::InstOpCode::stwcx_r;
-      opcode.setOpCodeValue(opCodeValue);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      threadReg->setRegisterFieldRS((uint32_t *)buffer);
-      objReg->setRegisterFieldRA((uint32_t *)buffer);
-      offsetReg->setRegisterFieldRB((uint32_t *)buffer);
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::beq);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldBI((uint32_t *)buffer);
-      *(int32_t *)buffer |= 8;
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::b);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      *(int32_t *)buffer |= (getRestoreAndCallLabel()->getCodeLocation()-buffer) & 0x03FFFFFC;
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      cg()->setBinaryBufferCursor(buffer);
-      buffer = TR::PPCHelperCallSnippet::emitSnippetBody();
-
-      return buffer;
-
-      }
-
-   // The 32-bit code for the snippet looks like:
-   // decLabel:
-   //    rlwinm  threadReg, monitorReg, 0, ~OBJECT_HEADER_LOCK_RECURSION_MASK  // mask out count field
-   //    cmp     cr0, 0, metaReg, threadReg
-   //    bne     callLabel                      // inflated or flc bit set
-   //    addi    monitorReg, monitorReg, -LOCK_INC_DEC_VALUE
-   //    stw     [objReg, monitor offset], monitorReg
-   //    b       restartLabel
-   // callLabel:
-   //    bl    jitMonitorExit
-   //    b     restartLabel
-
-   // mask out count field for 64-bit is:
-   //    li     threadReg, OBJECT_HEADER_LOCK_RECURSION_MASK
-   //    andc   threadReg, monitorReg, threadReg
-
-
-   // reservationPreserving exit snippet looks like:
-   // decLabel:
-   //    li     threadReg, OWING_NON_INFLATED_COMPLEMENT
-   //    andc   threadReg, monitorReg, threadReg
-   //    cmpl   cndReg, threadReg, metaReg
-   //    bne    callLabel
-   //    andi_r threadReg, monitorReg, OBJECT_HEADER_LOCK_RECURSION_MASK
-   //    beq    callLabel
-   //    andi_r threadReg, monitorReg, OWING_NON_INFLATED_COMPLEMENT
-   //    cmpli  cndReg, threadReg, LOCK_RES_CONTENDED_VALUE
-   //    beq    callLabel
-   //    addi   monitorReg, monitorReg, -INC
-   //    st     monitorReg, [objReg, lwOffset]
-   //    b      restartLabel
-   // callLabel:
-   //    bl     jitMonitorExit
-   //    b      restartLabel
-
-   _decLabel->setCodeLocation(buffer);
-
-   if (isReservationPreserving())
-      {
-      opcode.setOpCodeValue(TR::InstOpCode::li);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      threadReg->setRegisterFieldRT((uint32_t *)buffer);
-      *(int32_t *)buffer |= LOCK_OWNING_NON_INFLATED_COMPLEMENT;
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::andc);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      threadReg->setRegisterFieldRA((uint32_t *)buffer);
-      monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-      threadReg->setRegisterFieldRB((uint32_t *)buffer);
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::Op_cmpl);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldRT((uint32_t *)buffer);
-      threadReg->setRegisterFieldRA((uint32_t *)buffer);
-      metaReg->setRegisterFieldRB((uint32_t *)buffer);
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::bne);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldBI((uint32_t *)buffer);
-      *(int32_t *)buffer |= 36;
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::andi_r);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      threadReg->setRegisterFieldRA((uint32_t *)buffer);
-      monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-      *(int32_t *)buffer |= OBJECT_HEADER_LOCK_RECURSION_MASK;
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::beq);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldBI((uint32_t *)buffer);
-      *(int32_t *)buffer |= 28;
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::andi_r);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      threadReg->setRegisterFieldRA((uint32_t *)buffer);
-      monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-      *(int32_t *)buffer |= LOCK_OWNING_NON_INFLATED_COMPLEMENT;
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::Op_cmpli);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldRT((uint32_t *)buffer);
-      threadReg->setRegisterFieldRA((uint32_t *)buffer);
-      *(int32_t *)buffer |= LOCK_RES_CONTENDED_VALUE;
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::beq);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldBI((uint32_t *)buffer);
-      *(int32_t *)buffer |= 16;
-      buffer += PPC_INSTRUCTION_LENGTH;
-      }
-   else
-      {
-      if (TR::Compiler->target.is64Bit())
-         {
-         opcode.setOpCodeValue(TR::InstOpCode::addi);
-         buffer = opcode.copyBinaryToBuffer(buffer);
-         threadReg->setRegisterFieldRT((uint32_t *)buffer);
-         // RA = 0
-         *(int32_t *)buffer |= OBJECT_HEADER_LOCK_RECURSION_MASK;
-         buffer += PPC_INSTRUCTION_LENGTH;
-
-         opcode.setOpCodeValue(TR::InstOpCode::andc);
-         buffer = opcode.copyBinaryToBuffer(buffer);
-         threadReg->setRegisterFieldRA((uint32_t *)buffer);
-         monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-         threadReg->setRegisterFieldRB((uint32_t *)buffer);
-         }
-      else
-         {
-         opcode.setOpCodeValue(TR::InstOpCode::rlwinm);
-         buffer = opcode.copyBinaryToBuffer(buffer);
-         threadReg->setRegisterFieldRA((uint32_t *)buffer);
-         monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-         // SH = 0
-         // assumption here that thread pointer is in upper bits, so MB = 0
-         // MB = LOCK_FIRST_RECURSION_BIT_NUMBER + 1
-         // ME = LOCK_LAST_RECURSION_BIT_NUMBER - 1
-         // this is a mask that wraps from the low order bits into the high bits
-         *(int32_t *)buffer |= ((LOCK_FIRST_RECURSION_BIT_NUMBER + 1) << 6);
-         *(int32_t *)buffer |= ((LOCK_LAST_RECURSION_BIT_NUMBER - 1) << 1);
-         }
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::Op_cmp);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldRT((uint32_t *)buffer);
-      metaReg->setRegisterFieldRA((uint32_t *)buffer);
-      threadReg->setRegisterFieldRB((uint32_t *)buffer);
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::bne);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldBI((uint32_t *)buffer);
-      *(int32_t *)buffer |= 16;
-      buffer += PPC_INSTRUCTION_LENGTH;
-      }
-
-   opcode.setOpCodeValue(TR::InstOpCode::addi);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   monitorReg->setRegisterFieldRT((uint32_t *)buffer);
-   monitorReg->setRegisterFieldRA((uint32_t *)buffer);
-   *(int32_t *)buffer |= (-LOCK_INC_DEC_VALUE) & 0xFFFF;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   if (TR::Compiler->target.is64Bit() && !fej9->generateCompressedLockWord())
-      opCodeValue = TR::InstOpCode::std;
-   else
-      opCodeValue = TR::InstOpCode::stw;
-   opcode.setOpCodeValue(opCodeValue);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-   objReg->setRegisterFieldRA((uint32_t *)buffer);
-   *(int32_t *)buffer |= _lwOffset & 0xFFFF;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::b);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   *(int32_t *)buffer |= (getRestartLabel()->getCodeLocation()-buffer) & 0x03FFFFFC;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   cg()->setBinaryBufferCursor(buffer);
-   buffer = TR::PPCHelperCallSnippet::emitSnippetBody();
-
-   return buffer;
-   }
-
-
-void
-TR::PPCMonitorExitSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
-   {
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg()->fe());
-   uint8_t *cursor = getDecLabel()->getCodeLocation();
-
-   debug->printSnippetLabel(pOutFile, getDecLabel(), cursor, "Dec Monitor Counter");
-
-   TR::RegisterDependencyConditions *conditions = getRestartLabel()->getInstruction()->getDependencyConditions();
-   TR::RealRegister *objReg     = _objectClassReg ?
-      cg()->machine()->getRealRegister(conditions->getPostConditions()->getRegisterDependency(4)->getRealRegister()) :
-      cg()->machine()->getRealRegister(TR::RealRegister::gr3);
-   TR::RealRegister *metaReg    = cg()->getMethodMetaDataRegister();
-   TR::RealRegister *condReg    = cg()->machine()->getRealRegister(TR::RealRegister::cr0);
-   TR::RealRegister *monitorReg  = cg()->machine()->getRealRegister(TR::RealRegister::gr11);
-   TR::RealRegister *threadReg = cg()->machine()->getRealRegister(conditions->getPostConditions()->getRegisterDependency(2)->getRealRegister());
-
-   if (isReservationPreserving())
-      {
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "li \t%s, 0x%x\t;", debug->getName(threadReg), LOCK_OWNING_NON_INFLATED_COMPLEMENT);
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "andc\t%s, %s, %s\t;", debug->getName(threadReg), debug->getName(monitorReg), debug->getName(threadReg));
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "%s\t%s, %s, %s\t;", TR::InstOpCode::metadata[TR::InstOpCode::Op_cmpl].name, debug->getName(condReg), debug->getName(threadReg), debug->getName(metaReg));
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "bne \t%s, " POINTER_PRINTF_FORMAT "\t;", debug->getName(condReg), (intptrj_t)cursor + 36);
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "andi.\t%s, %s, 0x%x\t;", debug->getName(threadReg), debug->getName(monitorReg), OBJECT_HEADER_LOCK_RECURSION_MASK);
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "beq \t%s, " POINTER_PRINTF_FORMAT "\t;", debug->getName(condReg), (intptrj_t)cursor + 28);
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "andi.\t%s, %s, 0x%x\t;", debug->getName(threadReg), debug->getName(monitorReg), LOCK_OWNING_NON_INFLATED_COMPLEMENT);
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "cmplwi %s, %s, 0x%x\t;", debug->getName(condReg), debug->getName(threadReg), LOCK_RES_CONTENDED_VALUE);
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "beq \t%s, " POINTER_PRINTF_FORMAT "\t;", debug->getName(condReg), (intptrj_t)cursor + 16);
-      cursor += 4;
-      }
-   else
-      {
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      if (TR::Compiler->target.is64Bit())
-         {
-         trfprintf(pOutFile, "li \t%s, 0x%x", debug->getName(threadReg), *((int32_t *) cursor) & 0x0000ffff);
-         cursor += 4;
-         debug->printPrefix(pOutFile, NULL, cursor, 4);
-         trfprintf(pOutFile, "andc \t%s, %s, %s; Mask out count field", debug->getName(threadReg), debug->getName(monitorReg), debug->getName(threadReg));
-         }
-      else
-         trfprintf(pOutFile, "rlwinm \t%s, %s, 0, 0x%x; Mask out count field", debug->getName(threadReg), debug->getName(monitorReg), ~OBJECT_HEADER_LOCK_RECURSION_MASK);
-      cursor+= 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      if (TR::Compiler->target.is64Bit())
-         trfprintf(pOutFile, "cmp8 \t%s, %s, %s; Test for inflated or flc bit set", debug->getName(condReg), debug->getName(metaReg), debug->getName(threadReg));
-      else
-         trfprintf(pOutFile, "cmp4 \t%s, %s, %s; Test for inflated or flc bit set", debug->getName(condReg), debug->getName(metaReg), debug->getName(threadReg));
-      cursor+= 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "bne \t");
-      debug->print(pOutFile, getSnippetLabel());
-      trfprintf(pOutFile, ", %s; Call Helper", debug->getName(condReg));
-      cursor+= 4;
-      }
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "addi \t%s, %s, %d; Decrement the count", debug->getName(monitorReg), debug->getName(monitorReg), -LOCK_INC_DEC_VALUE);
-   cursor+= 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   if (TR::Compiler->target.is64Bit())
-      trfprintf(pOutFile, "std \t[%s, %d], %s; Store the new count", debug->getName(objReg), getLockWordOffset(), debug->getName(monitorReg));
-   else
-      trfprintf(pOutFile, "stw \t[%s, %d], %s; Store the new count", debug->getName(objReg), getLockWordOffset(), debug->getName(monitorReg));
-   cursor+= 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   int32_t distance = *((int32_t *) cursor) & 0x03fffffc;
-   distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t; ", (intptrj_t)cursor + distance);
-   debug->print(pOutFile, getRestartLabel());
-
-   debug->print(pOutFile, (TR::PPCHelperCallSnippet *)this);
-   }
-
-
-uint32_t TR::PPCMonitorExitSnippet::getLength(int32_t estimatedSnippetStart)
-   {
-
-   int32_t len;
-   if (_isReadOnly)
-      len = PPC_INSTRUCTION_LENGTH*5;
-   else if (isReservationPreserving())
-      len = PPC_INSTRUCTION_LENGTH*12;
-   else
-      {
-      if (TR::Compiler->target.is64Bit())
-         len = PPC_INSTRUCTION_LENGTH*7;
-      else
-         len = PPC_INSTRUCTION_LENGTH*6;
-      }
-   len += TR::PPCHelperCallSnippet::getLength(estimatedSnippetStart + len);
-   return len;
-   }
-
-int32_t TR::PPCMonitorExitSnippet::setEstimatedCodeLocation(int32_t estimatedSnippetStart)
-   {
-   int32_t len;
-   _decLabel->setEstimatedCodeLocation(estimatedSnippetStart);
-
-   if (_isReadOnly)
-      len = PPC_INSTRUCTION_LENGTH*5;
-   else if (isReservationPreserving())
-      len = PPC_INSTRUCTION_LENGTH*12;
-   else
-      {
-      if (TR::Compiler->target.is64Bit())
-         len = PPC_INSTRUCTION_LENGTH*7;
-      else
-         len = PPC_INSTRUCTION_LENGTH*6;
-      }
-
-   getSnippetLabel()->setEstimatedCodeLocation(estimatedSnippetStart+len);
-   return(estimatedSnippetStart);
-   }
-
-TR::PPCLockReservationEnterSnippet::PPCLockReservationEnterSnippet(
-   TR::CodeGenerator   *cg,
-   TR::Node            *monitorNode,
-   int32_t            lwOffset,
-   TR::LabelSymbol      *startLabel,
-   TR::LabelSymbol      *enterCallLabel,
-   TR::LabelSymbol      *restartLabel,
-   TR::Register        *objectClassReg)
-   : _lwOffset(lwOffset), _startLabel(startLabel),
-     _objectClassReg(objectClassReg),
-     TR::PPCHelperCallSnippet(cg, monitorNode, enterCallLabel, monitorNode->getSymbolReference(), restartLabel)
-   {
-   startLabel->setSnippet(this);
-   // Default registerMask is right already.
-   }
-
-uint8_t *
-TR::PPCLockReservationEnterSnippet::emitSnippetBody()
-   {
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg()->fe());
-
-   // PRIMITIVE lockReservation enter snippet looks like:
-   // startLabel:
-   //    cmpli cr0, monitorReg, 0
-   //    bne   reserved_checkLabel
-   //    li    tempReg, lwOffset
-   // loopLabel:
-   //    larx  monitorReg, [objReg, tempReg]
-   //    cmpli cr0, monitorReg, 0
-   //    bne   enterCallLabel
-   //    stcx. valReg, [objReg, tempReg]
-   //    bne   loopLabel
-   //    isync
-   //    b     restartLabel
-   // reserved_checkLabel:
-   //    li    tempReg, PRIMITIVE_ENTER_MASK
-   //    andc  tempReg, monitorReg, tempReg
-   //    cmpl  cr0, tempReg, valReg
-   //    beq   restartLabel (NOTE: possible far branch.)
-   // enterCallLabel:
-   //    bl    jitMonitorEntry
-   //    b     restartLabel
-
-   // lockReservation enter snippet looks like:
-   // startLabel:
-   //    cmpli cr0, monitorReg, 0
-   //    bne   reserved_checkLabel
-   //    li    tempReg, lwOffset
-   //    addi  valReg, metaReg, RES+INC           <--- Diff from PRIMITIVE
-   // loopLabel:
-   //    larx  monitorReg, [objReg, tempReg]
-   //    cmpli cr0, monitorReg, 0
-   //    bne   enterCallLabel
-   //    stcx. valReg, [objReg, tempReg]
-   //    bne   loopLabel
-   //    isync
-   //    b     restartLabel
-   // reserved_checkLabel:
-   //    li    tempReg, NON_PRIMITIVE_ENTER_MASK
-   //    andc  tempReg, monitorReg, tempReg
-   //    addi  valReg, metaReg, RES               <--- Diff
-   //    cmpl  cr0, tempReg, valReg
-   //    bne   enterCallLabel                     <--- Diff
-   //    addi  monitorReg, monitorReg, INC        <--- Diff
-   //    st    monitorReg, [objReg, lwOffset]     <--- Diff
-   //    b     restartLabel                       <--- Diff
-   // enterCallLabel:
-   //    bl    jitMonitorEntry
-   //    b     restartLabel
-
-   // NOTE: (potential improvements)
-   //   a) Didn't try to save 1 instruction in 32bit mode for reservation checking: maintainability;
-   //   b) Didn't make a case for non-SMP machine: maintainability too;
-   //   c) Recursive-reserved but contended, we call helper (but unnecessary);
-
-   TR::RegisterDependencyConditions *deps = getRestartLabel()->getInstruction()->getDependencyConditions();
-   TR::RealRegister *metaReg  = cg()->getMethodMetaDataRegister();
-   TR::RealRegister *objReg;
-   if (_objectClassReg)
-      objReg = ( TR::RealRegister *) _objectClassReg->getRealRegister();
-   else
-      objReg = cg()->machine()->getRealRegister(TR::RealRegister::gr3);
-   TR::RealRegister *cndReg = cg()->machine()->getRealRegister(TR::RealRegister::cr0);
-   TR::RealRegister *monitorReg = cg()->machine()->getRealRegister(TR::RealRegister::gr11);
-
-   int32_t regNum = 3;
-
-   TR::RealRegister *valReg  = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(regNum)->getRealRegister());
-   TR::RealRegister *tempReg  = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(regNum + 1)->getRealRegister());
-
-   TR::InstOpCode  opcode;
-   TR::InstOpCode::Mnemonic opCodeValue;
-   uint8_t      *buffer = cg()->getBinaryBufferCursor();
-   bool          isPrimitive = getNode()->isPrimitiveLockedRegion();
-
-   getStartLabel()->setCodeLocation(buffer);
-
-   opcode.setOpCodeValue(TR::InstOpCode::Op_cmpli);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   cndReg->setRegisterFieldRT((uint32_t *)buffer);
-   monitorReg->setRegisterFieldRA((uint32_t *)buffer);
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::bne);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   cndReg->setRegisterFieldBI((uint32_t *)buffer);
-   *(int32_t *)buffer |= isPrimitive?36:40;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::li);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   tempReg->setRegisterFieldRT((uint32_t *)buffer);
-   *(int32_t *)buffer |= getLockWordOffset() & 0x0000FFFF;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   if (!isPrimitive)
-      {
-      opcode.setOpCodeValue(TR::InstOpCode::addi);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      valReg->setRegisterFieldRT((uint32_t *)buffer);
-      metaReg->setRegisterFieldRA((uint32_t *)buffer);
-      *(int32_t *)buffer |= LOCK_RESERVATION_BIT | LOCK_INC_DEC_VALUE;
-      buffer += PPC_INSTRUCTION_LENGTH;
-      }
-
-   // LoopLabel is here:
-   if (TR::Compiler->target.is64Bit() && !fej9->generateCompressedLockWord())
-      opCodeValue = TR::InstOpCode::ldarx;
-   else
-      opCodeValue = TR::InstOpCode::lwarx;
-   opcode.setOpCodeValue(opCodeValue);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   monitorReg->setRegisterFieldRT((uint32_t *)buffer);
-   objReg->setRegisterFieldRA((uint32_t *)buffer);
-   tempReg->setRegisterFieldRB((uint32_t *)buffer);
-   if (TR::Compiler->target.cpu.id() >= TR_PPCp6)
-      *(int32_t *)buffer |=  PPCOpProp_LoadReserveExclusiveAccess;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::Op_cmpli);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   cndReg->setRegisterFieldRT((uint32_t *)buffer);
-   monitorReg->setRegisterFieldRA((uint32_t *)buffer);
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::bne);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   cndReg->setRegisterFieldBI((uint32_t *)buffer);
-   *(int32_t *)buffer |= isPrimitive?36:52;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   if (TR::Compiler->target.is64Bit() && !fej9->generateCompressedLockWord())
-      opCodeValue = TR::InstOpCode::stdcx_r;
-   else
-      opCodeValue = TR::InstOpCode::stwcx_r;
-   opcode.setOpCodeValue(opCodeValue);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   valReg->setRegisterFieldRS((uint32_t *)buffer);
-   objReg->setRegisterFieldRA((uint32_t *)buffer);
-   tempReg->setRegisterFieldRB((uint32_t *)buffer);
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::bne);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   cndReg->setRegisterFieldBI((uint32_t *)buffer);
-   *(int32_t *)buffer |= (-16) & 0x0000FFFF;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::isync);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::b);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   *(int32_t *)buffer |= (getRestartLabel()->getCodeLocation() - buffer) & 0x03FFFFFC;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   // reserved_checkLabel is here:
-   opcode.setOpCodeValue(TR::InstOpCode::li);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   tempReg->setRegisterFieldRT((uint32_t *)buffer);
-   *(int32_t *)buffer |= isPrimitive?LOCK_RES_PRIMITIVE_ENTER_MASK:LOCK_RES_NON_PRIMITIVE_ENTER_MASK;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::andc);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   tempReg->setRegisterFieldRA((uint32_t *)buffer);
-   monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-   tempReg->setRegisterFieldRB((uint32_t *)buffer);
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   if (!isPrimitive)
-      {
-      opcode.setOpCodeValue(TR::InstOpCode::addi);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      valReg->setRegisterFieldRT((uint32_t *)buffer);
-      metaReg->setRegisterFieldRA((uint32_t *)buffer);
-      *(int32_t *)buffer |= LOCK_RESERVATION_BIT;
-      buffer += PPC_INSTRUCTION_LENGTH;
-      }
-
-   opcode.setOpCodeValue(TR::InstOpCode::Op_cmpl);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   cndReg->setRegisterFieldRT((uint32_t *)buffer);
-   tempReg->setRegisterFieldRA((uint32_t *)buffer);
-   valReg->setRegisterFieldRB((uint32_t *)buffer);
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   if (isPrimitive)
-      {
-      int32_t bOffset = getRestartLabel()->getCodeLocation()-buffer;
-      if (bOffset<LOWER_IMMED || bOffset>UPPER_IMMED)
-         bOffset = 8;
-      opcode.setOpCodeValue(TR::InstOpCode::beq);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldBI((uint32_t *)buffer);
-      *(int32_t *)buffer |= bOffset & 0x0000FFFF;
-      buffer += PPC_INSTRUCTION_LENGTH;
-      }
-   else
-      {
-      opcode.setOpCodeValue(TR::InstOpCode::bne);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldBI((uint32_t *)buffer);
-      *(int32_t *)buffer |= 16;
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::addi);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      monitorReg->setRegisterFieldRT((uint32_t *)buffer);
-      monitorReg->setRegisterFieldRA((uint32_t *)buffer);
-      *(int32_t *)buffer |= LOCK_INC_DEC_VALUE;
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      if (TR::Compiler->target.is64Bit() && !fej9->generateCompressedLockWord())
-         opCodeValue = TR::InstOpCode::std;
-      else
-         opCodeValue = TR::InstOpCode::stw;
-      opcode.setOpCodeValue(opCodeValue);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-      objReg->setRegisterFieldRA((uint32_t *)buffer);
-      *(int32_t *)buffer |= getLockWordOffset() & 0x0000FFFF;
-      buffer += PPC_INSTRUCTION_LENGTH;
-
-      opcode.setOpCodeValue(TR::InstOpCode::b);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      *(int32_t *)buffer |= (getRestartLabel()->getCodeLocation()-buffer) & 0x03FFFFFC;
-      buffer += PPC_INSTRUCTION_LENGTH;
-      }
-
-   cg()->setBinaryBufferCursor(buffer);
-   buffer = TR::PPCHelperCallSnippet::emitSnippetBody();
-
-   return buffer;
-   }
-
-
-void
-TR::PPCLockReservationEnterSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
-   {
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg()->fe());
-   uint8_t *cursor = getStartLabel()->getCodeLocation();
-   int32_t distance;
-   bool     isPrimitive = getNode()->isPrimitiveLockedRegion();
-
-   debug->printSnippetLabel(pOutFile, getStartLabel(), cursor, isPrimitive?"Primitive Reservation Enter":"Reservation Enter");
-
-   TR::RegisterDependencyConditions *conditions = getRestartLabel()->getInstruction()->getDependencyConditions();
-   TR::RealRegister *objReg     = cg()->machine()->getRealRegister(TR::RealRegister::gr3);
-   TR::RealRegister *metaReg    = cg()->getMethodMetaDataRegister();
-   TR::RealRegister *condReg    = cg()->machine()->getRealRegister(TR::RealRegister::cr0);
-   TR::RealRegister *monitorReg = cg()->machine()->getRealRegister(TR::RealRegister::gr11);
-   TR::RealRegister *valReg     = cg()->machine()->getRealRegister(conditions->getPostConditions()->getRegisterDependency(3)->getRealRegister());
-   TR::RealRegister *tempReg    = cg()->machine()->getRealRegister(conditions->getPostConditions()->getRegisterDependency(4)->getRealRegister());
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   if (TR::Compiler->target.is64Bit())
-      trfprintf(pOutFile, "cmpldi ");
-   else
-      trfprintf(pOutFile, "cmplwi ");
-   trfprintf(pOutFile, "%s, %s, 0\t;", debug->getName(condReg), debug->getName(monitorReg));
-   cursor+= 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "bne \t%s, " POINTER_PRINTF_FORMAT "\t;", debug->getName(condReg), (intptrj_t)cursor + (isPrimitive?36:40));
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "li \t%s, %d\t;", debug->getName(tempReg), getLockWordOffset());
-   cursor += 4;
-
-   if (!isPrimitive)
-      {
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "addi\t%s, %s, %d\t;", debug->getName(valReg), debug->getName(metaReg), LOCK_RESERVATION_BIT | LOCK_INC_DEC_VALUE);
-      cursor += 4;
-      }
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "%s\t%s, [%s, %s]\t;", TR::InstOpCode::metadata[TR::InstOpCode::Op_larx].name, debug->getName(monitorReg), debug->getName(objReg), debug->getName(tempReg));
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "%s %s, %s, 0\t;", TR::InstOpCode::metadata[TR::InstOpCode::Op_cmpli].name, debug->getName(condReg), debug->getName(monitorReg));
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "bne \t%s, " POINTER_PRINTF_FORMAT "\t;", debug->getName(condReg), (intptrj_t)cursor + (isPrimitive?36:52));
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "%s\t[%s,%s], %s\t;", TR::InstOpCode::metadata[TR::InstOpCode::Op_stcx_r].name, debug->getName(objReg), debug->getName(tempReg), debug->getName(valReg));
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "bne \t%s, " POINTER_PRINTF_FORMAT "\t; Loop back", debug->getName(condReg), (intptrj_t)cursor - 16);
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "isync \t\t\t;");
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   distance = *((int32_t *) cursor) & 0x03fffffc;
-   distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t; ", (intptrj_t)cursor + distance);
-   debug->print(pOutFile, getRestartLabel());
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "li \t%s, 0x%x\t; reserved_check begins", debug->getName(tempReg), isPrimitive?LOCK_RES_PRIMITIVE_ENTER_MASK:LOCK_RES_NON_PRIMITIVE_ENTER_MASK);
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "andc\t%s, %s, %s\t;", debug->getName(tempReg), debug->getName(monitorReg), debug->getName(tempReg));
-   cursor += 4;
-
-   if (!isPrimitive)
-      {
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "addi\t%s, %s, %d\t;", debug->getName(valReg), debug->getName(metaReg), LOCK_RESERVATION_BIT);
-      cursor += 4;
-      }
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "%s\t%s, %s, %s\t;", TR::InstOpCode::metadata[TR::InstOpCode::Op_cmpl].name, debug->getName(condReg), debug->getName(tempReg), debug->getName(valReg));
-   cursor += 4;
-
-   if (isPrimitive)
-      {
-      distance = *((int32_t *) cursor) & 0x0000ffff;
-      distance = (distance << 16) >> 16;   // sign extend
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "beq \t%s, " POINTER_PRINTF_FORMAT "\t;", debug->getName(condReg), (intptrj_t)cursor + distance);
-      cursor += 4;
-      }
-   else
-      {
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "bne \t%s, " POINTER_PRINTF_FORMAT "\t;", debug->getName(condReg), (intptrj_t)cursor + 16);
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "addi\t%s, %s, %d\t;", debug->getName(monitorReg), debug->getName(monitorReg), LOCK_INC_DEC_VALUE);
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      trfprintf(pOutFile, "%s\t[%s,%d], %s\t;", TR::InstOpCode::metadata[TR::InstOpCode::Op_st].name, debug->getName(objReg), getLockWordOffset(), debug->getName(monitorReg));
-      cursor += 4;
-
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      distance = *((int32_t *) cursor) & 0x03fffffc;
-      distance = (distance << 6) >> 6;   // sign extend
-      trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t; ", (intptrj_t)cursor + distance);
-      debug->print(pOutFile, getRestartLabel());
-      cursor += 4;
-      }
-
-   debug->print(pOutFile, (TR::PPCHelperCallSnippet *)this);
-   }
-
-
-uint32_t
-TR::PPCLockReservationEnterSnippet::getLength(int32_t estimatedSnippetStart)
-   {
-   int32_t len = getNode()->isPrimitiveLockedRegion()?56:76;
-   len += TR::PPCHelperCallSnippet::getLength(estimatedSnippetStart+len);
-   return len;
-   }
-
-int32_t
-TR::PPCLockReservationEnterSnippet::setEstimatedCodeLocation(int32_t p)
-   {
-   getStartLabel()->setEstimatedCodeLocation(p);
-   getSnippetLabel()->setEstimatedCodeLocation(p+ (getNode()->isPrimitiveLockedRegion()?56:76));
-   return p;
-   }
-
-TR::PPCLockReservationExitSnippet::PPCLockReservationExitSnippet(
-   TR::CodeGenerator   *cg,
-   TR::Node            *monitorNode,
-   int32_t            lwOffset,
-   TR::LabelSymbol      *startLabel,
-   TR::LabelSymbol      *exitCallLabel,
-   TR::LabelSymbol      *restartLabel,
-   TR::Register        *objectClassReg)
-   : _startLabel(startLabel), _lwOffset(lwOffset),
-     _objectClassReg(objectClassReg),
-     TR::PPCHelperCallSnippet(cg, monitorNode, exitCallLabel, monitorNode->getSymbolReference(), restartLabel)
-   {
-   startLabel->setSnippet(this);
-   // Default registerMask is right already.
-   }
-
-uint8_t *
-TR::PPCLockReservationExitSnippet::emitSnippetBody()
-   {
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg()->fe());
-
-   // PRIMITIVE lockReservation exit snippet looks like:
-   // startLabel:
-   //    li     tempReg, RES_OWNING_COMPLEMENT
-   //    andc   tempReg, monitorReg, tempReg
-   //    addi   valReg, metaReg, RES_BIT
-   //    cmpl   cndReg, tempReg, valReg               <--- RES not owned by me: impossible case -- should not INC
-   //    bne    exitCallLabel
-   //    andi_r tempReg, monitorReg, RECURSION_MASK
-   //    bne    restartLabel (NOTE: potential far)
-   //    addi   monitorReg, monitorReg, INC
-   //    st     monitorReg, [objReg, lwOffset]
-   // exitCallLabel:
-   //    bl     jitMonitorExit
-   //    b      restartLabel
-
-   // Non-PRIMITIVE reservationLock exit snippet looks like:
-   // startLabel:
-   //    li     tempReg, RES_OWNING_COMPLEMENT
-   //    andc   tempReg, monitorReg, tempReg
-   //    addi   valReg, metaReg, RES
-   //    cmpl   cndReg, tempReg, valReg
-   //    bne    exitCallLabel
-   //    andi_r tempReg, monitorReg, NON_PRIMITIVE_EXIT_MASK         <--- Diff from PRIMITIVE
-   //    beq    exitCallLabel                                        <--- Diff
-   //    addi   monitorReg, monitorReg, -INC                         <--- Diff
-   //    st     monitorReg, [objReg, lwOffset]
-   //    b      restartLabel                                         <--- Diff
-   // exitCallLabel:
-   //    bl     jitMonitorExit
-   //    b      restartLabel
-
-   TR::RegisterDependencyConditions *deps = getRestartLabel()->getInstruction()->getDependencyConditions();
-   TR::RealRegister *metaReg  = cg()->getMethodMetaDataRegister();
-   TR::RealRegister *objReg;
-   if (_objectClassReg)
-     objReg = (TR::RealRegister *) _objectClassReg->getRealRegister();
-  else
-     objReg = cg()->machine()->getRealRegister(TR::RealRegister::gr3);
-
-   TR::RealRegister *cndReg = cg()->machine()->getRealRegister(TR::RealRegister::cr0);
-   TR::RealRegister *monitorReg = cg()->machine()->getRealRegister(TR::RealRegister::gr11);
-
-   int32_t regNum = 3;
-
-   TR::RealRegister *valReg  = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(regNum)->getRealRegister());
-   TR::RealRegister *tempReg  = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(regNum + 1)->getRealRegister());
-
-   TR::InstOpCode  opcode;
-   TR::InstOpCode::Mnemonic opCodeValue;
-   uint8_t      *buffer = cg()->getBinaryBufferCursor();
-   bool          isPrimitive = getNode()->isPrimitiveLockedRegion();
-
-   getStartLabel()->setCodeLocation(buffer);
-
-   opcode.setOpCodeValue(TR::InstOpCode::li);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   tempReg->setRegisterFieldRT((uint32_t *)buffer);
-   *(int32_t *)buffer |= LOCK_RES_OWNING_COMPLEMENT;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::andc);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   tempReg->setRegisterFieldRA((uint32_t *)buffer);
-   monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-   tempReg->setRegisterFieldRB((uint32_t *)buffer);
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::addi);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   valReg->setRegisterFieldRT((uint32_t *)buffer);
-   metaReg->setRegisterFieldRA((uint32_t *)buffer);
-   *(int32_t *)buffer |= LOCK_RESERVATION_BIT;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::Op_cmpl);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   cndReg->setRegisterFieldRT((uint32_t *)buffer);
-   tempReg->setRegisterFieldRA((uint32_t *)buffer);
-   valReg->setRegisterFieldRB((uint32_t *)buffer);
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::bne);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   cndReg->setRegisterFieldBI((uint32_t *)buffer);
-   *(int32_t *)buffer |= isPrimitive?20:24;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::andi_r);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   tempReg->setRegisterFieldRA((uint32_t *)buffer);
-   monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-   *(int32_t *)buffer |= isPrimitive?OBJECT_HEADER_LOCK_RECURSION_MASK:LOCK_RES_NON_PRIMITIVE_EXIT_MASK;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   if (isPrimitive)
-      {
-      opcode.setOpCodeValue(TR::InstOpCode::bne);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldBI((uint32_t *)buffer);
-      int32_t bOffset = getRestartLabel()->getCodeLocation()-buffer;
-      if (bOffset<LOWER_IMMED || bOffset>UPPER_IMMED)
-         bOffset = 16;
-      *(int32_t *)buffer |= bOffset & 0x0000FFFF;
-      }
-   else
-      {
-      opcode.setOpCodeValue(TR::InstOpCode::beq);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      cndReg->setRegisterFieldBI((uint32_t *)buffer);
-      *(int32_t *)buffer |= 16;
-      }
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   opcode.setOpCodeValue(TR::InstOpCode::addi);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   monitorReg->setRegisterFieldRT((uint32_t *)buffer);
-   monitorReg->setRegisterFieldRA((uint32_t *)buffer);
-   *(int32_t *)buffer |= (isPrimitive?LOCK_INC_DEC_VALUE:-LOCK_INC_DEC_VALUE) & 0x0000FFFF;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   if (TR::Compiler->target.is64Bit() && !fej9->generateCompressedLockWord())
-      opCodeValue = TR::InstOpCode::std;
-   else
-      opCodeValue = TR::InstOpCode::stw;
-   opcode.setOpCodeValue(opCodeValue);
-   buffer = opcode.copyBinaryToBuffer(buffer);
-   monitorReg->setRegisterFieldRS((uint32_t *)buffer);
-   objReg->setRegisterFieldRA((uint32_t *)buffer);
-   *(int32_t *)buffer |= getLockWordOffset() & 0x0000FFFF;
-   buffer += PPC_INSTRUCTION_LENGTH;
-
-   if (!isPrimitive)
-      {
-      opcode.setOpCodeValue(TR::InstOpCode::b);
-      buffer = opcode.copyBinaryToBuffer(buffer);
-      *(int32_t *)buffer |= (getRestartLabel()->getCodeLocation()-buffer) & 0x03FFFFFC;
-      buffer += PPC_INSTRUCTION_LENGTH;
-      }
-
-   // exitCallLabel is here
-   cg()->setBinaryBufferCursor(buffer);
-   buffer = TR::PPCHelperCallSnippet::emitSnippetBody();
-
-   return buffer;
-   }
-
-
-void
-TR::PPCLockReservationExitSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
-   {
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg()->fe());
-   uint8_t *cursor = getStartLabel()->getCodeLocation();
-   int32_t distance;
-   bool     isPrimitive = getNode()->isPrimitiveLockedRegion();
-
-   debug->printSnippetLabel(pOutFile, getStartLabel(), cursor, isPrimitive?"Primitive Reservation Exit":"Reservation Exit");
-
-   TR::RegisterDependencyConditions *conditions = getRestartLabel()->getInstruction()->getDependencyConditions();
-   TR::RealRegister *objReg     = cg()->machine()->getRealRegister(TR::RealRegister::gr3);
-   TR::RealRegister *metaReg    = cg()->getMethodMetaDataRegister();
-   TR::RealRegister *condReg    = cg()->machine()->getRealRegister(TR::RealRegister::cr0);
-   TR::RealRegister *monitorReg = cg()->machine()->getRealRegister(TR::RealRegister::gr11);
-   TR::RealRegister *valReg     = cg()->machine()->getRealRegister(conditions->getPostConditions()->getRegisterDependency(3)->getRealRegister());
-   TR::RealRegister *tempReg    = cg()->machine()->getRealRegister(conditions->getPostConditions()->getRegisterDependency(4)->getRealRegister());
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "li \t%s, 0x%x\t;", debug->getName(tempReg), LOCK_RES_OWNING_COMPLEMENT);
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "andc\t%s, %s, %s\t;", debug->getName(tempReg), debug->getName(monitorReg), debug->getName(tempReg));
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "addi\t%s, %s, %d\t;", debug->getName(valReg), debug->getName(metaReg), LOCK_RESERVATION_BIT);
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "%s\t%s, %s, %s\t;", TR::InstOpCode::metadata[TR::InstOpCode::Op_cmpl].name, debug->getName(condReg), debug->getName(tempReg), debug->getName(valReg));
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "bne \t%s, " POINTER_PRINTF_FORMAT "\t;", debug->getName(condReg), (intptrj_t)cursor + (isPrimitive?20:24));
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "andi.\t%s, %s, 0x%x\t;", debug->getName(tempReg), debug->getName(monitorReg), isPrimitive?OBJECT_HEADER_LOCK_RECURSION_MASK:LOCK_RES_NON_PRIMITIVE_EXIT_MASK);
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   if (isPrimitive)
-      {
-      distance = *((int32_t *) cursor) & 0x0000ffff;
-      distance = (distance << 16) >> 16;   // sign extend
-      trfprintf(pOutFile, "bne \t%s, " POINTER_PRINTF_FORMAT "\t;", debug->getName(condReg), (intptrj_t)cursor + distance);
-      }
-   else
-      {
-      trfprintf(pOutFile, "beq \t%s, " POINTER_PRINTF_FORMAT "\t;", debug->getName(condReg), (intptrj_t)cursor + 16);
-      }
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "addi\t%s, %s, %d\t;", debug->getName(monitorReg), debug->getName(monitorReg), isPrimitive?LOCK_INC_DEC_VALUE:-LOCK_INC_DEC_VALUE);
-   cursor += 4;
-
-   debug->printPrefix(pOutFile, NULL, cursor, 4);
-   trfprintf(pOutFile, "%s\t[%s,%d], %s\t;", TR::InstOpCode::metadata[TR::InstOpCode::Op_st].name, debug->getName(objReg), getLockWordOffset(), debug->getName(monitorReg));
-   cursor += 4;
-
-   if (!isPrimitive)
-      {
-      debug->printPrefix(pOutFile, NULL, cursor, 4);
-      distance = *((int32_t *) cursor) & 0x03fffffc;
-      distance = (distance << 6) >> 6;   // sign extend
-      trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t; ", (intptrj_t)cursor + distance);
-      debug->print(pOutFile, getRestartLabel());
-      cursor += 4;
-      }
-
-   debug->print(pOutFile, (TR::PPCHelperCallSnippet *)this);
-   }
-
-
-uint32_t
-TR::PPCLockReservationExitSnippet::getLength(int32_t estimatedSnippetStart)
-   {
-   int32_t len = getNode()->isPrimitiveLockedRegion()?36:40;
-   len += TR::PPCHelperCallSnippet::getLength(estimatedSnippetStart+len);
-   return len;
-   }
-
-int32_t
-TR::PPCLockReservationExitSnippet::setEstimatedCodeLocation(int32_t p)
-   {
-   getStartLabel()->setEstimatedCodeLocation(p);
-   getSnippetLabel()->setEstimatedCodeLocation(p+ (getNode()->isPrimitiveLockedRegion()?36:40));
-   return p;
-   }
-
 
 TR::PPCReadMonitorSnippet::PPCReadMonitorSnippet(
    TR::CodeGenerator   *codeGen,
@@ -1476,7 +113,7 @@ uint8_t *TR::PPCReadMonitorSnippet::emitSnippetBody()
 
    _recurCheckLabel->setCodeLocation(buffer);
 
-   if (TR::Compiler->target.is64Bit())
+   if (cg()->comp()->target().is64Bit())
       {
       opcode.setOpCodeValue(TR::InstOpCode::rldicr);
       buffer = opcode.copyBinaryToBuffer(buffer);
@@ -1527,11 +164,11 @@ uint8_t *TR::PPCReadMonitorSnippet::emitSnippetBody()
    *(int32_t *)buffer |= (getRestartLabel()->getCodeLocation()-buffer) & 0x03FFFFFC;
    buffer += PPC_INSTRUCTION_LENGTH;
 
-   intptrj_t helperAddress = (intptrj_t)getMonitorEnterHelper()->getSymbol()->castToMethodSymbol()->getMethodAddress();
-   if (cg()->directCallRequiresTrampoline(helperAddress, (intptrj_t)buffer))
+   intptr_t helperAddress = (intptr_t)getMonitorEnterHelper()->getSymbol()->castToMethodSymbol()->getMethodAddress();
+   if (cg()->directCallRequiresTrampoline(helperAddress, (intptr_t)buffer))
       {
       helperAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(getMonitorEnterHelper()->getReferenceNumber(), (void *)buffer);
-      TR_ASSERT_FATAL(TR::Compiler->target.cpu.isTargetWithinIFormBranchRange(helperAddress, (intptrj_t)buffer), "Helper address is out of range");
+      TR_ASSERT_FATAL(cg()->comp()->target().cpu.isTargetWithinIFormBranchRange(helperAddress, (intptr_t)buffer), "Helper address is out of range");
       }
 
    opcode.setOpCodeValue(TR::InstOpCode::bl);
@@ -1543,7 +180,7 @@ uint8_t *TR::PPCReadMonitorSnippet::emitSnippetBody()
                                 __FILE__, __LINE__, getNode());
       }
 
-   *(int32_t *)buffer |= (helperAddress - (intptrj_t)buffer) & 0x03FFFFFC;
+   *(int32_t *)buffer |= (helperAddress - (intptr_t)buffer) & 0x03FFFFFC;
    buffer += PPC_INSTRUCTION_LENGTH;
 
    gcMap().registerStackMap(buffer, cg());
@@ -1589,14 +226,14 @@ TR::PPCReadMonitorSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
    TR::RealRegister *loadBaseReg  = machine->getRealRegister(deps->getPostConditions()->getRegisterDependency(4)->getRealRegister());
 
    debug->printPrefix(pOutFile, NULL, cursor, 4);
-   if (TR::Compiler->target.is64Bit())
+   if (cg()->comp()->target().is64Bit())
       trfprintf(pOutFile, "rldicr \t%s, %s, 0, " INT64_PRINTF_FORMAT_HEX "\t; Get owner thread value", debug->getName(monitorReg), debug->getName(monitorReg), (int64_t) LOCK_THREAD_PTR_MASK);
    else
       trfprintf(pOutFile, "rlwinm \t%s, %s, 0, 0x%x\t; Get owner thread value", debug->getName(monitorReg), debug->getName(monitorReg), LOCK_THREAD_PTR_MASK);
    cursor+= 4;
 
    debug->printPrefix(pOutFile, NULL, cursor, 4);
-   if (TR::Compiler->target.is64Bit())
+   if (cg()->comp()->target().is64Bit())
       trfprintf(pOutFile, "cmp8 \t%s, %s, %s\t; Compare VMThread to owner thread", debug->getName(condReg), debug->getName(metaReg), debug->getName(monitorReg));
    else
       trfprintf(pOutFile, "cmp4 \t%s, %s, %s\t; Compare VMThread to owner thread", debug->getName(condReg), debug->getName(metaReg), debug->getName(monitorReg));
@@ -1605,7 +242,7 @@ TR::PPCReadMonitorSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
    debug->printPrefix(pOutFile, NULL, cursor, 4);
    int32_t distance = *((int32_t *) cursor) & 0x0000fffc;
    distance = (distance << 16) >> 16;   // sign extend
-   trfprintf(pOutFile, "bne %s, " POINTER_PRINTF_FORMAT "\t; Use Helpers", debug->getName(condReg), (intptrj_t)cursor + distance);
+   trfprintf(pOutFile, "bne %s, " POINTER_PRINTF_FORMAT "\t; Use Helpers", debug->getName(condReg), (intptr_t)cursor + distance);
    cursor+= 4;
 
    debug->printPrefix(pOutFile, NULL, cursor, 4);
@@ -1615,14 +252,14 @@ TR::PPCReadMonitorSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
    debug->printPrefix(pOutFile, NULL, cursor, 4);
    distance = *((int32_t *) cursor) & 0x03fffffc;
    distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t; ", (intptrj_t)cursor + distance);
+   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t; ", (intptr_t)cursor + distance);
    debug->print(pOutFile, getRestartLabel());
    cursor+= 4;
 
    debug->printPrefix(pOutFile, NULL, cursor, 4);
    distance = *((int32_t *) cursor) & 0x03fffffc;
    distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "bl \t" POINTER_PRINTF_FORMAT "\t\t; %s", (intptrj_t)cursor + distance, debug->getName(getMonitorEnterHelper()));
+   trfprintf(pOutFile, "bl \t" POINTER_PRINTF_FORMAT "\t\t; %s", (intptr_t)cursor + distance, debug->getName(getMonitorEnterHelper()));
    if (debug->isBranchToTrampoline(getMonitorEnterHelper(), cursor, distance))
       trfprintf(pOutFile, " Through trampoline");
    cursor+= 4;
@@ -1701,16 +338,16 @@ uint8_t *TR::PPCHeapAllocSnippet::emitSnippetBody()
       buffer += PPC_INSTRUCTION_LENGTH;
       }
 
-   intptrj_t helperAddress = (intptrj_t)getDestination()->getSymbol()->castToMethodSymbol()->getMethodAddress();
-   if (cg()->directCallRequiresTrampoline(helperAddress, (intptrj_t)buffer))
+   intptr_t helperAddress = (intptr_t)getDestination()->getSymbol()->castToMethodSymbol()->getMethodAddress();
+   if (cg()->directCallRequiresTrampoline(helperAddress, (intptr_t)buffer))
       {
       helperAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(getDestination()->getReferenceNumber(), (void *)buffer);
-      TR_ASSERT_FATAL(TR::Compiler->target.cpu.isTargetWithinIFormBranchRange(helperAddress, (intptrj_t)buffer), "Helper address is out of range");
+      TR_ASSERT_FATAL(cg()->comp()->target().cpu.isTargetWithinIFormBranchRange(helperAddress, (intptr_t)buffer), "Helper address is out of range");
       }
 
    opcode.setOpCodeValue(TR::InstOpCode::bl);
    buffer = opcode.copyBinaryToBuffer(buffer);
-   *(int32_t *)buffer |= (helperAddress - (intptrj_t)buffer) & 0x03FFFFFC;
+   *(int32_t *)buffer |= (helperAddress - (intptr_t)buffer) & 0x03FFFFFC;
    if (cg()->comp()->compileRelocatableCode())
       {
       cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer, (uint8_t*) getDestination(), TR_HelperAddress, cg()),
@@ -1773,7 +410,7 @@ TR::PPCHeapAllocSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
    debug->printPrefix(pOutFile, NULL, cursor, 4);
    distance = *((int32_t *) cursor) & 0x03fffffc;
    distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "bl \t" POINTER_PRINTF_FORMAT "\t\t;%s", (intptrj_t)cursor + distance, info);
+   trfprintf(pOutFile, "bl \t" POINTER_PRINTF_FORMAT "\t\t;%s", (intptr_t)cursor + distance, info);
    cursor += 4;
 
    debug->printPrefix(pOutFile, NULL, cursor, 4);
@@ -1783,8 +420,8 @@ TR::PPCHeapAllocSnippet::print(TR::FILE *pOutFile, TR_Debug *debug)
    debug->printPrefix(pOutFile, NULL, cursor, 4);
    distance = *((int32_t *) cursor) & 0x03fffffc;
    distance = (distance << 6) >> 6;   // sign extend
-   TR_ASSERT( (intptrj_t)cursor + distance == (intptrj_t)getRestartLabel()->getCodeLocation(), "heap snippet: bad branch to restart label");
-   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t; Back to restart %s", (intptrj_t)cursor + distance, debug->getName(getRestartLabel()));
+   TR_ASSERT( (intptr_t)cursor + distance == (intptr_t)getRestartLabel()->getCodeLocation(), "heap snippet: bad branch to restart label");
+   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t; Back to restart %s", (intptr_t)cursor + distance, debug->getName(getRestartLabel()));
    }
 
 
@@ -1847,15 +484,6 @@ uint32_t TR::getCCPreLoadedCodeSize()
       }
    size += 3;
 
-      //TR_ObjectAlloc/TR_ConstLenArrayAlloc/TR_VariableLenArrayAlloc/Hybrid arraylets
-      size += (2 + (11 + 11) + 2) + (16 + 14) + 4 + 9 + 4;
-      // If TLH prefetching is done
-      size += 2*5 + 2*5;
-   #if defined(DEBUG)
-      //TR_ObjectAlloc/TR_ConstLenArrayAlloc
-      size += 5 + 8;
-   #endif
-
    //TR_writeBarrier/TR_writeBarrierAndCardMark/TR_cardMark
    size += 12;
    if (TR::Options::getCmdLineOptions()->getGcCardSize() > 0)
@@ -1887,6 +515,17 @@ uint32_t TR::getCCPreLoadedCodeSize()
 #else
 #define CCEYECATCHER(a, b, c, d) (((a) << 24) | ((b) << 16) | ((c) << 8) | ((d) << 0))
 #endif
+
+static void performCCPreLoadedBinaryEncoding(uint8_t *buffer, TR::CodeGenerator *cg)
+   {
+   cg->setBinaryBufferStart(buffer);
+   cg->setBinaryBufferCursor(buffer);
+   for (TR::Instruction *i = cg->getFirstInstruction(); i != NULL; i = i->getNext())
+      {
+      i->estimateBinaryLength(cg->getBinaryBufferCursor() - cg->getBinaryBufferStart());
+      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+      }
+   }
 
 static uint8_t* initializeCCPreLoadedPrefetch(uint8_t *buffer, void **CCPreLoadedCodeTable, TR::CodeGenerator *cg)
    {
@@ -2003,11 +642,7 @@ static uint8_t* initializeCCPreLoadedPrefetch(uint8_t *buffer, void **CCPreLoade
 
    cursor = generateInstruction(cg, TR::InstOpCode::blr, n, cursor);
 
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+   performCCPreLoadedBinaryEncoding(buffer, cg);
 
    helperSize += 3;
    TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
@@ -2133,11 +768,7 @@ static uint8_t* initializeCCPreLoadedNonZeroPrefetch(uint8_t *buffer, void **CCP
 
    cursor = generateInstruction(cg, TR::InstOpCode::blr, n, cursor);
 
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+   performCCPreLoadedBinaryEncoding(buffer, cg);
 
    helperSize += 3;
    TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
@@ -2211,511 +842,6 @@ static TR::Instruction* genZeroInit(TR::CodeGenerator *cg, TR::Node *n, TR::Regi
    return cursor;
    }
 
-static uint8_t* initializeCCPreLoadedObjectAlloc(uint8_t *buffer, void **CCPreLoadedCodeTable, TR::CodeGenerator *cg)
-   {
-   TR::Compilation *comp = cg->comp();
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
-   TR::Node *n = cg->getFirstInstruction()->getNode();
-
-   // Object allocation off TLH (zero or non-zero)
-   // If it fails we branch to the regular helper (via it's trampoline)
-   // which will return directly to JIT code
-   // In:
-   //   r3 = class ptr
-   //   r4 = alloc size in bytes
-   // If canSkipZeroInit:
-   //   r11 = 1 if optimizer says we can skip zero init (allocate on nonZeroTLH)
-   // Out:
-   //   r3 = object ptr
-   // Clobbers:
-   //   r4, r8 if TLH prefetch, r10, r11
-   //   cr0 if TLH prefetch, cr1, cr2
-
-   cg->setFirstInstruction(NULL);
-   cg->setAppendInstruction(NULL);
-
-   TR::Instruction *eyecatcher = generateImmInstruction(cg, TR::InstOpCode::dd, n, CCEYECATCHER('C', 'C', 'H', 0));
-
-   TR::LabelSymbol *entryLabel = generateLabelSymbol(cg);
-   TR::LabelSymbol *doNonZeroHeapTLHAlloc = generateLabelSymbol(cg);
-
-   //Branch to VM Helpers for Zeroed TLH.
-   TR::LabelSymbol *zeroed_branchToHelperLabel = generateLabelSymbol(cg);
-   TR::LabelSymbol *zeroed_helperTrampolineLabel = generateLabelSymbol(cg);
-   zeroed_helperTrampolineLabel->setCodeLocation((uint8_t *)TR::CodeCacheManager::instance()->findHelperTrampoline(TR_newObject, buffer));
-
-   //Branch to VM Helpers for nonZeroed TLH.
-   TR::LabelSymbol *nonZeroed_branchToHelperLabel = generateLabelSymbol(cg);
-   TR::LabelSymbol *nonZeroed_helperTrampolineLabel = generateLabelSymbol(cg);
-   nonZeroed_helperTrampolineLabel->setCodeLocation((uint8_t *)TR::CodeCacheManager::instance()->findHelperTrampoline(TR_newObjectNoZeroInit, buffer));
-
-   TR::Instruction *entry = generateLabelInstruction(cg, TR::InstOpCode::label, n, entryLabel);
-   TR::Instruction *cursor = entry;
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-   const TR::InstOpCode::Mnemonic Op_stclass = TR::InstOpCode::stw;
-#else
-   const TR::InstOpCode::Mnemonic Op_stclass =TR::InstOpCode::Op_st;
-#endif
-
-   TR::Register *metaReg = cg->getMethodMetaDataRegister();
-   TR::Register *r3 = cg->machine()->getRealRegister(TR::RealRegister::gr3);
-   TR::Register *r4 = cg->machine()->getRealRegister(TR::RealRegister::gr4);
-   TR::Register *r8 = cg->machine()->getRealRegister(TR::RealRegister::gr8);
-   TR::Register *r10 = cg->machine()->getRealRegister(TR::RealRegister::gr10);
-   TR::Register *r11 = cg->machine()->getRealRegister(TR::RealRegister::gr11);
-   TR::Register *cr0 = cg->machine()->getRealRegister(TR::RealRegister::cr0);
-   TR::Register *cr1 = cg->machine()->getRealRegister(TR::RealRegister::cr1);
-   TR::Register *cr2 = cg->machine()->getRealRegister(TR::RealRegister::cr2);
-
-#if defined(DEBUG)
-   // Trap if size not word aligned
-   cursor = generateTrg1Src1Imm2Instruction(cg, TR::InstOpCode::rlwinm, n, r10, r4, 0, 3, cursor);
-   cursor = generateSrc1Instruction(cg, TR::InstOpCode::twneqi, n, r10, 0, cursor);
-   // Trap if size does not preserve object alignment requirements
-   cursor = generateTrg1Src1Imm2Instruction(cg, TR::InstOpCode::rlwinm, n, r10, r4, 0, fej9->getObjectAlignmentInBytes() - 1, cursor);
-   cursor = generateSrc1Instruction(cg, TR::InstOpCode::twneqi, n, r10, 0, cursor);
-   // Trap if size less than minimum object size
-   cursor = generateSrc1Instruction(cg, TR::InstOpCode::twlti, n, r4, J9_GC_MINIMUM_OBJECT_SIZE, cursor);
-#endif
-
-   //Allocate on nonZeroHeapAlloc or heapAlloc based on r11.
-   cursor = generateTrg1Src1ImmInstruction(cg,TR::InstOpCode::Op_cmpli, n, cr2, r11, 1, cursor);
-   cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::beq, false, n, doNonZeroHeapTLHAlloc, cr2, cursor); //Set likeliness of branch to false.
-   //2 instructions so far.
-      {
-      //Allocate on zeroed TLH here.
-
-      if (cg->enableTLHPrefetching())
-         {
-         cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r10,
-                                             new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, tlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                             cursor);
-         cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::subf_r, n, r10, r4, r10, cr0, cursor);
-         cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                             new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, tlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                             r10, cursor);
-         }
-      cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r10,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapAlloc), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                          cursor);
-      cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r11,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapTop), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                          cursor);
-      // New heapAlloc
-      cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::add, n, r4, r10, r4, cursor);
-      // Check if we exceeded the TLH
-      cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr2, r4, r11, cursor);
-      cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bgt, n, zeroed_branchToHelperLabel, cr2, cursor);
-      // Check if we overflowed
-      cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr2, r4, r10, cursor);
-      cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::ble, n, zeroed_branchToHelperLabel, cr2, cursor);
-      // Store new heapAlloc
-      cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapAlloc), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                          r4, cursor);
-      // Store class ptr
-      cursor = generateMemSrc1Instruction(cg,Op_stclass, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(r10, TR::Compiler->om.offsetOfObjectVftField(), TR::Compiler->om.sizeofReferenceField(), cg),
-                                          r3, cursor);
-      cursor = generateTrg1Src1Instruction(cg, TR::InstOpCode::mr, n, r3, r10, cursor);
-
-      if (cg->enableTLHPrefetching())
-         {
-         TR::LabelSymbol *prefetchHelperLabel = generateLabelSymbol(cg);
-         TR_ASSERT( CCPreLoadedCodeTable[TR_AllocPrefetch], "Expecting prefetch helper to be initialized");
-         prefetchHelperLabel->setCodeLocation((uint8_t *)CCPreLoadedCodeTable[TR_AllocPrefetch]);
-         cursor = generateTrg1Src1Instruction(cg, TR::InstOpCode::mr, n, r8, r3, cursor);
-         cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::ble, n, prefetchHelperLabel, cr0, cursor);
-         }
-
-      //Done allocating on TLH, return to calling code.
-      cursor = generateInstruction(cg, TR::InstOpCode::blr, n, cursor);
-
-      //11 instructions excluding tlhPrefetch.
-      }
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, doNonZeroHeapTLHAlloc, cursor);
-      {
-      //Allocate on nonZero TLH here.
-
-      if (cg->enableTLHPrefetching())
-         {
-         cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r10,
-                                             new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, nonZeroTlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                             cursor);
-         cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::subf_r, n, r10, r4, r10, cr0, cursor);
-         cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                             new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, nonZeroTlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                             r10, cursor);
-         }
-      cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r10,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, nonZeroHeapAlloc), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                          cursor);
-      cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r11,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, nonZeroHeapTop), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                          cursor);
-      // New heapAlloc
-      cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::add, n, r4, r10, r4, cursor);
-      // Check if we exceeded the TLH
-      cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr2, r4, r11, cursor);
-      cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bgt, n, nonZeroed_branchToHelperLabel, cr2, cursor);
-      // Check if we overflowed
-      cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr2, r4, r10, cursor);
-      cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::ble, n, nonZeroed_branchToHelperLabel, cr2, cursor);
-      // Store new heapAlloc
-      cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, nonZeroHeapAlloc), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                          r4, cursor);
-      // Store class ptr
-      cursor = generateMemSrc1Instruction(cg,Op_stclass, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(r10, TR::Compiler->om.offsetOfObjectVftField(), TR::Compiler->om.sizeofReferenceField(), cg),
-                                          r3, cursor);
-      cursor = generateTrg1Src1Instruction(cg, TR::InstOpCode::mr, n, r3, r10, cursor);
-
-      if (cg->enableTLHPrefetching())
-         {
-         TR::LabelSymbol *prefetchHelperLabel = generateLabelSymbol(cg);
-         TR_ASSERT( CCPreLoadedCodeTable[TR_NonZeroAllocPrefetch], "Expecting non-zero tlh prefetch helper to be initialized");
-         prefetchHelperLabel->setCodeLocation((uint8_t *)CCPreLoadedCodeTable[TR_NonZeroAllocPrefetch]);
-         cursor = generateTrg1Src1Instruction(cg, TR::InstOpCode::mr, n, r8, r3, cursor);
-         cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::ble, n, prefetchHelperLabel, cr0, cursor);
-         }
-
-      //Done allocating on TLH, return to calling code.
-      cursor = generateInstruction(cg, TR::InstOpCode::blr, n, cursor);
-
-      //11 instructions excluding tlhPrefetch.
-      }
-
-   //Call out to VM helper for Zeroed TLH.
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, zeroed_branchToHelperLabel, cursor);
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::b, n, zeroed_helperTrampolineLabel, cursor);
-   //1 instruction.
-
-   //Call out to VM helper for nonZeroed TLH.
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, nonZeroed_branchToHelperLabel, cursor);
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::b, n, nonZeroed_helperTrampolineLabel, cursor);
-   //1 instruction.
-
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
-
-   uint32_t helperSize = 2 + (11 + 11) + 2 + (cg->enableTLHPrefetching() ? 2*5 : 0);
-
-#ifdef DEBUG
-   helperSize += 5;
-#endif
-
-   TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
-             "Per-codecache object allocation helper, unexpected size");
-
-   CCPreLoadedCodeTable[TR_ObjAlloc] = entryLabel->getCodeLocation();
-
-   return cg->getBinaryBufferCursor() - PPC_INSTRUCTION_LENGTH;
-   }
-
-static uint8_t* initializeCCPreLoadedArrayAlloc(uint8_t *buffer, void **CCPreLoadedCodeTable, TR::CodeGenerator *cg)
-   {
-   TR::Compilation *comp = cg->comp();
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
-   TR::Node *n = cg->getFirstInstruction()->getNode();
-
-   // Array allocation off TLH (zero or non-zero)
-   // If it fails we branch to the regular helper (via it's trampoline)
-   // which will return directly to JIT code
-   // In:
-   //   r3 = class ptr (or identifier for arrays of primitive types)
-   //   r4 = number of elements
-   //   r5 = data size in bytes (r4 * element size) for variable length arrays
-   //        total alloc size in bytes for constant length arrays
-   //   r8 = array class ptr
-   // If canSkipZeroInit:
-   //   r11 = 1 if optimizer says we can skip zero init (allocate on nonZeroTLH)
-   // Out:
-   //   r3 = array ptr
-   //   r4 = number of elements
-   // Clobbers:
-   //   r5, r8, r10, r11
-   //   cr0, cr1, cr2
-
-   cg->setFirstInstruction(NULL);
-   cg->setAppendInstruction(NULL);
-
-   TR::Instruction *eyecatcher = generateImmInstruction(cg, TR::InstOpCode::dd, n, CCEYECATCHER('C', 'C', 'H', 1));
-
-   TR::LabelSymbol *entryLabel = generateLabelSymbol(cg);
-   TR::LabelSymbol *doneTLHAlloc = generateLabelSymbol(cg);
-   TR::LabelSymbol *doNonZeroHeapTLHAlloc = generateLabelSymbol(cg);
-   TR::LabelSymbol *constLenArrayAllocLabel = generateLabelSymbol(cg);
-
-   //Branch to VM Helpers for Zeroed TLH.
-   TR::LabelSymbol *zeroed_branchToHelperLabel = generateLabelSymbol(cg);
-   TR::LabelSymbol *zeroed_branchToPrimArrayHelperLabel = generateLabelSymbol(cg);
-   TR::LabelSymbol *zeroed_aNewArrayTrampolineLabel = generateLabelSymbol(cg);
-   TR::LabelSymbol *zeroed_newArrayTrampolineLabel = generateLabelSymbol(cg);
-   zeroed_aNewArrayTrampolineLabel->setCodeLocation((uint8_t *)TR::CodeCacheManager::instance()->findHelperTrampoline(TR_aNewArray, buffer));
-   zeroed_newArrayTrampolineLabel->setCodeLocation((uint8_t *)TR::CodeCacheManager::instance()->findHelperTrampoline(TR_newArray, buffer));
-
-   //Branch to VM Helpers for non-Zeroed TLH.
-   TR::LabelSymbol *nonZeroed_branchToHelperLabel = generateLabelSymbol(cg);
-   TR::LabelSymbol *nonZeroed_branchToPrimArrayHelperLabel = generateLabelSymbol(cg);
-   TR::LabelSymbol *nonZeroed_aNewArrayTrampolineLabel = generateLabelSymbol(cg);
-   TR::LabelSymbol *nonZeroed_newArrayTrampolineLabel = generateLabelSymbol(cg);
-   nonZeroed_aNewArrayTrampolineLabel->setCodeLocation((uint8_t *)TR::CodeCacheManager::instance()->findHelperTrampoline(TR_aNewArrayNoZeroInit, buffer));
-   nonZeroed_newArrayTrampolineLabel->setCodeLocation((uint8_t *)TR::CodeCacheManager::instance()->findHelperTrampoline(TR_newArrayNoZeroInit, buffer));
-
-   TR::Instruction *entry = generateLabelInstruction(cg, TR::InstOpCode::label, n, entryLabel);
-   TR::Instruction *cursor = entry;
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-   const TR::InstOpCode::Mnemonic Op_stclass = TR::InstOpCode::stw;
-#else
-   const TR::InstOpCode::Mnemonic Op_stclass =TR::InstOpCode::Op_st;
-#endif
-
-   TR::Register *metaReg = cg->getMethodMetaDataRegister();
-   TR::Register *r3 = cg->machine()->getRealRegister(TR::RealRegister::gr3);
-   TR::Register *r4 = cg->machine()->getRealRegister(TR::RealRegister::gr4);
-   TR::Register *r5 = cg->machine()->getRealRegister(TR::RealRegister::gr5);
-   TR::Register *r8 = cg->machine()->getRealRegister(TR::RealRegister::gr8);
-   TR::Register *r10 = cg->machine()->getRealRegister(TR::RealRegister::gr10);
-   TR::Register *r11 = cg->machine()->getRealRegister(TR::RealRegister::gr11);
-   TR::Register *cr0 = cg->machine()->getRealRegister(TR::RealRegister::cr0);
-   TR::Register *cr1 = cg->machine()->getRealRegister(TR::RealRegister::cr1);
-   TR::Register *cr2 = cg->machine()->getRealRegister(TR::RealRegister::cr2);
-
-   // This is the distance between the end of the heap and the end of the address space,
-   // such that adding this value or less to any heap pointer is guaranteed not to overflow
-   const uint32_t maxSafeSize = cg->getMaxObjectSizeGuaranteedNotToOverflow();
-
-   // Detect large or negative number of elements in case addr wrap-around
-   if (maxSafeSize < 0x00100000)
-      {
-      cursor = generateTrg1Src1ImmInstruction(cg,TR::InstOpCode::Op_cmpli, n, cr0, r4, (maxSafeSize >> 6) << 2, cursor);
-      cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bge, n, zeroed_branchToHelperLabel, cr0, cursor);
-      }
-   else
-      {
-      if (TR::Compiler->target.is64Bit())
-         cursor = generateTrg1Src1Imm2Instruction(cg, TR::InstOpCode::rldicr_r, n, r10, r4, cr0, 0,
-                                                  CONSTANT64(0xffffffffffffffff) << (27 - leadingZeroes(maxSafeSize)),
-                                                  cursor);
-      else
-         cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::andis_r, n, r10, r4, cr0,
-                                                 (0xffffffff << (11 - leadingZeroes(maxSafeSize))) & 0x0000ffff,
-                                                 cursor);
-      cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bne, n, zeroed_branchToHelperLabel, cr0, cursor);
-      }
-   //2 instructions.
-
-   if (TR::Compiler->om.useHybridArraylets())
-      {
-      // Check if this array needs to be discontiguous because it is too large or is a zero-length array
-      // Zero length arrays are discontiguous (i.e. they also need the discontiguous length field to be 0) because
-      // they are indistinguishable from non-zero length discontiguous arrays
-      int32_t maxContiguousArraySize = TR::Compiler->om.maxContiguousArraySizeInBytes();
-      TR_ASSERT( maxContiguousArraySize >= 0, "Unexpected negative size for max contiguous array size");
-      if (maxContiguousArraySize > UPPER_IMMED)
-         {
-         cursor = loadConstant(cg, n, maxContiguousArraySize, r10, cursor);
-         cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::cmpl4, n, cr0, r5, r10, cursor);
-         }
-      else
-         cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::cmpli4, n, cr0, r5, maxContiguousArraySize, cursor);
-      cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bgt, n, zeroed_branchToHelperLabel, cr0, cursor);
-      }
-
-   cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::cmpli4, n, cr0, r5, 0, cursor);
-   cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::beq, n, zeroed_branchToHelperLabel, cr0, cursor);
-
-   // Add header to size and align to OBJECT_ALIGNMENT
-   cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r5, r5, sizeof(J9IndexableObjectContiguous) + fej9->getObjectAlignmentInBytes() - 1, cursor);
-   cursor = generateTrg1Src1Imm2Instruction(cg, TR::Compiler->target.is64Bit() ? TR::InstOpCode::rldicr : TR::InstOpCode::rlwinm, n, r5, r5, 0, -fej9->getObjectAlignmentInBytes(), cursor);
-   // Check if size < J9_GC_MINIMUM_OBJECT_SIZE and set size = J9_GC_MINIMUM_OBJECT_SIZE if so
-   cursor = generateTrg1Src1ImmInstruction(cg,TR::InstOpCode::Op_cmpli, n, cr0, r5, J9_GC_MINIMUM_OBJECT_SIZE, cursor);
-   cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bge, n, constLenArrayAllocLabel, cr0, cursor);
-   cursor = generateTrg1ImmInstruction(cg, TR::InstOpCode::li, n, r5, J9_GC_MINIMUM_OBJECT_SIZE, cursor);
-   //5 instructions.
-
-   // At this point r5 should contain the total alloc size in bytes for this array
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, constLenArrayAllocLabel, cursor);
-
-#if defined(DEBUG)
-   // Trap if size not word aligned
-   cursor = generateTrg1Src1Imm2Instruction(cg, TR::InstOpCode::rlwinm, n, r10, r5, 0, 3, cursor);
-   cursor = generateSrc1Instruction(cg, TR::InstOpCode::twneqi, n, r10, 0, cursor);
-   // Trap if size does not preserve object alignment requirements
-   cursor = generateTrg1Src1Imm2Instruction(cg, TR::InstOpCode::rlwinm, n, r10, r5, 0, fej9->getObjectAlignmentInBytes() - 1, cursor);
-   cursor = generateSrc1Instruction(cg, TR::InstOpCode::twneqi, n, r10, 0, cursor);
-   // Trap if size less than minimum object size
-   cursor = generateSrc1Instruction(cg, TR::InstOpCode::twlti, n, r5, J9_GC_MINIMUM_OBJECT_SIZE, cursor);
-   // Trap if data size not word aligned
-   cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::addi, n, r10, r5, -sizeof(J9IndexableObjectContiguous), cursor);
-   cursor = generateTrg1Src1Imm2Instruction(cg, TR::InstOpCode::rlwinm, n, r10, r10, 0, 3, cursor);
-   cursor = generateSrc1Instruction(cg, TR::InstOpCode::twneqi, n, r10, 0, cursor);
-#endif
-
-   //Allocate on nonZeroHeapAlloc or heapAlloc based on r11.
-   cursor = generateTrg1Src1ImmInstruction(cg,TR::InstOpCode::Op_cmpli, n, cr2, r11, 1, cursor);
-   cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::beq, false, n, doNonZeroHeapTLHAlloc, cr2, cursor); //Set likeliness of branch to false.
-   //2 instructions.
-      {
-      //Allocate on zeroed TLH here.
-
-      if (cg->enableTLHPrefetching())
-         {
-         cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r10,
-                                             new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, tlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                             cursor);
-         cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::subf_r, n, r10, r5, r10, cr0, cursor);
-         cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                             new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, tlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                             r10, cursor);
-         }
-      cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r10,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapAlloc), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                          cursor);
-      cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r11,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapTop), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                          cursor);
-      // New heapAlloc
-      cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::add, n, r5, r10, r5, cursor);
-      // Check if we exceeded the TLH
-      cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr2, r5, r11, cursor);
-      cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bgt, n, zeroed_branchToHelperLabel, cr2, cursor);
-      // Check if we overflowed
-      // For variable-length arrays we already know it won't overflow (see above) however since we're interested in
-      // a small i-cache footprint here it's better to have the variable length path fall through to the const length path.
-      cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr2, r5, r10, cursor);
-      cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::ble, n, zeroed_branchToHelperLabel, cr2, cursor);
-      // Store new heapAlloc
-      cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapAlloc), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                          r5, cursor);
-      // Store class ptr
-      cursor = generateMemSrc1Instruction(cg,Op_stclass, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(r10, TR::Compiler->om.offsetOfObjectVftField(), TR::Compiler->om.sizeofReferenceField(), cg),
-                                          r8, cursor);
-      cursor = generateTrg1Src1Instruction(cg, TR::InstOpCode::mr, n, r3, r10, cursor);
-      // Store array length
-      cursor = generateMemSrc1Instruction(cg, TR::InstOpCode::stw, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(r10, fej9->getOffsetOfContiguousArraySizeField(), 4, cg),
-                                          r4, cursor);
-
-      if (cg->enableTLHPrefetching())
-         {
-         TR::LabelSymbol *prefetchHelperLabel = generateLabelSymbol(cg);
-         TR_ASSERT( CCPreLoadedCodeTable[TR_AllocPrefetch], "Expecting prefetch helper to be initialized");
-         prefetchHelperLabel->setCodeLocation((uint8_t *)CCPreLoadedCodeTable[TR_AllocPrefetch]);
-         cursor = generateTrg1Src1Instruction(cg, TR::InstOpCode::mr, n, r8, r3);
-         cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::ble, n, prefetchHelperLabel, cr0, cursor);
-         }
-
-      //Done allocating on TLH, return to calling code.
-      cursor = generateInstruction(cg, TR::InstOpCode::blr, n, cursor);
-
-      //11 instructions (excluding prefetch).
-      }
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, doNonZeroHeapTLHAlloc, cursor);
-      {
-      //Allocate on nonZero TLH here.
-
-      if (cg->enableTLHPrefetching())
-         {
-         cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r10,
-                                             new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, nonZeroTlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                             cursor);
-         cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::subf_r, n, r10, r5, r10, cr0, cursor);
-         cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                             new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(J9VMThread, nonZeroTlhPrefetchFTA), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                             r10, cursor);
-         }
-
-      cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r10,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, nonZeroHeapAlloc), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                          cursor);
-      cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r11,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, nonZeroHeapTop), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                          cursor);
-      // New heapAlloc
-      cursor = generateTrg1Src2Instruction(cg, TR::InstOpCode::add, n, r5, r10, r5, cursor);
-      // Check if we exceeded the TLH
-      cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr2, r5, r11, cursor);
-      cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bgt, n, nonZeroed_branchToHelperLabel, cr2, cursor);
-      // Check if we overflowed
-      // For variable-length arrays we already know it won't overflow (see above) however since we're interested in
-      // a small i-cache footprint here it's better to have the variable length path fall through to the const length path.
-      cursor = generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmpl, n, cr2, r5, r10, cursor);
-      cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::ble, n, nonZeroed_branchToHelperLabel, cr2, cursor);
-      // Store new heapAlloc
-      cursor = generateMemSrc1Instruction(cg,TR::InstOpCode::Op_st, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, nonZeroHeapAlloc), TR::Compiler->om.sizeofReferenceAddress(), cg),
-                                          r5, cursor);
-      // Store class ptr
-      cursor = generateMemSrc1Instruction(cg,Op_stclass, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(r10, TR::Compiler->om.offsetOfObjectVftField(), TR::Compiler->om.sizeofReferenceField(), cg),
-                                          r8, cursor);
-      cursor = generateTrg1Src1Instruction(cg, TR::InstOpCode::mr, n, r3, r10, cursor);
-      // Store array length
-      cursor = generateMemSrc1Instruction(cg, TR::InstOpCode::stw, n,
-                                          new (cg->trHeapMemory()) TR::MemoryReference(r10, fej9->getOffsetOfContiguousArraySizeField(), 4, cg),
-                                          r4, cursor);
-
-      if (cg->enableTLHPrefetching())
-         {
-         TR::LabelSymbol *prefetchHelperLabel = generateLabelSymbol(cg);
-         TR_ASSERT( CCPreLoadedCodeTable[TR_NonZeroAllocPrefetch], "Expecting non-zero tlh prefetch helper to be initialized");
-         prefetchHelperLabel->setCodeLocation((uint8_t *)CCPreLoadedCodeTable[TR_NonZeroAllocPrefetch]);
-         cursor = generateTrg1Src1Instruction(cg, TR::InstOpCode::mr, n, r8, r3);
-         cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::ble, n, prefetchHelperLabel, cr0, cursor);
-         }
-
-      //Done allocating on TLH, return to calling code.
-      cursor = generateInstruction(cg, TR::InstOpCode::blr, n, cursor);
-
-      //12 instructions (excluding prefetch).
-      }
-
-   //Call out to VM helper for Zeroed TLH.
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, zeroed_branchToHelperLabel, cursor);
-   cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::cmpli4, n, cr0, r3, 11, cursor);
-   cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::ble, n, zeroed_branchToPrimArrayHelperLabel, cr0, cursor);
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::b, n, zeroed_aNewArrayTrampolineLabel, cursor);
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, zeroed_branchToPrimArrayHelperLabel, cursor);
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::b, n, zeroed_newArrayTrampolineLabel, cursor);
-   //4 instructions.
-
-   //Call out to VM helper for nonZeroed TLH.
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, nonZeroed_branchToHelperLabel, cursor);
-   cursor = generateTrg1Src1ImmInstruction(cg, TR::InstOpCode::cmpli4, n, cr0, r3, 11, cursor);
-   cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::ble, n, nonZeroed_branchToPrimArrayHelperLabel, cr0, cursor);
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::b, n, nonZeroed_aNewArrayTrampolineLabel, cursor);
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, nonZeroed_branchToPrimArrayHelperLabel, cursor);
-   cursor = generateLabelInstruction(cg, TR::InstOpCode::b, n, nonZeroed_newArrayTrampolineLabel, cursor);
-   //4 instructions.
-
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
-
-   uint32_t helperSize = 25 + 14 + 4 + (TR::Compiler->om.useHybridArraylets() ? (TR::Compiler->om.maxContiguousArraySizeInBytes() > UPPER_IMMED ? 4 : 2) : 0)
-      + (cg->enableTLHPrefetching() ? (2*5) : 0);
-#ifdef DEBUG
-   helperSize += 8;
-#endif
-
-   TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
-             "Per-codecache array allocation helpers, unexpected size");
-
-   CCPreLoadedCodeTable[TR_VariableLenArrayAlloc] = entryLabel->getCodeLocation();
-   CCPreLoadedCodeTable[TR_ConstLenArrayAlloc] = constLenArrayAllocLabel->getCodeLocation();
-
-   return cg->getBinaryBufferCursor() - PPC_INSTRUCTION_LENGTH;
-   }
-
 static uint8_t* initializeCCPreLoadedWriteBarrier(uint8_t *buffer, void **CCPreLoadedCodeTable, TR::CodeGenerator *cg)
    {
    TR::Compilation *comp = cg->comp();
@@ -2742,11 +868,9 @@ static uint8_t* initializeCCPreLoadedWriteBarrier(uint8_t *buffer, void **CCPreL
    helperTrampolineLabel->setCodeLocation((uint8_t *)TR::CodeCacheManager::instance()->findHelperTrampoline(TR_writeBarrierStoreGenerational, buffer));
    TR::Instruction *entry = generateLabelInstruction(cg, TR::InstOpCode::label, n, entryLabel);
    TR::Instruction *cursor = entry;
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-   const TR::InstOpCode::Mnemonic Op_lclass = TR::InstOpCode::lwz;
-#else
-   const TR::InstOpCode::Mnemonic Op_lclass =TR::InstOpCode::Op_load;
-#endif
+   TR::InstOpCode::Mnemonic Op_lclass = TR::InstOpCode::Op_load;
+   if (TR::Compiler->om.compressObjectReferences())
+      Op_lclass = TR::InstOpCode::lwz;
    const TR::InstOpCode::Mnemonic rememberedClassMaskOp = J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST > UPPER_IMMED ||
                                                J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST < LOWER_IMMED ? TR::InstOpCode::andis_r : TR::InstOpCode::andi_r;
    const uint32_t      rememberedClassMask = rememberedClassMaskOp == TR::InstOpCode::andis_r ?
@@ -2766,22 +890,22 @@ static uint8_t* initializeCCPreLoadedWriteBarrier(uint8_t *buffer, void **CCPreL
 
    const bool constHeapBase = !comp->getOptions()->isVariableHeapBaseForBarrierRange0();
    const bool constHeapSize = !comp->getOptions()->isVariableHeapSizeForBarrierRange0();
-   intptrj_t heapBase;
-   intptrj_t heapSize;
+   intptr_t heapBase;
+   intptr_t heapSize;
 
-   if (TR::Compiler->target.is32Bit() && !comp->compileRelocatableCode() && constHeapBase)
+   if (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapBase)
       {
       heapBase = comp->getOptions()->getHeapBaseForBarrierRange0();
-      cursor = loadAddressConstant(cg, n, heapBase, r5, cursor);
+      cursor = loadAddressConstant(cg, false, n, heapBase, r5, cursor);
       }
    else
       cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r5,
                                           new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapBaseForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress(), cg),
                                           cursor);
-   if (TR::Compiler->target.is32Bit() && !comp->compileRelocatableCode() && constHeapSize)
+   if (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapSize)
       {
       heapSize = comp->getOptions()->getHeapSizeForBarrierRange0();
-      cursor = loadAddressConstant(cg, n, heapSize, r6, cursor);
+      cursor = loadAddressConstant(cg, false, n, heapSize, r6, cursor);
       }
    else
       cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r6,
@@ -2800,15 +924,11 @@ static uint8_t* initializeCCPreLoadedWriteBarrier(uint8_t *buffer, void **CCPreL
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bnelr, n, NULL, cr0, cursor);
    cursor = generateLabelInstruction(cg, TR::InstOpCode::b, n, helperTrampolineLabel, cursor);
 
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+   performCCPreLoadedBinaryEncoding(buffer, cg);
 
    const uint32_t helperSize = 12 +
-      (TR::Compiler->target.is32Bit() && !comp->compileRelocatableCode() && constHeapBase && heapBase > UPPER_IMMED && heapBase < LOWER_IMMED ? 1 : 0) +
-      (TR::Compiler->target.is32Bit() && !comp->compileRelocatableCode() && constHeapSize && heapSize > UPPER_IMMED && heapSize < LOWER_IMMED ? 1 : 0);
+      (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapBase && heapBase > UPPER_IMMED && heapBase < LOWER_IMMED ? 1 : 0) +
+      (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapSize && heapSize > UPPER_IMMED && heapSize < LOWER_IMMED ? 1 : 0);
    TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
            "Per-codecache write barrier, unexpected size");
 
@@ -2844,11 +964,9 @@ static uint8_t* initializeCCPreLoadedWriteBarrierAndCardMark(uint8_t *buffer, vo
    helperTrampolineLabel->setCodeLocation((uint8_t *)TR::CodeCacheManager::instance()->findHelperTrampoline(TR_writeBarrierStoreGenerationalAndConcurrentMark, buffer));
    TR::Instruction *entry = generateLabelInstruction(cg, TR::InstOpCode::label, n, entryLabel);
    TR::Instruction *cursor = entry;
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-   const TR::InstOpCode::Mnemonic Op_lclass = TR::InstOpCode::lwz;
-#else
-   const TR::InstOpCode::Mnemonic Op_lclass =TR::InstOpCode::Op_load;
-#endif
+   TR::InstOpCode::Mnemonic Op_lclass = TR::InstOpCode::Op_load;
+   if (TR::Compiler->om.compressObjectReferences())
+      Op_lclass = TR::InstOpCode::lwz;
    const TR::InstOpCode::Mnemonic cmActiveMaskOp = J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE > UPPER_IMMED ||
                                         J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE < LOWER_IMMED ? TR::InstOpCode::andis_r : TR::InstOpCode::andi_r;
    const uint32_t      cmActiveMask = cmActiveMaskOp == TR::InstOpCode::andis_r ?
@@ -2857,7 +975,7 @@ static uint8_t* initializeCCPreLoadedWriteBarrierAndCardMark(uint8_t *buffer, vo
                                                J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST < LOWER_IMMED ? TR::InstOpCode::andis_r : TR::InstOpCode::andi_r;
    const uint32_t      rememberedClassMask = rememberedClassMaskOp == TR::InstOpCode::andis_r ?
                                              J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST >> 16 : J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST;
-   const uintptr_t     cardTableShift = TR::Compiler->target.is64Bit() ?
+   const uintptr_t     cardTableShift = cg->comp()->target().is64Bit() ?
                                         trailingZeroes((uint64_t)comp->getOptions()->getGcCardSize()) :
                                         trailingZeroes((uint32_t)comp->getOptions()->getGcCardSize());
 
@@ -2877,22 +995,22 @@ static uint8_t* initializeCCPreLoadedWriteBarrierAndCardMark(uint8_t *buffer, vo
 
    const bool constHeapBase = !comp->getOptions()->isVariableHeapBaseForBarrierRange0();
    const bool constHeapSize = !comp->getOptions()->isVariableHeapSizeForBarrierRange0();
-   intptrj_t heapBase;
-   intptrj_t heapSize;
+   intptr_t heapBase;
+   intptr_t heapSize;
 
-   if (TR::Compiler->target.is32Bit() && !comp->compileRelocatableCode() && constHeapBase)
+   if (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapBase)
       {
       heapBase = comp->getOptions()->getHeapBaseForBarrierRange0();
-      cursor = loadAddressConstant(cg, n, heapBase, r5, cursor);
+      cursor = loadAddressConstant(cg, false, n, heapBase, r5, cursor);
       }
    else
       cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r5,
                                           new (cg->trHeapMemory()) TR::MemoryReference(metaReg, offsetof(struct J9VMThread, heapBaseForBarrierRange0), TR::Compiler->om.sizeofReferenceAddress(), cg),
                                           cursor);
-   if (TR::Compiler->target.is32Bit() && !comp->compileRelocatableCode() && constHeapSize)
+   if (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapSize)
       {
       heapSize = comp->getOptions()->getHeapSizeForBarrierRange0();
-      cursor = loadAddressConstant(cg, n, heapSize, r6, cursor);
+      cursor = loadAddressConstant(cg, false, n, heapSize, r6, cursor);
       }
    else
       cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r6,
@@ -2911,7 +1029,7 @@ static uint8_t* initializeCCPreLoadedWriteBarrierAndCardMark(uint8_t *buffer, vo
    cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r6,
                                        new (cg->trHeapMemory()) TR::MemoryReference(metaReg,  offsetof(struct J9VMThread, activeCardTableBase), TR::Compiler->om.sizeofReferenceAddress(), cg),
                                        cursor);
-   if (TR::Compiler->target.is64Bit())
+   if (cg->comp()->target().is64Bit())
       cursor = generateShiftRightLogicalImmediateLong(cg, n, r11, r11, cardTableShift, cursor);
    else
       cursor = generateShiftRightLogicalImmediate(cg, n, r11, r11, cardTableShift, cursor);
@@ -2928,15 +1046,11 @@ static uint8_t* initializeCCPreLoadedWriteBarrierAndCardMark(uint8_t *buffer, vo
    cursor = generateConditionalBranchInstruction(cg, TR::InstOpCode::bnelr, n, NULL, cr0, cursor);
    cursor = generateLabelInstruction(cg, TR::InstOpCode::b, n, helperTrampolineLabel, cursor);
 
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+   performCCPreLoadedBinaryEncoding(buffer, cg);
 
    const uint32_t helperSize = 19 +
-      (TR::Compiler->target.is32Bit() && !comp->compileRelocatableCode() && constHeapBase && heapBase > UPPER_IMMED && heapBase < LOWER_IMMED ? 1 : 0) +
-      (TR::Compiler->target.is32Bit() && !comp->compileRelocatableCode() && constHeapSize && heapSize > UPPER_IMMED && heapSize < LOWER_IMMED ? 1 : 0);
+      (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapBase && heapBase > UPPER_IMMED && heapBase < LOWER_IMMED ? 1 : 0) +
+      (cg->comp()->target().is32Bit() && !comp->compileRelocatableCode() && constHeapSize && heapSize > UPPER_IMMED && heapSize < LOWER_IMMED ? 1 : 0);
    TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
            "Per-codecache write barrier with card mark, unexpected size");
 
@@ -2971,7 +1085,7 @@ static uint8_t* initializeCCPreLoadedCardMark(uint8_t *buffer, void **CCPreLoade
                                         J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE < LOWER_IMMED ? TR::InstOpCode::andis_r : TR::InstOpCode::andi_r;
    const uint32_t      cmActiveMask = cmActiveMaskOp == TR::InstOpCode::andis_r ?
                                       J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE >> 16 : J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE;
-   const uintptr_t     cardTableShift = TR::Compiler->target.is64Bit() ?
+   const uintptr_t     cardTableShift = cg->comp()->target().is64Bit() ?
                                         trailingZeroes((uint64_t)comp->getOptions()->getGcCardSize()) :
                                         trailingZeroes((uint32_t)comp->getOptions()->getGcCardSize());
 
@@ -3006,7 +1120,7 @@ static uint8_t* initializeCCPreLoadedCardMark(uint8_t *buffer, void **CCPreLoade
    cursor = generateTrg1MemInstruction(cg,TR::InstOpCode::Op_load, n, r4,
                                        new (cg->trHeapMemory()) TR::MemoryReference(metaReg,  offsetof(struct J9VMThread, activeCardTableBase), TR::Compiler->om.sizeofReferenceAddress(), cg),
                                        cursor);
-   if (TR::Compiler->target.is64Bit())
+   if (cg->comp()->target().is64Bit())
       cursor = generateShiftRightLogicalImmediateLong(cg, n, r5, r5, cardTableShift, cursor);
    else
       cursor = generateShiftRightLogicalImmediate(cg, n, r5, r5, cardTableShift, cursor);
@@ -3016,11 +1130,7 @@ static uint8_t* initializeCCPreLoadedCardMark(uint8_t *buffer, void **CCPreLoade
                                        r11, cursor);
    cursor = generateInstruction(cg, TR::InstOpCode::blr, n, cursor);
 
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+   performCCPreLoadedBinaryEncoding(buffer, cg);
 
    const uint32_t helperSize = TR::Compiler->om.writeBarrierType() != gc_modron_wrtbar_cardmark_incremental ? 13 : 10;
    TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
@@ -3059,11 +1169,9 @@ static uint8_t* initializeCCPreLoadedArrayStoreCHK(uint8_t *buffer, void **CCPre
    helperTrampolineLabel->setCodeLocation((uint8_t *)TR::CodeCacheManager::instance()->findHelperTrampoline(TR_typeCheckArrayStore, buffer));
    TR::Instruction *entry = generateLabelInstruction(cg, TR::InstOpCode::label, n, entryLabel);
    TR::Instruction *cursor = entry;
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-   const TR::InstOpCode::Mnemonic Op_lclass = TR::InstOpCode::lwz;
-#else
-   const TR::InstOpCode::Mnemonic Op_lclass =TR::InstOpCode::Op_load;
-#endif
+   TR::InstOpCode::Mnemonic Op_lclass = TR::InstOpCode::Op_load;
+   if (TR::Compiler->om.compressObjectReferences())
+      Op_lclass = TR::InstOpCode::lwz;
 
    TR::Register *r3 = cg->machine()->getRealRegister(TR::RealRegister::gr3);
    TR::Register *r4 = cg->machine()->getRealRegister(TR::RealRegister::gr4);
@@ -3126,11 +1234,7 @@ static uint8_t* initializeCCPreLoadedArrayStoreCHK(uint8_t *buffer, void **CCPre
    cursor = generateLabelInstruction(cg, TR::InstOpCode::label, n, skipSuperclassTestLabel, cursor);
    cursor = generateLabelInstruction(cg, TR::InstOpCode::b, n, helperTrampolineLabel, cursor);
 
-   cg->setBinaryBufferStart(buffer);
-   cg->setBinaryBufferCursor(buffer);
-
-   for (TR::Instruction *i = eyecatcher; i != NULL; i = i->getNext())
-      cg->setBinaryBufferCursor(i->generateBinaryEncoding());
+   performCCPreLoadedBinaryEncoding(buffer, cg);
 
    const uint32_t helperSize = 25;
    TR_ASSERT(cg->getBinaryBufferCursor() - entryLabel->getCodeLocation() == helperSize * PPC_INSTRUCTION_LENGTH,
@@ -3145,12 +1249,12 @@ void TR::createCCPreLoadedCode(uint8_t *CCPreLoadedCodeBase, uint8_t *CCPreLoade
    {
    /* If you modify this make sure you update CCPreLoadedCodeSize above as well */
 
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
-      return;
-
    // We temporarily clobber the first and append instructions so we can use high level codegen to generate pre-loaded code
    // So save the original values here and restore them when done
    TR::Compilation *comp = cg->comp();
+   if (comp->getOptions()->realTimeGC())
+      return;
+
    TR::Instruction *curFirst = cg->getFirstInstruction();
    TR::Instruction *curAppend = cg->getAppendInstruction();
    uint8_t *curBinaryBufferStart = cg->getBinaryBufferStart();
@@ -3160,8 +1264,6 @@ void TR::createCCPreLoadedCode(uint8_t *CCPreLoadedCodeBase, uint8_t *CCPreLoade
 
    buffer = initializeCCPreLoadedPrefetch(buffer, CCPreLoadedCodeTable, cg);
    buffer = initializeCCPreLoadedNonZeroPrefetch(buffer + PPC_INSTRUCTION_LENGTH, CCPreLoadedCodeTable, cg);
-   buffer = initializeCCPreLoadedObjectAlloc(buffer + PPC_INSTRUCTION_LENGTH, CCPreLoadedCodeTable, cg);
-   buffer = initializeCCPreLoadedArrayAlloc(buffer + PPC_INSTRUCTION_LENGTH, CCPreLoadedCodeTable, cg);
    buffer = initializeCCPreLoadedWriteBarrier(buffer + PPC_INSTRUCTION_LENGTH, CCPreLoadedCodeTable, cg);
    if (comp->getOptions()->getGcCardSize() > 0)
       {
@@ -3207,13 +1309,13 @@ uint8_t *TR::PPCAllocPrefetchSnippet::emitSnippetBody()
    getSnippetLabel()->setCodeLocation(buffer);
    TR::InstOpCode opcode;
 
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
+   if (comp->getOptions()->realTimeGC())
       return NULL;
 
-   TR_ASSERT((uintptrj_t)((cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_AllocPrefetch, cg())) != 0xDEADBEEF,
+   TR_ASSERT((uintptr_t)((cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_AllocPrefetch, cg())) != 0xDEADBEEF,
          "Invalid addr for code cache helper");
-   intptrj_t distance = (intptrj_t)(cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_AllocPrefetch, cg())
-                           - (intptrj_t)buffer;
+   intptr_t distance = (intptr_t)(cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_AllocPrefetch, cg())
+                           - (intptr_t)buffer;
    opcode.setOpCodeValue(TR::InstOpCode::b);
    buffer = opcode.copyBinaryToBuffer(buffer);
    *(int32_t *)buffer |= distance & 0x03FFFFFC;
@@ -3233,13 +1335,13 @@ TR::PPCAllocPrefetchSnippet::print(TR::FILE *pOutFile, TR_Debug * debug)
    debug->printPrefix(pOutFile, NULL, cursor, 4);
    distance = *((int32_t *) cursor) & 0x03fffffc;
    distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t", (intptrj_t)cursor + distance);
+   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t", (intptr_t)cursor + distance);
    }
 
 uint32_t TR::PPCAllocPrefetchSnippet::getLength(int32_t estimatedCodeStart)
    {
 
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
+   if (cg()->comp()->getOptions()->realTimeGC())
       return 0;
 
    return PPC_INSTRUCTION_LENGTH;
@@ -3260,13 +1362,13 @@ uint8_t *TR::PPCNonZeroAllocPrefetchSnippet::emitSnippetBody()
    getSnippetLabel()->setCodeLocation(buffer);
    TR::InstOpCode opcode;
 
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
+   if (comp->getOptions()->realTimeGC())
       return NULL;
 
-   TR_ASSERT((uintptrj_t)((cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_NonZeroAllocPrefetch, cg())) != 0xDEADBEEF,
+   TR_ASSERT((uintptr_t)((cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_NonZeroAllocPrefetch, cg())) != 0xDEADBEEF,
          "Invalid addr for code cache helper");
-   intptrj_t distance = (intptrj_t)(cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_NonZeroAllocPrefetch, cg())
-                           - (intptrj_t)buffer;
+   intptr_t distance = (intptr_t)(cg()->getCodeCache())->getCCPreLoadedCodeAddress(TR_NonZeroAllocPrefetch, cg())
+                           - (intptr_t)buffer;
    opcode.setOpCodeValue(TR::InstOpCode::b);
    buffer = opcode.copyBinaryToBuffer(buffer);
    *(int32_t *)buffer |= distance & 0x03FFFFFC;
@@ -3286,13 +1388,13 @@ TR::PPCNonZeroAllocPrefetchSnippet::print(TR::FILE *pOutFile, TR_Debug * debug)
    debug->printPrefix(pOutFile, NULL, cursor, 4);
    distance = *((int32_t *) cursor) & 0x03fffffc;
    distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t", (intptrj_t)cursor + distance);
+   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t", (intptr_t)cursor + distance);
    }
 
 uint32_t TR::PPCNonZeroAllocPrefetchSnippet::getLength(int32_t estimatedCodeStart)
    {
 
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
+   if (cg()->comp()->getOptions()->realTimeGC())
       return 0;
 
    return PPC_INSTRUCTION_LENGTH;

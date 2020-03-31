@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -45,6 +45,7 @@ extern "C" {
 #define J9_CREATEJAVAVM_ARGENCODING_LATIN 2
 #define J9_CREATEJAVAVM_ARGENCODING_UTF8 4
 #define J9_CREATEJAVAVM_ARGENCODING_PLATFORM 8
+#define J9_CREATEJAVAVM_START_JITSERVER 16
 
 typedef struct J9CreateJavaVMParams {
 	UDATA j2seVersion;
@@ -327,6 +328,16 @@ freeClassLoader(J9ClassLoader *classLoader, J9JavaVM *javaVM, J9VMThread *vmThre
 UDATA
 calculateArity(J9VMThread* vmThread, U_8* name, UDATA length);
 
+/**
+* @brief
+* @param currentThread
+* @param classLoader
+* @param className
+* @param classNameLength
+* @return UDATA
+*/
+J9Class*
+peekClassHashTable(J9VMThread* currentThread, J9ClassLoader* classLoader, U_8* className, UDATA classNameLength);
 
 /**
 * @brief
@@ -413,14 +424,6 @@ contendedLoadTableNew(J9JavaVM* vm, J9PortLibrary *portLib);
 */
 void
 contendedLoadTableFree(J9JavaVM* vm);
-
-/**
-* @brief
-* @param clazz
-* @param cpIndex
-*/
-void
-fixCPShapeDescription(J9Class * clazz, UDATA cpIndex);
 
 /* ---------------- createramclass.c ---------------- */
 
@@ -684,6 +687,21 @@ setCurrentExceptionWithUtfCause(J9VMThread *currentThread, UDATA exceptionNumber
 */
 void  
 setCurrentExceptionNLS(J9VMThread * vmThread, UDATA exceptionNumber, U_32 moduleName, U_32 messageNumber);
+
+/**
+ * Prepare for throwing an exception. Find the exception class using its name.
+ * Create an object using the exception class. Set an OutOfMemoryError if the
+ * object cannot be created. Otherwise, set an exception pending using the
+ * created object.
+ *
+ * Note this does not generate the "systhrow" dump event.
+ *
+ * @param vmThread[in] the current J9VMThread
+ * @param exceptionClassName[in] the name of the exception class
+ * @return void
+ */
+void
+prepareExceptionUsingClassName(J9VMThread *vmThread, const char *exceptionClassName);
 
 /**
  * @brief Creates exception with nls message; substitutes string values into error message.
@@ -1622,6 +1640,19 @@ registerPredefinedHandler(J9JavaVM *vm, U_32 signal, void **oldOSHandler);
 IDATA
 registerOSHandler(J9JavaVM *vm, U_32 signal, void *newOSHandler, void **oldOSHandler);
 
+#if defined(J9VM_OPT_JITSERVER)
+/**
+ * @brief checks if the runtime flag for enabling JITServer is set or not
+ *
+ * @param[in] vm pointer to a J9JavaVM
+ *
+ * @return TRUE if the flag for JITServer is set, FALSE otherwise
+ */
+BOOLEAN
+isJITServerEnabled(J9JavaVM *vm);
+
+#endif /* J9VM_OPT_JITSERVER */
+
 /* ---------------- romutil.c ---------------- */
 
 /**
@@ -1917,7 +1948,7 @@ mustReportEnterStepOrBreakpoint(J9JavaVM * vm);
 * @param object
 * @return IDATA
 */
-IDATA
+UDATA
 objectMonitorEnter(J9VMThread* vmStruct, j9object_t object);
 
 
@@ -2215,6 +2246,20 @@ fieldOffsetsStartDo(J9JavaVM *vm, J9ROMClass *romClass, J9Class *superClazz, J9R
  */
 void
 defaultValueWithUnflattenedFlattenables(J9VMThread *currentThread, J9Class *clazz, j9object_t instance);
+
+
+/**
+ * Compare two objects for equality. This helper will perform a
+ * structural comparison if both objecst are valueTypes
+ *
+ * @param[in] currentThread the current thread
+ * @param[in] lhs first operand
+ * @param[in] rhs second operand
+ *
+ * @return TRUE if both objects are equal, false otherwise
+ */
+BOOLEAN
+valueTypeCapableAcmp(J9VMThread *currentThread, j9object_t lhs, j9object_t rhs);
 
 /**
 * @brief Iterate over fields of the specified class in JVMTI order.
@@ -2810,18 +2855,6 @@ void *
 getStatistic (J9JavaVM* javaVM, U_8 * name);
 
 /* ---------------- stringhelpers.c ---------------- */
-
-/**
- * @brief
- * @param *vmThread
- * @param *data
- * @param length
- * @param stringFlags
- * @param byteArray
- * @param offset
- */
-void
-copyUTF8ToCompressedUnicode(J9VMThread *vmThread, U_8 *data, UDATA length, UDATA stringFlags, j9object_t byteArray, UDATA offset);
 
 /**
  * @brief Compare a java string to another java string for character equality.
@@ -3920,7 +3953,9 @@ J9ROMMethod *
 * @brief Finds the rom class given a PC.  Also returns the classloader it belongs to.
 * @param vmThread
 * @param methodPC
-* @param resultClassLoader
+* @param resultClassLoader  This is the classLoader that owns the memory segment that the ROMClass was found in.
+*	For classes from the SharedClasses cache, this will always be the vm->systemClassLoader regardless of which
+*	J9ClassLoader actually loaded the class.
 * @return IDATA
 *
 * Returns the rom class, or NULL on failure.  resultClassLoader is filled in if non-null with the classloader associated.
@@ -4150,6 +4185,28 @@ getMonitorForWait (J9VMThread* vmThread, j9object_t object);
  */
 IDATA
 createThreadWithCategory(omrthread_t* handle, UDATA stacksize, UDATA priority, UDATA suspend,
+	omrthread_entrypoint_t entrypoint, void* entryarg, U_32 category);
+
+/**
+ * Helper function to create a joinable thread with a specific thread category.
+ *
+ * @param[out] handle a pointer to a omrthread_t which will point to the thread (if successfully created)
+ * @param[in] stacksize the size of the new thread's stack (bytes)<br>
+ *			0 indicates use default size
+ * @param[in] priority priorities range from J9THREAD_PRIORITY_MIN to J9THREAD_PRIORITY_MAX (inclusive)
+ * @param[in] suspend set to non-zero to create the thread in a suspended state.
+ * @param[in] entrypoint pointer to the function which the thread will run
+ * @param[in] entryarg a value to pass to the entrypoint function
+ * @param[in] category category of the thread to be created
+ *
+ * @return success or error code
+ * @retval J9THREAD_SUCCESS success
+ * @retval J9THREAD_ERR_xxx failure
+ *
+ * @see omrthread_create
+ */
+IDATA
+createJoinableThreadWithCategory(omrthread_t* handle, UDATA stacksize, UDATA priority, UDATA suspend,
 	omrthread_entrypoint_t entrypoint, void* entryarg, U_32 category);
 
 /**

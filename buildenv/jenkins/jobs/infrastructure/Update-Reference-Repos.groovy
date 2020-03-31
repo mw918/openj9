@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -38,10 +38,6 @@ UPDATE_SETUP_NODES = params.UPDATE_SETUP_NODES
 UPDATE_BUILD_NODES = params.UPDATE_BUILD_NODES
 
 EXTENSIONS_REPOS = [[name: "openj9", url: "https://github.com/eclipse/openj9.git"]]
-
-properties([buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '10')),
-            pipelineTriggers([cron('''# Daily at 11:00pm
-                                        0 23 * * *''')])])
 
 def jobs = [:]
 
@@ -134,6 +130,12 @@ timeout(time: 6, unit: 'HOURS') {
 
                         // get Eclipse OpenJ9 extensions repositories from variables file
                         def repos = get_openjdk_repos(VARIABLES.openjdk, foundLabel)
+
+                        if (nodeLabels.contains('ci.role.test')) {
+                            // add AdoptOpenJDK/openjdk-tests repository
+                            repos.add([name: "adoptopenjdk", url: VARIABLES.adoptopenjdk.default.get('repoUrl')])
+                        }
+
                         if (jenkins.model.Jenkins.instance.getLabel(SETUP_LABEL).getNodes().contains(aNode)) {
                             // add OpenJ9 repo
                             repos.addAll(EXTENSIONS_REPOS)
@@ -206,7 +208,7 @@ def config(remoteName, remoteUrl) {
 */
 def get_openjdk_repos(openJdkMap, useDefault) {
     def repos = []
-    def releases = ['8', '11', '12', '13']
+    def releases = ['8', '11', '14', 'next']
 
     // iterate over VARIABLES.openjdk map and fetch the repository URL
     openJdkMap.entrySet().each { mapEntry ->

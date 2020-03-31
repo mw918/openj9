@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <!--
-	Copyright (c) 2016, 2019 IBM Corp. and others
+	Copyright (c) 2016, 2020 IBM Corp. and others
 
 	This program and the accompanying materials are made available under
 	the terms of the Eclipse Public License 2.0 which accompanies this
@@ -22,7 +22,7 @@
 	SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
 
-<playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../TestConfig/playlist.xsd">
+<playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../TKG/playlist.xsd">
 	<!-- jit.test.jitt tests start here -->
 	<test>
 		<testCaseName>finalizerTest</testCaseName>
@@ -115,6 +115,78 @@
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
+		</impls>
+	</test>
+
+	<test>
+		<testCaseName>jit_compareAndBranch</testCaseName>
+		<variations>
+			<variation>-Xjit:count=1,limit={*testAddressCompare*},optlevel=hot,disableCFGSimplification,disableGRA,disableAsyncCompilation</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
+	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)jitt.jar$(Q) \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
+	-testnames \
+	compareAndBranchTest \
+	-groups $(TEST_GROUP) \
+	-excludegroups $(DEFAULT_EXCLUDE); \
+	$(TEST_STATUS)</command>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
+
+	<test>
+		<testCaseName>jit_jitt_openj9_none_SCC</testCaseName>
+		<variations>
+			<variation>-Xjit:noJitUntilMain,count=0,assumeStrictFP,optlevel=warm,gcOnResolve,rtResolve -verbose:stackwalk=0 -Xdump</variation>
+			<variation>-Xrs -Xjit:noJitUntilMain,count=0,assumeStrictFP,optlevel=warm,gcOnResolve,rtResolve -verbose:stackwalk=0 -Xdump</variation>
+			<variation>-Xrs:sync -Xjit:noJitUntilMain,count=0,assumeStrictFP,optlevel=warm,gcOnResolve,rtResolve -verbose:stackwalk=0 -Xdump</variation>
+			<variation>-Xrs:async -Xjit:noJitUntilMain,count=0,assumeStrictFP,optlevel=warm,gcOnResolve,rtResolve -verbose:stackwalk=0 -Xdump</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) -Xshareclasses:none \
+	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)jitt.jar$(Q) \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
+	-testnames \
+	arrayTest,\
+	assemblerTest,\
+	castingTest,\
+	cfgTest,\
+	crashesTest,\
+	ctresolvesTest,\
+	exceptionsTest,\
+	fieldsTest,\
+	floatsTest,\
+	gcTest,\
+	geCastingTest,\
+	immedOpTest,\
+	invokeTest,\
+	mathTest,\
+	math2Test,\
+	miscTest,\
+	os390LinkageTest,\
+	promotionTest,\
+	resolvesTest,\
+	sieveTest,\
+	transitionsTest \
+	-groups $(TEST_GROUP) \
+	-excludegroups $(DEFAULT_EXCLUDE); \
+	$(TEST_STATUS)</command>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<impls>
+			<impl>openj9</impl>
 		</impls>
 	</test>
 
@@ -391,6 +463,76 @@
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
+		</impls>
+	</test>
+
+<!-- jit.test.recognizedMethod tests start here -->
+	<test>
+		<testCaseName>jit_recognizedMethod</testCaseName>
+		<variations>
+			<variation>-Xint</variation>
+			<variation>-Xjit:count=1,disableAsyncCompilation</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
+	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)jitt.jar$(Q) \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
+	-testnames \
+	RecognizedMethodTest \
+	-groups $(TEST_GROUP) \
+	-excludegroups $(DEFAULT_EXCLUDE); \
+	$(TEST_STATUS)</command>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
+
+	<!-- JITServer tests start here. -->
+	<test>
+		<testCaseName>testJITServer</testCaseName>
+		<!-- Variations are passed to the client via the CLIENT_PROGRAM property from $JVM_OPTIONS; neither the test harness nor the server care about these. -->
+		<variations>
+			<variation>NoOptions</variation>
+			<variation>-Xshareclasses:none -Xjit:optLevel=hot</variation>
+		</variations>
+		<!-- Check if the JITServer launcher exists and if so start the test and
+			 - specify the executables for the client and server via the CLIENT_EXE and SERVER_EXE properties respectively,
+			 - specify what the client will run via the CLIENT_PROGRAM property.
+			 If the launcher doesn't exist we assume that the build doesn't support JITServer and trivially pass the test. -->
+		<command>if [ -x $(Q)$(TEST_JDK_BIN)$(D)jitserver$(Q) ]; \
+	then \
+		$(JAVA_COMMAND) \
+		-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)jitt.jar$(Q) \
+		-DSERVER_EXE=$(Q)$(TEST_JDK_BIN)$(D)jitserver$(Q) \
+		-DCLIENT_EXE=$(JAVA_COMMAND) \
+		-DCLIENT_PROGRAM=$(SQ)$(JVM_OPTIONS) -cp $(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)jitt.jar -DjarTesterArgs=$(TEST_RESROOT)$(D)jitt.jar org.testng.TestNG -d $(REPORTDIR)$(D)client $(TEST_RESROOT)$(D)testng.xml -testnames JarTesterTest -groups $(TEST_GROUP) -excludegroups $(DEFAULT_EXCLUDE)$(SQ) \
+		org.testng.TestNG \
+		-d $(REPORTDIR) \
+		$(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
+		-testnames JITServerTest \
+		-groups $(TEST_GROUP) \
+		-excludegroups $(DEFAULT_EXCLUDE); \
+	else \
+		echo; \
+		echo $(Q)$(TEST_JDK_BIN)$(D)jitserver doesn't exist; assuming this JDK does not support JITServer and trivially passing the test.$(Q); \
+	fi; \
+	$(TEST_STATUS)</command>
+		<disabled>https://github.com/eclipse/openj9/issues/8806</disabled>
+		<platformRequirements>os.linux,arch.x86,bits.64</platformRequirements>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<impls>
+			<impl>openj9</impl>
 		</impls>
 	</test>
 </playlist>

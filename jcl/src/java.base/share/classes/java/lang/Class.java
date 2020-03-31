@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar16]*/
+/*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -83,6 +83,7 @@ import java.lang.annotation.Repeatable;
 import java.lang.invoke.*;
 import com.ibm.oti.reflect.TypeAnnotationParser;
 import java.security.PrivilegedActionException;
+import sun.security.util.SecurityConstants;
 
 /**
  * An instance of class Class is the in-image representation
@@ -165,6 +166,9 @@ public final class Class<T> implements java.io.Serializable, GenericDeclaration,
 	/*[PR CMVC 125822] Move RAM class fields onto the heap to fix hotswap crash */
 	private transient ProtectionDomain protectionDomain;
 	private transient String classNameString;
+
+	/* Cache filename on Class to avoid repeated lookups / allocations in stack traces */
+	private transient String fileNameString;
 
 	private static final class AnnotationVars {
 		AnnotationVars() {}
@@ -259,9 +263,7 @@ public final class Class<T> implements java.io.Serializable, GenericDeclaration,
 	}
 	
 /*[IF Java11]*/
-	/* Store the results of getNestHostImpl() and getNestMembersImpl() respectively */
 	private Class<?> nestHost;
-	private Class<?>[] nestMembers;
 /*[ENDIF] Java11*/
 	
 /**
@@ -284,7 +286,7 @@ void checkMemberAccess(SecurityManager security, ClassLoader callerClassLoader, 
 		/*[PR CMVC 82311] Spec is incorrect before 1.5, RI has this behavior since 1.2 */
 		/*[PR CMVC 201490] To remove CheckPackageAccess call from more Class methods */
 		if (type == Member.DECLARED && callerClassLoader != loader) {
-			security.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionAccessDeclaredMembers);
+			security.checkPermission(SecurityConstants.CHECK_MEMBER_ACCESS_PERMISSION);
 		}
 		/*[PR CMVC 195558, 197433, 198986] Various fixes. */
 		if (sun.reflect.misc.ReflectUtil.needsPackageAccessCheck(callerClassLoader, loader)) {	
@@ -313,7 +315,7 @@ private void checkNonSunProxyMemberAccess(SecurityManager security, ClassLoader 
 	if (callerClassLoader != ClassLoader.bootstrapClassLoader) {
 		ClassLoader loader = getClassLoaderImpl();
 		if (type == Member.DECLARED && callerClassLoader != loader) {
-			security.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionAccessDeclaredMembers);
+			security.checkPermission(SecurityConstants.CHECK_MEMBER_ACCESS_PERMISSION);
 		}
 		String packageName = this.getPackageName();
 		if (!(Proxy.isProxyClass(this) && packageName.equals(sun.reflect.misc.ReflectUtil.PROXY_PACKAGE)) &&
@@ -467,7 +469,7 @@ public static Class<?> forName(String className, boolean initializeBoolean, Clas
 			ClassLoader callerClassLoader = caller.getClassLoaderImpl();
 			if (callerClassLoader != ClassLoader.bootstrapClassLoader) {
 				/* only allowed if caller has RuntimePermission("getClassLoader") permission */
-				sm.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionGetClassLoader);
+				sm.checkPermission(SecurityConstants.GET_CLASSLOADER_PERMISSION);
 			}
 		}
 	}
@@ -516,7 +518,7 @@ public static Class<?> forName(Module module, String name)
 	if (null != sm) {
 		/* If the caller is not the specified module and RuntimePermission("getClassLoader") permission is denied, throw SecurityException */
 		if ((null != caller) && (caller.getModule() != module)) {
-			sm.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionGetClassLoader);
+			sm.checkPermission(SecurityConstants.GET_CLASSLOADER_PERMISSION);
 		}
 		classLoader = AccessController.doPrivileged(new PrivilegedAction<ClassLoader>() {
 	        public ClassLoader run() {
@@ -625,7 +627,7 @@ public ClassLoader getClassLoader() {
 		if (null != security) {
 			ClassLoader callersClassLoader = ClassLoader.callerClassLoader();
 			if (ClassLoader.needsClassLoaderPermissionCheck(callersClassLoader, classLoader)) {
-				security.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionGetClassLoader);
+				security.checkPermission(SecurityConstants.GET_CLASSLOADER_PERMISSION);
 			}
 		}
 	}
@@ -1840,7 +1842,7 @@ public String getName() {
 public ProtectionDomain getProtectionDomain() {
 	SecurityManager security = System.getSecurityManager();
 	if (security != null) {
-		security.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionGetProtectionDomain);
+		security.checkPermission(sun.security.util.SecurityConstants.GET_PD_PERMISSION);
 	}
 
 	ProtectionDomain result = getPDImpl();
@@ -1854,7 +1856,7 @@ public ProtectionDomain getProtectionDomain() {
 
 private void allocateAllPermissionsPD() {
 	Permissions collection = new Permissions();
-	collection.add(new AllPermission());
+	collection.add(sun.security.util.SecurityConstants.ALL_PERMISSION);
 	AllPermissionsPD = new ProtectionDomain(null, collection);
 }
 
@@ -2286,6 +2288,10 @@ public String toGenericString() {
 		kindOfType = "interface "; //$NON-NLS-1$
 	} else if ((!isArray) && ((modifiers & ENUM) != 0) && (getSuperclass() == Enum.class)) {
 		kindOfType = "enum "; //$NON-NLS-1$
+/*[IF Java14]*/
+	} else if (isRecord()) {
+		kindOfType = "record "; //$NON-NLS-1$
+/*[ENDIF]*/
 	} else {
 		kindOfType = "class "; //$NON-NLS-1$	
 	}
@@ -4585,22 +4591,31 @@ public boolean isNestmateOf(Class<?> that) {
  */
 @CallerSensitive
 public Class<?>[] getNestMembers() throws LinkageError, SecurityException {
-	if (nestMembers == null) {
-		nestMembers = getNestMembersImpl();
+	if (isArray() || isPrimitive()) {
+		/* By spec, Class objects representing array types or primitive types
+		 * belong to the nest consisting only of itself.
+		 */
+		return new Class<?>[] { this };
 	}
-	SecurityManager securityManager = System.getSecurityManager();
-	if (securityManager != null) {
-		/* All classes in a nest must be in the same runtime package and therefore same classloader */
-		ClassLoader nestMemberClassLoader = this.internalGetClassLoader();
-		ClassLoader callerClassLoader = ClassLoader.getCallerClassLoader();
-		if (!doesClassLoaderDescendFrom(nestMemberClassLoader, callerClassLoader)) {
-			String nestMemberPackageName = this.getPackageName();
-			if ((nestMemberPackageName != null) && (nestMemberPackageName != "")) {
-				securityManager.checkPackageAccess(nestMemberPackageName);
+
+	Class<?>[] members = getNestMembersImpl();
+	/* Skip security check for the Class object that belongs to the nest consisting only of itself */
+	if (members.length > 1) {
+		SecurityManager securityManager = System.getSecurityManager();
+		if (securityManager != null) {
+			/* All classes in a nest must be in the same runtime package and therefore same classloader */
+			ClassLoader nestMemberClassLoader = this.internalGetClassLoader();
+			ClassLoader callerClassLoader = ClassLoader.getCallerClassLoader();
+			if (!doesClassLoaderDescendFrom(nestMemberClassLoader, callerClassLoader)) {
+				String nestMemberPackageName = this.getPackageName();
+				if ((nestMemberPackageName != null) && (nestMemberPackageName != "")) { //$NON-NLS-1$
+					securityManager.checkPackageAccess(nestMemberPackageName);
+				}
 			}
 		}
 	}
-	return nestMembers;
+
+	return members;
 }
 /*[ENDIF] Java11 */
 
@@ -4678,4 +4693,39 @@ public Class<?>[] getNestMembers() throws LinkageError, SecurityException {
 		return "L"+ name + ";"; //$NON-NLS-1$ //$NON-NLS-2$
 	}
 /*[ENDIF] Java12 */
+
+/*[IF Java14]*/
+	/**
+	 * Returns true if the class instance is a record.
+	 * 
+	 * @return true for a record class, false otherwise
+	 */
+	public native boolean isRecord();
+
+	/**
+	 * Returns an array of RecordComponent objects for a record class.
+	 * 
+	 * @return array of RecordComponent objects, one for each component in the record.
+	 * For a class that is not a record, null is returned.
+	 * For a record with no components an empty array is returned.
+	 * 
+	 * @throws SecurityException 
+	 */
+	@CallerSensitive
+	public RecordComponent[] getRecordComponents() {
+		SecurityManager security = System.getSecurityManager();
+		if (security != null) {
+			ClassLoader callerClassLoader = ClassLoader.getStackClassLoader(1);
+			checkMemberAccess(security, callerClassLoader, Member.DECLARED);
+		}
+
+		if (!isRecord()) {
+			return null;
+		}
+
+		return getRecordComponentsImpl();
+	}
+
+	private native RecordComponent[] getRecordComponentsImpl();
+/*[ENDIF] Java14 */
 }

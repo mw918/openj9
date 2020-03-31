@@ -4,19 +4,19 @@ define(`ZZ',`**')
 define(`ZZ',`##')
 ')dnl
 
-ZZ Copyright (c) 2000, 2019 IBM Corp. and others
+ZZ Copyright (c) 2000, 2020 IBM Corp. and others
 ZZ
-ZZ This program and the accompanying materials are made 
-ZZ available under the terms of the Eclipse Public License 2.0 
-ZZ which accompanies this distribution and is available at 
-ZZ https://www.eclipse.org/legal/epl-2.0/ or the Apache License, 
-ZZ Version 2.0 which accompanies this distribution and is available 
+ZZ This program and the accompanying materials are made
+ZZ available under the terms of the Eclipse Public License 2.0
+ZZ which accompanies this distribution and is available at
+ZZ https://www.eclipse.org/legal/epl-2.0/ or the Apache License,
+ZZ Version 2.0 which accompanies this distribution and is available
 ZZ at https://www.apache.org/licenses/LICENSE-2.0.
 ZZ
 ZZ This Source Code may also be made available under the following
 ZZ Secondary Licenses when the conditions for such availability set
 ZZ forth in the Eclipse Public License, v. 2.0 are satisfied: GNU
-ZZ General Public License, version 2 with the GNU Classpath 
+ZZ General Public License, version 2 with the GNU Classpath
 ZZ Exception [1] and GNU General Public License, version 2 with the
 ZZ OpenJDK Assembly Exception [2].
 ZZ
@@ -33,10 +33,12 @@ ZZ For zLinux GAS assembler and zOS HLASM assembler
 ZZ ===================================================================
 
 ZZ ===================================================================
-ZZ changequote is used to replace ` with [ and ' with ]
-ZZ For better readability
+ZZ jilvalues.m4 is a j9 m4 include that defines offsets of various
+ZZ fields in structs used by jit
+ZZ Note that it changes the quoting style to use { and }
 ZZ ===================================================================
-changequote([,])dnl
+
+include(`jilvalues.m4')dnl
 
 ZZ ===================================================================
 ZZ For zOS, We declare just one csect with multiple entry points.
@@ -44,16 +46,16 @@ ZZ Each PICBuilder function will be declared as an entrypoint in this
 ZZ csect.
 ZZ ===================================================================
 
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
         TITLE 'PicBuilder.s'
 PICBUILDER#START      CSECT
 PICBUILDER#START      RMODE ANY
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
 PICBUILDER#START      AMODE 64
-],[dnl
+},{dnl
 PICBUILDER#START      AMODE 31
-])dnl
-])dnl
+})dnl
+})dnl
 
 ZZ This file contains glue routines which are used to call out
 ZZ to helper and interpreter.  Register usage is important in
@@ -86,19 +88,12 @@ ZZ then stack walker concerned about the stack shape
 ZZ ===================================================================
 
 ZZ ===================================================================
-ZZ codert/jilconsts.inc is a j9 assembler include that defines
-ZZ offsets of various fields in structs used by jit
-ZZ ===================================================================
-
-include([jilconsts.inc])dnl
-
-ZZ ===================================================================
 ZZ codert.dev/s390_asdef.inc is a JIT assembler include that defines
 ZZ macros for instructions for 64 bit and 31 bit mode. Appropriate set
 ZZ of instruction macros are selected for each mode
 ZZ ===================================================================
 
-include([z/runtime/s390_asdef.inc])dnl
+include({z/runtime/s390_asdef.inc})dnl
 
 
 ZZ ===================================================================
@@ -107,7 +102,7 @@ ZZ various m4 macros used in this file. It includes zOS_macros.inc on
 ZZ zOS and zLinux_macros.inc on zLinux
 ZZ ===================================================================
 
-include([z/runtime/s390_macros.inc])dnl
+include({z/runtime/s390_macros.inc})dnl
 
 ZZ ===================================================================
 ZZ codert.dev/Helper.inc is a JIT assembler include that defines
@@ -115,7 +110,7 @@ ZZ index of various runtime helper functions addressable from
 ZZ codertTOC.
 ZZ ===================================================================
 
-include([runtime/Helpers.inc])dnl
+include({runtime/Helpers.inc})dnl
 
 ZZ ===================================================================
 ZZ Definitions for various offsets used by PicBuilder code
@@ -126,7 +121,7 @@ SETVAL(breg,r10)
 ZZ ===================================================================
 ZZ Used for linkage from C calls
 ZZ ===================================================================
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
 
 ZZ ===================================================================
 ZZ Offsets of items in various code snippets (64-bit mode)
@@ -169,7 +164,7 @@ SETVAL(eq_methodFlagsOffset,(J9TR_MethodFlagsOffset+4))
 
 ZZ The compiled flag is hidden in the LSB of the J9Method.extra field
 SETVAL(eq_methodCompiledFlagOffset,(J9TR_MethodPCStartOffset+7))
-],[dnl
+},{dnl
 
 ZZ ===================================================================
 ZZ Offsets of items in various code snippets (31 bit mode)
@@ -207,16 +202,16 @@ SETVAL(eq_methodFlagsOffset,J9TR_MethodFlagsOffset)
 
 ZZ The compiled flag is hidden in the LSB of the J9Method.extra field
 SETVAL(eq_methodCompiledFlagOffset,(J9TR_MethodPCStartOffset+3))
-])dnl
+})dnl
 
 SETPPA2()
 
 ZZ ===================================================================
-ZZ _interpreterUnresolved{Special,Static,VirtualDirect}Glue
+ZZ _interpreterUnresolved[Special,Static,VirtualDirect]Glue
 ZZ
 ZZ This glue function is called by an unresolved call snippet.  It in
-ZZ turn calls a VM routine (i.e. jitResolve{Special,Static,Virtual-
-ZZ Direct}Glue to resolve an unresolved method, patches the
+ZZ turn calls a VM routine (i.e. jitResolve[Special,Static,Virtual-
+ZZ Direct]Glue to resolve an unresolved method, patches the
 ZZ invoking snippet with the resolved address, and returns to the
 ZZ point where the call was originally made in the code cache.
 ZZ
@@ -372,7 +367,7 @@ ZZ Save the original method pointer field into the snippet - could
 ZZ potentially contain <clinit> bit.
     ST_GPR  r2,eq_methodptr_inSnippet(,rSB)
 
-ifdef([MCC_SUPPORTED],[dnl
+ifdef({MCC_SUPPORTED},{dnl
 ZZ Adjust the trampoline reservations to remove over-reservations
 ZZ since this site is resolved now.
 ZZ Parameters:
@@ -405,7 +400,7 @@ LOAD_ADDR_FROM_TOC(r14,TR_S390jitCallCFunction)
     L_GPR   r2,eq_methodptr_inSnippet(,rSB)
     L_GPR   r14,0(J9SP)            # Restore Return Address
     AHI_GPR J9SP,5*PTR_SIZE        # Restore stack pointer
-])dnl
+})dnl
 
 ZZ Now we want to find the appropriate jit helper method
 ZZ to handle this resolved method (i.e. to patch code.)
@@ -692,7 +687,7 @@ LABEL(LStaticGlueCallFixer)
 
 LABEL(Ljitted)
 
-ifdef([MCC_SUPPORTED],[dnl
+ifdef({MCC_SUPPORTED},{dnl
 ZZ Call MCC service for code patching of the resolved method.
 ZZ Parameters:
 ZZ       j9method, callSite, newPC, extraArg
@@ -733,18 +728,18 @@ LOAD_ADDR_FROM_TOC(r14,TR_S390jitCallCFunction)
 
 ZZ This will now proceed to LJitted_end
 
-],[dnl
+},{dnl
 
     L_GPR   r1,J9TR_MethodPCStartOffset(r1)  # Load PCStart
     LR_GPR  rEP,r1        # save PCStart for branch at end
 
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
     LGF     r2,-4(r1)     # Load magic word
-],[dnl
+},{dnl
     LR_GPR  r2,r1         # Copy PCStart
     AHI_GPR r2,-4         # Move up to the magic word
     L       r2,0(r2)      # Load magic word
-])dnl
+})dnl
 
 ZZ                        # The first half of magic word is
 ZZ                        # jit-to-jit offset, so we need to
@@ -773,7 +768,7 @@ ZZ  # We will prepare the ST/STG instruction and store it in stack
 ZZ  # then use EX to execute it for patching the branch address
     AHI_GPR J9SP,-PTR_SIZE
 
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
 ZZ  # Put the extended part of STG (i.e. 0x0024) at 4(J9SP)
     LHI     r2,HEX(24)
     SLL     r2,16
@@ -781,10 +776,10 @@ ZZ  # Put the extended part of STG (i.e. 0x0024) at 4(J9SP)
 
     L       r2,0(r3)      # Load the L instruction in r2
     LHI     r3,HEX(E31)   # Load STG 1, part in r3
-],[dnl
+},{dnl
     L       r2,0(r3)      # Load the L instruction in r2
     LHI     r3,HEX(501)   # Load ST 1, part in r3
-])dnl
+})dnl
     SLL     r3,20         # Move ST 1, part at proper position
 
 ZZ  Clean up top 12 bits of L instruction
@@ -803,15 +798,15 @@ ZZ  # In case of BRASL, we will just patch the offset part
 ZZ  # of the BRASL instruction
     SR_GPR  r1,r3            # offset of branch target from BRASL
 
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
     srlg    r1,r1,1          # divide the offset by 2
-],[dnl
+},{dnl
     srl     r1,1             # divide the offset by 2
-])dnl
+})dnl
 
 ZZ  Patch the immediate field of the BRASL
     ST      r1,0(,r2)
-])dnl
+})dnl
 
 LABEL(Ljitted_end)
     L_GPR   r14,eq_codeRA_inSnippet(r14)  # Load code cache RA
@@ -846,11 +841,11 @@ LOAD_ADDR_FROM_TOC(rEP,TR_icallVMprJavaSendNativeStatic)
     END_FUNC(_nativeStaticHelper,natStHlpr,11)
 
 ZZ ===================================================================
-ZZ _interpreterUnresolved{Class,String,StaticData,StaticDataStore}Glue
+ZZ _interpreterUnresolved[Class,String,StaticData,StaticDataStore]Glue
 ZZ
 ZZ This glue function is called by an unresolved call data snippet.
-ZZ It in turn calls a VM routine (i.e. jitResolve{Class,ClassFrom-
-ZZ StaticField,StaticField,StaticFieldSetter}) to resolve an
+ZZ It in turn calls a VM routine (i.e. jitResolve[Class,ClassFrom-
+ZZ StaticField,StaticField,StaticFieldSetter]) to resolve an
 ZZ unresolved class/field, stores the resolved address in the literal
 ZZ pool, patches mainline code, and returns to the point
 ZZ where the call was originally made in the code cache.
@@ -1057,336 +1052,6 @@ LOAD_ADDR_FROM_TOC(rEP,TR_S390jitResolveHandleMethod)
     END_FUNC(_interpreterUnresolvedMethodTypeTableEntryGlue,intpUMT,9)
 
 ZZ ===================================================================
-ZZ  PICBuilder routine - MTUnresolvedInt32Load
-ZZ
-ZZ ===================================================================
-    START_FUNC(MTUnresolvedInt32Load,intpMTI32L)
-ifdef([J9VM_OPT_TENANT],[dnl
-    SaveRegs
-
-    L_GPR   r1,eq_cp_inDataSnippet(,r14)         # p1) const pool lit
-    LGF_GPR r2,eq_cpindex_inDataSnippet(,r14)    # p2) cp index
-    L_GPR   r3,eq_codeRA_inDataSnippet(,r14)     # p3) code cache RA
-
-LOAD_ADDR_FROM_TOC(rEP,TR_S390jitResolveStaticField)
-
-    LR_GPR  r0,r14
-    BASR    r14,rEP                      # Call jitResolvedStaticField
-
-    LHI     r1,2                                 # shift for int32
-    MTComputeStaticAddress(Int32Load,32)
-    MVC     (2*PTR_SIZE+4)(4,r5),0(r2)           # load data to r2 low
-
-    RestoreRegs
-    L_GPR   r14,eq_codeRA_inDataSnippet(,r14)    # return to mainline
-    BR      r14
-])dnl
-    END_FUNC(MTUnresolvedInt32Load,intpMTI32L,12)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - MTUnresolvedInt64Load
-ZZ
-ZZ ===================================================================
-    START_FUNC(MTUnresolvedInt64Load,intpMTI64L)
-ifdef([J9VM_OPT_TENANT],[dnl
-    SaveRegs
-
-    L_GPR   r1,eq_cp_inDataSnippet(,r14)         # p1) const pool lit
-    LGF_GPR r2,eq_cpindex_inDataSnippet(,r14)    # p2) cp index
-    L_GPR   r3,eq_codeRA_inDataSnippet(,r14)     # p3) code cache RA
-
-LOAD_ADDR_FROM_TOC(rEP,TR_S390jitResolveStaticField)
-
-    LR_GPR  r0,r14
-    BASR    r14,rEP                      # Call jitResolvedStaticField
-
-    LHI     r1,3                                 # shift for int64
-    MTComputeStaticAddress(Int64Load,64)
-    MVC     (2*PTR_SIZE)(8,r5),0(r2)             # load data to r2
-
-    RestoreRegs
-    L_GPR   r14,eq_codeRA_inDataSnippet(,r14)    # return to mainline
-    BR      r14
-])dnl
-    END_FUNC(MTUnresolvedInt64Load,intpMTI64L,12)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - MTUnresolvedFloatLoad
-ZZ
-ZZ ===================================================================
-    START_FUNC(MTUnresolvedFloatLoad,intpMTFL)
-ifdef([J9VM_OPT_TENANT],[dnl
-    SaveRegs
-
-    L_GPR   r1,eq_cp_inDataSnippet(,r14)         # p1) const pool lit
-    LGF_GPR r2,eq_cpindex_inDataSnippet(,r14)    # p2) cp index
-    L_GPR   r3,eq_codeRA_inDataSnippet(,r14)     # p3) code cache RA
-
-LOAD_ADDR_FROM_TOC(rEP,TR_S390jitResolveStaticField)
-
-    LR_GPR  r0,r14
-    BASR    r14,rEP                      # Call jitResolvedStaticField
-
-    LHI     r1,2                                 # shift for float
-    MTComputeStaticAddress(FloatLoad,32)
-    LE      f0,0(,r2)                            # load the data
-
-    RestoreRegs
-    L_GPR   r14,eq_codeRA_inDataSnippet(,r14)    # return to mainline
-    BR      r14
-])dnl
-    END_FUNC(MTUnresolvedFloatLoad,intpMTFL,10)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - MTUnresolvedDoubleLoad
-ZZ
-ZZ ===================================================================
-    START_FUNC(MTUnresolvedDoubleLoad,intpMTDL)
-ifdef([J9VM_OPT_TENANT],[dnl
-    SaveRegs
-
-    L_GPR   r1,eq_cp_inDataSnippet(,r14)         # p1) const pool lit
-    LGF_GPR r2,eq_cpindex_inDataSnippet(,r14)    # p2) cp index
-    L_GPR   r3,eq_codeRA_inDataSnippet(,r14)     # p3) code cache RA
-
-LOAD_ADDR_FROM_TOC(rEP,TR_S390jitResolveStaticField)
-
-    LR_GPR  r0,r14
-    BASR    r14,rEP                      # Call jitResolvedStaticField
-
-    LHI     r1,3                                 # shift for double
-    MTComputeStaticAddress(DoubleLoad,64)
-    LD      f0,0(,r2)                            # load the data
-
-    RestoreRegs
-    L_GPR   r14,eq_codeRA_inDataSnippet(,r14)    # return to mainline
-    BR      r14
-])dnl
-    END_FUNC(MTUnresolvedDoubleLoad,intpMTDL,10)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - MTUnresolvedAddressLoad
-ZZ
-ZZ ===================================================================
-    START_FUNC(MTUnresolvedAddressLoad,intpMTAL)
-ifdef([J9VM_OPT_TENANT],[dnl
-    SaveRegs
-
-    L_GPR   r1,eq_cp_inDataSnippet(,r14)         # p1) const pool lit
-    LGF_GPR r2,eq_cpindex_inDataSnippet(,r14)    # p2) cp index
-    L_GPR   r3,eq_codeRA_inDataSnippet(,r14)     # p3) code cache RA
-
-LOAD_ADDR_FROM_TOC(rEP,TR_S390jitResolveStaticField)
-
-    LR_GPR  r0,r14
-    BASR    r14,rEP                      # Call jitResolvedStaticField
-
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
-    LHI     r1,2                                 # shift for addr
-],[dnl
-    LHI     r1,3                                 # shift for addr
-])dnl
-
-    NILL    r2,HEX(FFFE)                      # mask off clinit
-    TML     r2,HEX(0002)                      # if not isolated
-    JZ      LMTStaticAddressLoadNoneIsolated
-
-    MTComputeStaticAddress(AddressLoad,Obj)
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
-    LLGF    r3,0(,r2)                        # load compressed val
-    SLLG    r3,r3,0(r1)                       # decompress
-    STG     r3,(2*PTR_SIZE)(,r5)             # store val into r2
-],[dnl
-    MVC     (2*PTR_SIZE)(8,r5),0(r2)          # load data to r2
-])dnl
-
-    J       LMTStaticAddressLoadBRANCHEND
-LABEL(LMTStaticAddressLoadNoneIsolated)
-    MVC     (2*PTR_SIZE)(8,r5),0(r2)          # load data to r2
-LABEL(LMTStaticAddressLoadBRANCHEND)
-
-    RestoreRegs
-    L_GPR   r14,eq_codeRA_inDataSnippet(,r14)    # return to mainline
-    BR      r14
-])dnl
-    END_FUNC(MTUnresolvedAddressLoad,intpMTAL,10)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - MTUnresolvedInt32Store
-ZZ
-ZZ ===================================================================
-    START_FUNC(MTUnresolvedInt32Store,intpMTI32S)
-ifdef([J9VM_OPT_TENANT],[dnl
-    SaveRegs
-
-    L_GPR   r1,eq_cp_inDataSnippet(,r14)         # p1) const pool lit
-    LGF_GPR r2,eq_cpindex_inDataSnippet(,r14)    # p2) cp index
-    L_GPR   r3,eq_codeRA_inDataSnippet(,r14)     # p3) code cache RA
-
-LOAD_ADDR_FROM_TOC(rEP,TR_S390jitResolveStaticFieldSetter)
-
-    LR_GPR  r0,r14
-    BASR    r14,rEP                      # Call jitResolvedStaticField
-
-    LHI     r1,2                                 # shift for int32
-    MTComputeStaticAddress(Int32Store,32)
-    MVC     0(4,r2),(PTR_SIZE+4)(r5)             # store r1 low
-
-    RestoreRegs
-    L_GPR   r14,eq_codeRA_inDataSnippet(,r14)    # return to mainline
-    BR      r14
-])dnl
-    END_FUNC(MTUnresolvedInt32Store,intpMTI32S,12)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - MTUnresolvedInt64Store
-ZZ
-ZZ ===================================================================
-    START_FUNC(MTUnresolvedInt64Store,intpMTI64S)
-ifdef([J9VM_OPT_TENANT],[dnl
-    SaveRegs
-
-    L_GPR   r1,eq_cp_inDataSnippet(,r14)         # p1) const pool lit
-    LGF_GPR r2,eq_cpindex_inDataSnippet(,r14)    # p2) cp index
-    L_GPR   r3,eq_codeRA_inDataSnippet(,r14)     # p3) code cache RA
-
-LOAD_ADDR_FROM_TOC(rEP,TR_S390jitResolveStaticFieldSetter)
-
-    LR_GPR  r0,r14
-    BASR    r14,rEP                      # Call jitResolvedStaticField
-
-    LHI     r1,3                                 # shift int64
-    MTComputeStaticAddress(Int64Store,64)
-    MVC     0(8,r2),(PTR_SIZE)(r5)               # store r1 as data
-
-    RestoreRegs
-    L_GPR   r14,eq_codeRA_inDataSnippet(,r14)    # return to mainline
-    BR      r14
-])dnl
-    END_FUNC(MTUnresolvedInt64Store,intpMTI64S,12)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - MTUnresolvedFloatStore
-ZZ
-ZZ ===================================================================
-    START_FUNC(MTUnresolvedFloatStore,intpMTFS)
-ifdef([J9VM_OPT_TENANT],[dnl
-    SaveRegs
-
-    L_GPR   r1,eq_cp_inDataSnippet(,r14)         # p1) const pool lit
-    LGF_GPR r2,eq_cpindex_inDataSnippet(,r14)    # p2) cp index
-    L_GPR   r3,eq_codeRA_inDataSnippet(,r14)     # p3) code cache RA
-
-LOAD_ADDR_FROM_TOC(rEP,TR_S390jitResolveStaticFieldSetter)
-
-    LR_GPR  r0,r14
-    BASR    r14,rEP                      # Call jitResolvedStaticField
-
-    LHI     r1,2                                 # shift for float
-    MTComputeStaticAddress(FloatStore,32)
-    STE     f0,0(,r2)                            # store the data
-
-    RestoreRegs
-    L_GPR   r14,eq_codeRA_inDataSnippet(,r14)    # return to mainline
-    BR      r14
-])dnl
-    END_FUNC(MTUnresolvedFloatStore,intpMTFS,10)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - MTUnresolvedDoubleStore
-ZZ
-ZZ ===================================================================
-    START_FUNC(MTUnresolvedDoubleStore,intpMTDS)
-ifdef([J9VM_OPT_TENANT],[dnl
-    SaveRegs
-
-    L_GPR   r1,eq_cp_inDataSnippet(,r14)         # p1) const pool lit
-    LGF_GPR r2,eq_cpindex_inDataSnippet(,r14)    # p2) cp index
-    L_GPR   r3,eq_codeRA_inDataSnippet(,r14)     # p3) code cache RA
-
-LOAD_ADDR_FROM_TOC(rEP,TR_S390jitResolveStaticFieldSetter)
-
-    LR_GPR  r0,r14
-    BASR    r14,rEP                      # Call jitResolvedStaticField
-
-    LHI     r1,3                                 # shift for double
-    MTComputeStaticAddress(DoubleStore,64)
-    STD     f0,0(,r2)                            # store the data
-
-    RestoreRegs
-    L_GPR   r14,eq_codeRA_inDataSnippet(,r14)    # return to mainline
-    BR      r14
-])dnl
-    END_FUNC(MTUnresolvedDoubleStore,intpMTDS,10)
-
-ZZ ===================================================================
-ZZ  PICBuilder routine - MTUnresolvedAddressStore
-ZZ
-ZZ ===================================================================
-    START_FUNC(MTUnresolvedAddressStore,intpMTAS)
-ifdef([J9VM_OPT_TENANT],[dnl
-    SaveRegs
-    L_GPR   r1,eq_cp_inDataSnippet(,r14)         # p1) const pool lit
-    LGF_GPR r2,eq_cpindex_inDataSnippet(,r14)    # p2) cp index
-    L_GPR   r3,eq_codeRA_inDataSnippet(,r14)     # p3) code cache RA
-
-LOAD_ADDR_FROM_TOC(rEP,TR_S390jitResolveStaticFieldSetter)
-
-    LR_GPR  r0,r14
-    BASR    r14,rEP                      # Call jitResolvedStaticField
-
-    NILL    r2,HEX(FFFE)              # mask off clinit
-    TML     r2,HEX(0002)              # if not isolated
-    JZ      LMTUnresolvedAddressStoreNonIsolated
-
-    LG      r3,J9TR_VMThread_tenantDataObj(,r13)
-    NILL    r2,HEX(FFFC)              # chop flags from address
-    LG      r2,0(,r2)                 # load tenant data index
-    LLGFR   r2,r2                     # clear high word
-    SRLG    r6,r2,16                  # get row index
-    NILH    r2,0                      # get col index
-
-    LGR     r14,r0                    # restore r14
-    LG      r1,28(,r14)               # load CP word
-    LG      r7,(PTR_SIZE)(,r5)        # load JIT r1, obj to store
-
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
-    SLLG    r2,r2,2                   # col offset, data size
-    SLLG    r6,r6,2                   # row offset, compressed
-    LLGF    r3,8(r6,r3)               # tenantData[row]
-    SRLG    r10,r1,8                  # shift amount
-    SLLG    r3,r3,0(r10)             # decompress
-    LA      r2,8(r2,r3)               # tenantData[row][col]
-    SRLG    r7,r7,0(r10)             # compress
-    ST      r7,0(,r2)                 # store obj
-],[dnl
-    SLLG    r2,r2,3                   # col offset, data size
-    SLLG    r6,r6,3                   # row offset, 64-bit data
-    LG      r3,16(r6,r3)              # tenantData[row]
-    LA      r2,16(r2,r3)              # tenantData[row][col]
-    STG     r7,0(,r2)                 # store obj
-])dnl
-
-    TML     r1,HEX(0001)              # is owning obj required?
-    JZ      LMTComputeStaticAddressAddressStoreEnd
-    STG     r3,(2*PTR_SIZE)(,r5)      # JIT r2 = owning obj
-
-LABEL(LMTComputeStaticAddressAddressStoreEnd)
-    RestoreRegs
-    L_GPR   r14,eq_codeRA_inDataSnippet(,r14)    # return to mainline
-    BR      r14
-
-LABEL(LMTUnresolvedAddressStoreNonIsolated)
-    MVC     0(8,r2),(PTR_SIZE)(r5)    # store JIT r1 as obj
-
-    RestoreRegs
-    L_GPR   r14,eq_codeRA_inDataSnippet(,r14)    # return to mainline
-    BR      r14
-])dnl
-
-    END_FUNC(MTUnresolvedAddressStore,intpMTAS,10)
-
-ZZ ===================================================================
 ZZ  PICBuilder routine - _interpreterUnresolvedStaticDataGlue
 ZZ
 ZZ ===================================================================
@@ -1574,11 +1239,11 @@ ZZ  If resolved offset is greater than 4k
 
     L_GPR   r3,eq_codeRef_inDataSnippet(,r14) #DataRef instr location
 ZZ  needsToBeSignExtendedTo8Bytes
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
     CLI     0(r3),HEX(59)  #check if this is OC_C
     JNZ     LclearD2
     AHI     r2,4 # integer is in the lower half of the 8 byte slot
-])dnl
+})dnl
 LABEL(LclearD2)
     L       r1,0(,r3)                # Data Ref. Instruction
     N       r1,4(,breg)              # Zero out the displacement field
@@ -1676,21 +1341,10 @@ ZZ  Check if it's a private method
     LR      r1,r2
     NILL    r1,J9TR_J9_VTABLE_INDEX_DIRECT_METHOD_FLAG
     JNZ     L_privateMethod
-ZZ  Skip patching if vft offset is smaller than -32768
-    C       r2,4(rEP)
-    JL      L_endPatch
 LABEL(LVirtualDispatch)
 
     L_GPR   r3,eq_patchVftInstr_inVUCallSnippet(r14)
-    XR      r1,r1      # clear r1
-    ICM     r1,1,0(r3) # first opcode byte for LY/LG is E3
-    CHI     r1,HEX(E3) # is LY/LG?
-    JZ      L_isLY
-    STH     r2,2(r3)    # Update the vft offset for A[G]HI
-    STH     r2,6(r3)    # Update the vft offset for L[G]HI
-    J       L_patchBRASL
-LABEL(L_isLY)
-    STH     r2,8(r3)    # Update the vft offset field for L[G]HI
+    ST      r2,8(r3)    # Update the vft offset field for LGFI
 ZZ Long Displacement patching for LY/LG
     LR      r1,r2
     SLL     r1,20
@@ -1722,15 +1376,15 @@ LABEL(L_privateMethod)
 LABEL(L_privateMethodRemoveTag)
 
 ZZ  Load bitwise NOT of the direct method flag
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
 ZZ zOS
     LHI_GPR r0,J9TR_J9_VTABLE_INDEX_DIRECT_METHOD_FLAG
     LCR_GPR r0,r0
     AHI_GPR r0,-1
-],[dnl
+},{dnl
 ZZ zLinux
     LHI_GPR r0,~J9TR_J9_VTABLE_INDEX_DIRECT_METHOD_FLAG
-])dnl
+})dnl
 
     LR_GPR  r1,r2
     NR_GPR  r1,r0          # Remove low-tag of J9Method ptr
@@ -1747,13 +1401,13 @@ ZZ  Load jitted code entry
 LABEL(L_jitted_private)
     L_GPR   r1,J9TR_MethodPCStartOffset(r1)
 
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
     LGF     r2,-4(r1)     # Load reservedWord
-],[dnl
+},{dnl
     LR_GPR  r2,r1         # Copy PCStart
     AHI_GPR r2,-4         # Move up to the reservedWord
     L       r2,0(r2)      # Load reservedWord
-])dnl
+})dnl
 
 ZZ The first half of the reserved word is jit-to-jit offset,
 ZZ so we need to shift it to lower half
@@ -1807,11 +1461,11 @@ ZZ R3 - JIT'd code Return Address
 
 ZZ Following snippet prepares JIT helper call sequence
 ZZ which needs r14 to be free which holds address of
-ZZ Snippet from where this is called. 
-ZZ As jitResolveConstantDynamic is called via 
+ZZ Snippet from where this is called.
+ZZ As jitResolveConstantDynamic is called via
 ZZ SLOW_PATH_ONLY_HELPER glue, it is guaranteed that
 ZZ all the registers (volatile and non-volatile) are preserved.
-ZZ This allows us to use R0 to preserve R14 
+ZZ This allows us to use R0 to preserve R14
 LOAD_ADDR_FROM_TOC(rEP,TR_S390jitResolveConstantDynamic)
     LR_GPR r0,r14
     BASR r14,rEP
@@ -1819,8 +1473,8 @@ LOAD_ADDR_FROM_TOC(rEP,TR_S390jitResolveConstantDynamic)
 
 ZZ Load the address of literal pool
 ZZ Store the return value of helper call which
-ZZ is address of resolved constant dynamic 
-ZZ into the Literal Pool 
+ZZ is address of resolved constant dynamic
+ZZ into the Literal Pool
     L_GPR   r1,eq_literalPoolAddr_inDataSnippet(r14)
     ST_GPR  r2,0(,r1)
     RestoreRegs
@@ -1883,14 +1537,14 @@ LABEL(LcontinueLookup)
 ZZ  # Load address of interface table & slot number
     LA      r2,eq_intfAddr_inInterfaceSnippet(,r14)
     L_GPR   r1,(2*PTR_SIZE)(,J9SP)  # Load this
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     L       r1,J9TR_J9Object_class(,r1)
 ZZ # Load lookup class offset
     LLGFR   r1,r1
-],[dnl
+},{dnl
     L_GPR   r1,J9TR_J9Object_class(,r1)
 ZZ # Load lookup class
-])dnl
+})dnl
     NILL    r1,HEX(10000)-J9TR_RequiredClassAlignment
 
 LOAD_ADDR_FROM_TOC(r14,TR_S390jitLookupInterfaceMethod)
@@ -1900,14 +1554,14 @@ LOAD_ADDR_FROM_TOC(r14,TR_S390jitLookupInterfaceMethod)
     LR_GPR  r14,r0
 ZZ                                  # return interpVtable offset in r2
     L_GPR   r1,(2*PTR_SIZE)(,J9SP)  # Load this
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     L       r3,J9TR_J9Object_class(,r1)
 ZZ # Load offset of the lookup class
     LLGFR   r3,r3
-],[dnl
+},{dnl
     L_GPR   r3,J9TR_J9Object_class(,r1)
 ZZ # Load address of the lookup class
-])dnl
+})dnl
     NILL    r3,HEX(10000)-J9TR_RequiredClassAlignment
     L_GPR   r3,0(r2,r3)             # Load method pointer
     L_GPR   r14,eq_codeRA_inInterfaceSnippet(,r14) # codecacheRA
@@ -1918,14 +1572,14 @@ LABEL(LcommonJitDispatch)         # interpVtable offset in r2
     LNR_GPR r2,r2                 # negative the interpVtable offset
     AHI_GPR r2,J9TR_InterpVTableOffset
     LR_GPR  r0,r2                 # J9 requires the offset in R0
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     L       r3,J9TR_J9Object_class(,r1)
 ZZ # Load offset of the lookup class
     LLGFR   r3,r3
-],[dnl
+},{dnl
     L_GPR   r3,J9TR_J9Object_class(,r1)
 ZZ # Load address of the lookup class
-])dnl
+})dnl
     NILL    r3,HEX(10000)-J9TR_RequiredClassAlignment
     L_GPR   rEP,0(r2,r3)
     L_GPR   r1,(2*PTR_SIZE)(J9SP) # Restore "this"
@@ -1988,14 +1642,14 @@ LABEL(ifCH1LcontinueLookup)
 ZZ  # Load address of interface table & slot number
     LA      r2,eq_intfAddr_inInterfaceSnippet(,r14)
     L_GPR   r1,(2*PTR_SIZE)(,J9SP)       # Load this
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     L       r1,J9TR_J9Object_class(,r1)
 ZZ # Load lookup class offset
     LLGFR   r1,r1
-],[dnl
+},{dnl
     L_GPR   r1,J9TR_J9Object_class(,r1)
 ZZ # Load lookup class
-])dnl
+})dnl
     NILL    r1,HEX(10000)-J9TR_RequiredClassAlignment
 
 LOAD_ADDR_FROM_TOC(r14,TR_S390jitLookupInterfaceMethod)
@@ -2005,38 +1659,38 @@ LOAD_ADDR_FROM_TOC(r14,TR_S390jitLookupInterfaceMethod)
 
 ZZ                                # return interpVtable offset in r2
     L_GPR   r1,(2*PTR_SIZE)(,J9SP)       # Load this
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     L       r3,J9TR_J9Object_class(,r1)
 ZZ # Load offset of the lookup class
     LLGFR   r3,r3
-],[dnl
+},{dnl
     L_GPR   r3,J9TR_J9Object_class(,r1)
 ZZ # Load the addr of the lookup class
-])dnl
+})dnl
     NILL    r3,HEX(10000)-J9TR_RequiredClassAlignment
     L_GPR   r3,0(r2,r3)           # Load method pointer
     TM   eq_methodCompiledFlagOffset(r3),J9TR_MethodNotCompiledBit
     JNZ     ifCH1LcommonJitDispatch
 
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     L       r2,J9TR_J9Object_class(,r1)
 ZZ # Read class offset
     LLGFR   r2,r2
-],[dnl
+},{dnl
     L_GPR   r2,J9TR_J9Object_class(r1)
 ZZ # Read class
-])dnl
+})dnl
     NILL    r2,HEX(10000)-J9TR_RequiredClassAlignment
     L_GPR   r1,J9TR_MethodPCStartOffset(r3)  # Load PCStart
     LR_GPR  r14,r2        # Copy Class
 
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
     LGF     r2,-4(r1)     # Load magic word
-],[dnl
+},{dnl
     LR_GPR  r2,r1         # Copy PCStart
     AHI_GPR r2,-4         # Move up to the magic word
     L       r2,0(r2)      # Load magic word
-])dnl
+})dnl
 
 ZZ                        # The first half of magic word is
 ZZ                        # jit-to-jit offset, so we need to
@@ -2047,11 +1701,11 @@ ZZ                        # jit-to-jit offset, so we need to
     LR_GPR  r2,r14       # implementer class
 
     LR_GPR  r14,r0
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
     STPQ    r2,eq_implementerClass_inInterfaceSnippet(,r14)
-],[dnl
+},{dnl
     STM     r2,r3,eq_implementerClass_inInterfaceSnippet(r14)
-])dnl
+})dnl
 
 ZZ check if this picSite has already been registered,
 ZZ if yes, then no need to register again
@@ -2084,17 +1738,17 @@ ZZ  Buy stack space and save regs that may be killed by the c call
 ZZ  No need to save the ones that we don't care about.
 
 
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
     AHI_GPR J9SP,-(4*PTR_SIZE)
     ST_GPR  r0,(3*PTR_SIZE)(J9SP)
     ST_GPR  r6,(2*PTR_SIZE)(J9SP)
     ST_GPR  r7,PTR_SIZE(J9SP)
     ST_GPR  r12,0(J9SP)
-],[dnl
+},{dnl
     AHI_GPR J9SP,-(2*PTR_SIZE)
     ST_GPR  r0,(PTR_SIZE)(J9SP)
     ST_GPR  rEP,0(J9SP)
-])dnl
+})dnl
 
     ST_GPR  J9SP,J9TR_VMThread_sp(r13)
 
@@ -2102,20 +1756,20 @@ ifdef([J9ZOS390],[dnl
 
 ZZ make the call
 
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
 
 LOAD_ADDR_FROM_TOC(r6,TR_jitAddPicToPatchOnClassUnload)
 
 RestoreSSP
 
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
 
 ZZ 64 bit zOS
    LMG r5,r6,0(r6)
    BASR r7,r6
    LR   r0,r0
 
-],[dnl
+},{dnl
 
 ZZ 31 bit zOS
    LM r5,r6,16(r6)
@@ -2123,29 +1777,29 @@ ZZ 31 bit zOS
    BASR r7,r6
    DC   X'4700',Y((LCALLDESCPICREG-(*-8))/8)   * nop desc
 
-])dnl
+})dnl
 SaveSSP
-],[dnl
+},{dnl
 
 LOAD_ADDR_FROM_TOC(r14,TR_jitAddPicToPatchOnClassUnload)
 
 ZZ zLinux case
     BASR    r14,r14
-])dnl
+})dnl
 
 ZZ Restore killed regs
     L_GPR  J9SP,J9TR_VMThread_sp(r13)
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
     L_GPR  r0,(3*PTR_SIZE)(J9SP)
     L_GPR  r6,(2*PTR_SIZE)(J9SP)
     L_GPR  r7,PTR_SIZE(J9SP)
     L_GPR  r12,0(J9SP)
     AHI_GPR J9SP,(4*PTR_SIZE)
-],[dnl
+},{dnl
     L_GPR  r0,(PTR_SIZE)(J9SP)
     L_GPR  rEP,0(J9SP)
     AHI_GPR J9SP,(2*PTR_SIZE)
-])dnl
+})dnl
 
 ZZ restore java sp
     LR_GPR  r14,r0
@@ -2162,14 +1816,14 @@ LABEL(ifCH1LcommonJitDispatch)      # interpVtable offset in rEP
     AHI_GPR rEP,J9TR_InterpVTableOffset
     LR_GPR  r0,rEP                  # J9 requires the offset in R0
     L_GPR   r1,(2*PTR_SIZE)(J9SP)   # Restore "this"
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     L       r3,J9TR_J9Object_class(,r1)
 ZZ # Load offset of lookup class
     LLGFR   r3,r3
-],[dnl
+},{dnl
     L_GPR   r3,J9TR_J9Object_class(,r1)
 ZZ # Load the address of lookup class
-])dnl
+})dnl
     NILL    r3,HEX(10000)-J9TR_RequiredClassAlignment
     L_GPR   rEP,0(rEP,r3)
     L_GPR   r2,PTR_SIZE(J9SP)
@@ -2231,14 +1885,14 @@ LABEL(ifCHMLcontinueLookup)
 ZZ  # Load address of interface table & slot number
     LA      r2,eq_intfAddr_inInterfaceSnippet(,r14)
     L_GPR   r1,(2*PTR_SIZE)(,J9SP)       # Load this
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     L       r1,J9TR_J9Object_class(,r1)
 ZZ # Load offset of lookup class
     LLGFR   r1,r1
-],[dnl
+},{dnl
     L_GPR   r1,J9TR_J9Object_class(,r1)
 ZZ # Load lookup class
-])dnl
+})dnl
     NILL    r1,HEX(10000)-J9TR_RequiredClassAlignment
 
 LOAD_ADDR_FROM_TOC(r14,TR_S390jitLookupInterfaceMethod)
@@ -2248,14 +1902,14 @@ LOAD_ADDR_FROM_TOC(r14,TR_S390jitLookupInterfaceMethod)
 
 ZZ                          # returned interpVtable offset in r2
     L_GPR   r1,(2*PTR_SIZE)(,J9SP)       # Load this
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     L       r3,J9TR_J9Object_class(,r1)
 ZZ # Load offset of the lookup class
     LLGFR   r3,r3
-],[dnl
+},{dnl
     L_GPR   r3,J9TR_J9Object_class(,r1)
 ZZ # Load the address of the lookup class
-])dnl
+})dnl
     NILL    r3,HEX(10000)-J9TR_RequiredClassAlignment
     L_GPR   r3,0(r2,r3)     # Load method pointer
     TM      eq_methodCompiledFlagOffset(r3),J9TR_MethodNotCompiledBit
@@ -2263,24 +1917,24 @@ ZZ # Load the address of the lookup class
     JNZ     ifCHMLcommonJitDispatch
 
 ZZ  #Load receiving object classPtr in R2
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     L       r2,J9TR_J9Object_class(,r1)
 ZZ # Read class offset
     LLGFR   r2,r2
-],[dnl
+},{dnl
     L_GPR   r2,J9TR_J9Object_class(,r1)
-])dnl
+})dnl
     NILL    r2,HEX(10000)-J9TR_RequiredClassAlignment
 
     L_GPR   r1,J9TR_MethodPCStartOffset(r3)
 ZZ  #calculate jit-to-jit entry point from PCStart
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
     LGF     r14,-4(r1)    # Load magic word
-],[dnl
+},{dnl
     LR_GPR  r14,r1        # Copy PCStart
     AHI_GPR r14,-4        # Move up to the magic word
     L       r14,0(r14)    # Load magic word
-])dnl
+})dnl
 
 ZZ                        # The first half of magic word is
 ZZ                        # jit-to-jit offset, so we need to
@@ -2327,17 +1981,17 @@ LABEL(ifCHMLoopTillUpdate)
 
 ZZ  current slot is now updated,
 ZZ  Lets see if it has same classPtr as we are trying to store
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     L       r0,J9TR_J9Object_class(,r1)
 ZZ # Read class offset
     LLGFR   r0,r0
     NILL    r0,HEX(10000)-J9TR_RequiredClassAlignment
     CR      r2,r0
-],[dnl
+},{dnl
     L_GPR   r0,J9TR_J9Object_class(,r1)
     NILL    r0,HEX(10000)-J9TR_RequiredClassAlignment
     CR_GPR  r2,r0
-])dnl
+})dnl
     JZ      ifCHMLcommonJitDispatch ZZ same, so skip caching
 
 ZZ different than cached one, lets try to grab next free slot
@@ -2349,11 +2003,11 @@ ZZ slot we contended for last time
 LABEL(ifCHMUpdateCacheSlot)
 ZZ store class pointer and method EP in the current empty slot
     ST_GPR  r3,PTR_SIZE(,r1)
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     ST  r2,0(,r1)
-],[dnl
+},{dnl
     ST_GPR  r2,0(,r1)
-])dnl
+})dnl
 
 ZZ Clobberable volatile regs r1,r2,r3,r0
 ZZ  Load pic address as second address
@@ -2363,12 +2017,12 @@ ZZ  Load pic address as second address
     L_GPR   r0,J9TR_J9Class_classLoader(CARG1)
 
 ZZ  Load class pointer as first argument
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     L       CARG1,0(CARG2)   # May need to convert offset to J9Class
     LLGFR   CARG1,CARG1
-],[dnl
+},{dnl
     L_GPR   CARG1,0(CARG2)
-])dnl
+})dnl
 
 ZZ  Compare (r0) the classloader of interface class
 ZZ  with the classloader of target class (CARG1)
@@ -2381,16 +2035,16 @@ ZZ Need to preserve r14,rEP,r5,r6,r7
 ZZ For linux r6 and r7 are not used or clobbered, hence not saved
 ZZ For zos r14, rEP(r15) is not clobbered, hence not saved
 
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
     AHI_GPR J9SP,-(3*PTR_SIZE)
     ST_GPR  r6,(2*PTR_SIZE)(J9SP)
     ST_GPR  r7,PTR_SIZE(J9SP)
     ST_GPR  r12,0(J9SP)
-],[dnl
+},{dnl
     AHI_GPR J9SP,-(2*PTR_SIZE)
     ST_GPR  rEP,PTR_SIZE(J9SP)
     ST_GPR  r14,0(J9SP)
-])dnl
+})dnl
 
     ST_GPR  J9SP,J9TR_VMThread_sp(r13)
 
@@ -2398,18 +2052,18 @@ ZZ make the call
 
 RestoreSSP
 
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
 
 LOAD_ADDR_FROM_TOC(r6,TR_jitAddPicToPatchOnClassUnload)
 
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
 
 ZZ 64 bit zOS
    LMG r5,r6,0(r6)
    BASR r7,r6
    LR   r0,r0
 
-],[dnl
+},{dnl
 
 ZZ 31 bit zOS
    LM r5,r6,16(r6)
@@ -2417,28 +2071,28 @@ ZZ 31 bit zOS
    BASR r7,r6
    DC   X'4700',Y((LCALLDESCPICREG-(*-8))/8)   * nop desc
 
-])dnl
+})dnl
 SaveSSP
-],[dnl
+},{dnl
 
 
 ZZ zLinux case
 LOAD_ADDR_FROM_TOC(r14,TR_jitAddPicToPatchOnClassUnload)
     BASR    r14,r14
-])dnl
+})dnl
 
 ZZ Restore killed regs
     L_GPR  J9SP,J9TR_VMThread_sp(r13)
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
     L_GPR  r6,(2*PTR_SIZE)(J9SP)
     L_GPR  r7,PTR_SIZE(J9SP)
     L_GPR  r12,0(J9SP)
     AHI_GPR J9SP,(3*PTR_SIZE)
-],[dnl
+},{dnl
     L_GPR  rEP,PTR_SIZE(J9SP)
     L_GPR  r14,0(J9SP)
     AHI_GPR J9SP,(2*PTR_SIZE)
-])dnl
+})dnl
 
 LABEL(ifCHMLcommonJitDispatch)    # interpVtable offset in rEP
 
@@ -2447,14 +2101,14 @@ LABEL(ifCHMLcommonJitDispatch)    # interpVtable offset in rEP
     AHI_GPR rEP,J9TR_InterpVTableOffset
     LR_GPR  r0,rEP                # J9 requires the offset in R0
     L_GPR   r1,(2*PTR_SIZE)(J9SP) # Restore "this"
-ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
+IfCompressedElse({dnl
     L       r3,J9TR_J9Object_class(,r1)
 ZZ # Load offset of the lookup class
     LLGFR   r3,r3
-],[dnl
+},{dnl
     L_GPR   r3,J9TR_J9Object_class(,r1)
 ZZ # Load address of the lookup class
-])dnl
+})dnl
     NILL    r3,HEX(10000)-J9TR_RequiredClassAlignment
     L_GPR   rEP,0(rEP,r3)
     L_GPR   r2,PTR_SIZE(J9SP)
@@ -2482,7 +2136,7 @@ LABEL(ifCHMLTypeCheckIFCPrivate)
 ZZ  Call fast_jitInstanceOf
 ZZ  with three args: VMthread, object, and castClass.
 ZZ
-ZZ  The call to this helper follows J9S390CHelperLinkage except
+ZZ  The call to this helper follows J9::Z::CHelperLinkage except
 ZZ  that all volatiles are saved here.
 ZZ  instance of result is indicated in return reg
 ZZ
@@ -2501,25 +2155,25 @@ ZZ  R1-3 have been saved. just need to save r0, r4-15 here.
 
 ZZ  Now start to call fast_jitInstanceOf as a C function
     ST_GPR  J9SP,J9TR_VMThread_sp(r13)
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
     L_GPR   rSSP,eq_vmThrSSP(r13)
     XC      eq_vmThrSSP(PTR_SIZE,r13),eq_vmThrSSP(r13)
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
 ZZ 64 bit zOS. Do nothing.
-],[dnl
+},{dnl
 ZZ 31 bit zOS. See definition of J9TR_CAA_SAVE_OFFSET
     L_GPR  r12,2080(rSSP)
-])dnl
+})dnl
 
-])dnl
+})dnl
 
 LOAD_ADDR_FROM_TOC(r14,TR_instanceOf)
 
     BASR    r14,r14        # call instanceOf
 
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
     ST_GPR   rSSP,eq_vmThrSSP(r13)
-])dnl
+})dnl
 
     L_GPR   J9SP,J9TR_VMThread_sp(r13)
 
@@ -2539,15 +2193,15 @@ ZZ  remove low tag and call
     LR_GPR  r1,r0          # keep low-tagged in r0
 
 ZZ  bitwise NOT the flag
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
 ZZ zOS
     LHI_GPR r2,J9TR_J9_ITABLE_OFFSET_DIRECT
     LCR_GPR r2,r2
     AHI_GPR r2,-1
-],[dnl
+},{dnl
 ZZ zLinux
     LHI_GPR r2,~J9TR_J9_ITABLE_OFFSET_DIRECT
-])dnl
+})dnl
 
     NR_GPR  r1,r2         # Remove low-tag of J9Method ptr
     L_GPR   r14,eq_codeRA_inInterfaceSnippet(r14)    #load RA
@@ -2557,69 +2211,6 @@ ZZ zLinux
     J       L_callPrivate_inVU
 
     END_FUNC(_interfaceCallHelperMultiSlots,ifCHM,7)
-
-ZZ ===================================================================
-ZZ Allocates new object out of line.
-ZZ Callable by the JIT generated code.
-ZZ If we are out of TLH space, we set CC and
-ZZ check it when we return from this helper.
-ZZ IT DOES NOT INITIALIZE THE HEADER
-ZZ
-ZZ Parameters:
-ZZ
-ZZ   class R1
-ZZ   object size R2
-ZZ
-ZZ Returns:
-ZZ
-ZZ   R3
-ZZ ===================================================================
-START_FUNC(outlinedNewObject,ONO)
-  A_GPR  R2,J9TR_VMThread_heapAlloc(,J9VM_STRUCT)
-  CL_GPR R2,J9TR_VMThread_heapTop(,J9VM_STRUCT)
-  L_GPR  R3,J9TR_VMThread_heapAlloc(,J9VM_STRUCT)
-  BCR    HEX(2),R14
-  ST_GPR R2,J9TR_VMThread_heapAlloc(,J9VM_STRUCT)
-  BR     R14
-END_FUNC(outlinedNewObject,ONO,5)
-
-ZZ ===================================================================
-ZZ Allocates new array out of line.
-ZZ Callable by the JIT generated code.
-ZZ If we are out of TLH space, we set CC and
-ZZ check it when we return from this helper.
-ZZ IT DOES NOT INITIALIZE THE HEADER
-ZZ
-ZZ Parameters:
-ZZ
-ZZ   byte size R3
-ZZ   class R1
-ZZ   array size R2
-ZZ
-ZZ Returns:
-ZZ
-ZZ   R3
-ZZ ===================================================================
-START_FUNC(outlinedNewArray,ONA)
-ZZ Test if size is 0, means arraylets go to VM helpers
-  LTR rEP,R2
-  BRC     HEX(8),PatchConditionCode
-ZZ Test if size is negative or too large
-  SRA     rEP,16
-  BRC     HEX(6),PatchConditionCode
-  LR_GPR  rEP,R3
-ZZ Load HeapAlloc and compare it with HeapTop..
-  L_GPR   R3,J9TR_VMThread_heapAlloc(,J9VM_STRUCT)
-  AR_GPR  rEP,R3
-  CL_GPR  rEP,J9TR_VMThread_heapTop(,J9VM_STRUCT)
-  BCR     HEX(2),R14
-  ST_GPR  rEP,J9TR_VMThread_heapAlloc(,J9VM_STRUCT)
-  BR      R14
-LABEL(PatchConditionCode)
-  LHI_GPR   rEP,16
-  LTR_GPR   rEP,rEP
-  BR        R14
-END_FUNC(outlinedNewArray,ONA,5)
 
 ZZ ===================================================================
 ZZ wrapper to call atomic compare and swap of a 4 byte value
@@ -2647,7 +2238,7 @@ START_FUNC(_Store4,ST4)
   BR  CRA
 END_FUNC(_Store4,ST4,5)
 
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
 ZZ ===================================================================
 ZZ wrapper to call atomic store of a 8 byte value
 ZZ Note--this is called with C linkage!
@@ -2658,14 +2249,14 @@ START_FUNC(_Store8,ST8)
   STG CARG2,0(CARG1)
   BR  CRA
 END_FUNC(_Store8,ST8,5)
-])dnl
+})dnl
 
 ZZ ===================================================================
 ZZ Returns the offset of the MVS data area structs which contain
 ZZ the leap seconds offset required to correct the STCK time on zOS
 ZZ ===================================================================
 START_FUNC(_getSTCKLSOOffset,_GSTCKLSO)
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
   LHI CRINT,FLCCVT-PSA
   ST  CRINT,0(CARG1)
   LHI CRINT,CVTEXT2-CVT
@@ -2673,9 +2264,9 @@ ifdef([J9ZOS390],[dnl
   LHI CRINT,CVTLSO-CVTXTNT2
   ST  CRINT,8(CARG1)
   b  RETURNOFFSET(CRA)
-],[dnl
+},{dnl
   br  CRA
-])dnl
+})dnl
 
 
 END_FUNC(_getSTCKLSOOffset,_GSTCKLSO,11)
@@ -2685,15 +2276,15 @@ ZZ Wrapper to modify runtime instrumentation controls.
 ZZ CARG1 pointer to RI Control Block
 ZZ ==================================================================
 START_FUNC(_RIMRIC,RIMRIC)
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
    DC HEX(eb001000)
    DC HEX(0062)
    b  RETURNOFFSET(CRA)
-],[dnl
+},{dnl
    .long HEX(eb002000)
    .short HEX(0062)
    BR CRA
-])dnl
+})dnl
 END_FUNC(_RIMRIC,RIMRIC,8)
 
 ZZ ==================================================================
@@ -2701,48 +2292,48 @@ ZZ Wrapper to modify runtime instrumentation controls.
 ZZ CARG1 pointer to RI Control Block
 ZZ ==================================================================
 START_FUNC(_RISTRIC,RISTRIC)
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
    DC HEX(eb001000)
    DC HEX(0061)
    b  RETURNOFFSET(CRA)
-],[dnl
+},{dnl
    .long HEX(eb002000)
    .short HEX(0061)
    BR CRA
-])dnl
+})dnl
 END_FUNC(_RISTRIC,RISTRIC,9)
 
 ZZ ==================================================================
 ZZ Wrapper to enable runtime instrumentation.
 ZZ ==================================================================
 START_FUNC(_RION,RION)
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
    DC HEX(AA010000)
    b RETURNOFFSET(CRA)
-],[dnl
+},{dnl
    .long HEX(AA010000)
    BR CRA
-])dnl
+})dnl
 END_FUNC(_RION,RION,6)
 
 ZZ ==================================================================
 ZZ Wrapper to disable runtime instrumentation.
 ZZ ==================================================================
 START_FUNC(_RIOFF,RIOFF)
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
    DC HEX(AA030000)
    b RETURNOFFSET(CRA)
-],[dnl
+},{dnl
    .long HEX(AA030000)
    BR CRA
-   ])dnl
+   })dnl
 END_FUNC(_RIOFF,RIOFF,7)
 
 ZZ ==================================================================
 ZZ Wrapper to test runtime instrumentation controls.
 ZZ ==================================================================
 START_FUNC(_RITRIC,RITRIC)
-ifdef([J9ZOS390],[dnl
+ifdef({J9ZOS390},{dnl
    LHI CRINT,0
    DC HEX(aa020000)
    BC 8,RETURNOFFSET(CRA)
@@ -2752,7 +2343,7 @@ ifdef([J9ZOS390],[dnl
    BC 2,RETURNOFFSET(CRA)
    LHI CRINT,3
    b  RETURNOFFSET(CRA)
-],[dnl
+},{dnl
    .long HEX(aa020000)
    BCR 8,CRA
    LHI CRINT,1
@@ -2761,15 +2352,15 @@ ifdef([J9ZOS390],[dnl
    BCR 2,CRA
    LHI CRINT,3
    BR CRA
-])dnl
+})dnl
 END_FUNC(_RITRIC,RITRIC,8)
 
 SETVAL(rdsa,5)
-ifdef([J9VM_JIT_32BIT_USES64BIT_REGISTERS],[dnl
+ifdef({ASM_J9VM_JIT_32BIT_USES64BIT_REGISTERS},{dnl
 SETVAL(dsaSize,32*PTR_SIZE)
-],[dnl
+},{dnl
 SETVAL(dsaSize,16*PTR_SIZE)
-])dnl
+})dnl
 
 ZZ ===================================================================
 ZZ
@@ -2791,69 +2382,69 @@ ZZ ===================================================================
     ST_GPR   r14,PTR_SIZE(,rdsa)
     AHI_GPR  rdsa,-dsaSize
     STM_GPR  r0,r15,0(rdsa)
-ifdef([J9VM_JIT_32BIT_USES64BIT_REGISTERS],[dnl
+ifdef({ASM_J9VM_JIT_32BIT_USES64BIT_REGISTERS},{dnl
     STMH_GPR r0,r15,64(rdsa)
-])dnl
+})dnl
     LR_GPR   r8,rdsa      # save dsa in r8
-ifdef([J9ZOS390],[dnl
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({J9ZOS390},{dnl
+ifdef({TR_HOST_64BIT},{dnl
     LM_GPR   r1,r3,2176(r4)
     L_GPR    r10,2224(r4) # get vm referenceArrayCopy func desc
     LM_GPR   r5,r6,0(r10)
     BASR     r7,r6        # Call vm function referenceArrayCopy
     lr       r0,r0        # Nop for XPLINK return
-],[dnl
+},{dnl
     LM_GPR   r1,r3,2112(r4)
     L_GPR    r12,J9TR_CAA_save_offset(,r4) # Restore CAA for 31-bit
     L_GPR    r10,2136(r4)   # get vm referenceArrayCopy func desc
     LM_GPR   r5,r6,16(r10)
     BASR     r7,r6          # Call vm function referenceArrayCopy
     DC       X'4700',Y((LCALLDESCRACP-(*-8))/8)   * nop desc
-])dnl
+})dnl
     LR_GPR   r2,r3          # copy return value
-],[dnl
+},{dnl
 ZZ  z/Linux
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({TR_HOST_64BIT},{dnl
 ZZ  z/TPF
-ifdef([OMRZTPF],[dnl
+ifdef({OMRZTPF},{dnl
     LM_GPR   r2,r6,448(r15)   # load parms to call regs
     MVC      448(PTR_SIZE,r15),488(r15)  # copy to linux parm format
     L_GPR    r1,496(r15)   # get function addr
     BASR     r14,r1        # Call vm function referenceArrayCopy
 ZZ  R2 contains return value
-],[dnl
+},{dnl
     LM_GPR   r2,r6,160(r15)   # load parms to call regs
     MVC      160(PTR_SIZE,r15),200(r15)  # copy to linux parm format
     L_GPR    r1,208(r15)   #get function addr
     BASR     r14,r1        # Call vm function referenceArrayCopy
 ZZ  R2 contains return value
-])dnl
-],[dnl
+})dnl
+},{dnl
     LM_GPR   r2,r6,96(r15)    # load parms to call regs
     MVC      96(PTR_SIZE,r15),116(r15)  # copy to linux parm format
     L_GPR    r1,120(r15)   #get function addr
     BASR     r14,r1        # Call vm function referenceArrayCopy
 ZZ  R2 contains return value
-])dnl
-])dnl
+})dnl
+})dnl
     LR_GPR   rdsa,r8 #restore dsa from r8
     LM_GPR   r0,r1,0(rdsa)
     LM_GPR   r3,r15,3*PTR_SIZE(rdsa)
-ifdef([J9VM_JIT_32BIT_USES64BIT_REGISTERS],[dnl
+ifdef({ASM_J9VM_JIT_32BIT_USES64BIT_REGISTERS},{dnl
     LMH_GPR  r0,r15,64(rdsa)
-])dnl
+})dnl
     AHI_GPR  rdsa,dsaSize
     L_GPR    r14,PTR_SIZE(,rdsa)
     br r14
 
     END_FUNC(__referenceArrayCopyHelper,_RACP,7)
 
-ifdef([J9ZOS390],[dnl
-ifdef([TR_HOST_64BIT],[dnl
+ifdef({J9ZOS390},{dnl
+ifdef({TR_HOST_64BIT},{dnl
 
 ZZ 64bit XPLINK doesn't need call descriptors
 
-],[dnl
+},{dnl
 
 ZZ We will share this call descriptor for all calls to
 ZZ jitAddPicToPatchOnClassUnload
@@ -2864,7 +2455,7 @@ LCALLDESCPICREG      DS    0D           * Dword Boundary
         DC    BL.3'000',BL.5'00000'   * XPLINK Linkage + Returns: void
         DC    BL.6'001000',BL.6'000000',BL.6'000000',BL.6'000000'
 ZZ                                      unprototyped call
-])dnl
+})dnl
 
 ZZ Call Descriptor for call to referenceArrayCopy
 LCALLDESCRACP     DS    0D         * Dword Boundary
@@ -2878,5 +2469,5 @@ ZZ                                     unprototyped call
   CVT DSECT=YES
 
     END
-])dnl
+})dnl
 

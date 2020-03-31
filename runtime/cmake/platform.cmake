@@ -20,25 +20,38 @@
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
-#TODO alot of this should really just be inherited from the OMR config
-#TODO we are assuming Linux at the moment
-if(CMAKE_CXX_COMPILER_ID STREQUAL "XL")
-    set(OMR_TOOLCONFIG "xlc")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -q64 -qalias=noansi")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -q64 -qalias=noansi -qnortti -qnoeh -qsuppress=1540-1087:1540-1088:1540-1090")
-    set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -qpic=large -q64")
+include(OmrPlatform)
+# Note: we need to inject WIN32 et al, as OMR no longer uses them
+if(OMR_OS_WINDOWS)
+    list(APPEND OMR_PLATFORM_DEFINITIONS
+        -DWIN32
+        -D_WIN32
+    )
+    if(OMR_ENV_DATA64)
+        list(APPEND OMR_PLATFORM_DEFINITIONS
+            -DWIN64
+            -D_WIN64
+        )
+    endif()
 endif()
+omr_platform_global_setup()
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+if(OMR_TOOLCONFIG STREQUAL "gnu")
     set(CMAKE_CXX_FLAGS " -g -fno-rtti -fno-exceptions ${CMAKE_CXX_FLAGS}")
     set(CMAKE_C_FLAGS "-g ${CMAKE_C_FLAGS}")
-    set(CMAKE_SHARED_LINKER_FLAGS "-Wl,-z,defs ${CMAKE_SHARED_LINKER_FLAGS}")
+
+    # Raise an error if a shared library has any unresolved symbols.
+    # This flag isn't supported on OSX, but it has this behaviour by default
+    if(NOT OMR_OS_OSX)
+        set(CMAKE_SHARED_LINKER_FLAGS "-Wl,-z,defs ${CMAKE_SHARED_LINKER_FLAGS}")
+    endif()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pthread -O3 -fno-strict-aliasing")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread -O3 -fno-strict-aliasing -fno-exceptions -fno-rtti -fno-threadsafe-statics")
+elseif(OMR_TOOLCONFIG STREQUAL "xlc")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -qalias=noansi")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -qalias=noansi -qnortti -qnoeh -qsuppress=1540-1087:1540-1088:1540-1090")
+    set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -qpic=large")
 endif()
-
-include(OmrPlatform)
-omr_platform_global_setup()
 
 if(OMR_ARCH_POWER)
     #TODO do based on toolchain stuff
@@ -50,6 +63,10 @@ if(OMR_ARCH_POWER)
     set(J9VM_PORT_RUNTIME_INSTRUMENTATION ON CACHE BOOL "")
 endif()
 
+if(OMR_OS_AIX)
+    # Override cmake default of ".a" for shared libs on aix
+    set(CMAKE_SHARED_LIBRARY_SUFFIX ".so")
+endif()
 
 if(NOT OMR_OS_OSX)
     add_definitions(-DIPv6_FUNCTION_SUPPORT)

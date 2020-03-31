@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2016, 2019 IBM Corp. and others
+Copyright (c) 2016, 2020 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,14 +24,16 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 
 Let's create the following scenario:
 For the purpose of this example, we assume you have an OpenJ9 SDK ready
-for testing. Below are the specific commands you'd run to compile and
-run tests. Details are explained in *Tasks in OpenJ9 Test* section below.
+for testing. Below are the specific commands you'd run to clone test framework
+TKG, compile and run tests. Details are explained in *Tasks in OpenJ9 Test*
+section below.
 
 ```
-cd openj9/test/TestConfig
+cd openj9/test
+git clone https://github.com/AdoptOpenJDK/TKG.git
+cd TKG
 export TEST_JDK_HOME=<path to JDK directory that you wish to test>
 export BUILD_LIST=functional
-make -f run_configure.mk
 make compile
 make _sanity.regular
 ```
@@ -100,7 +102,7 @@ Please read [DependentLibs.md](./DependentLibs.md) for details.
 - If you have added new features to OpenJ9, you will likely need to add new tests. Check out [openj9/test/functional/TestExample/src/org/openj9/test/MyTest.java](https://github.com/eclipse/openj9/blob/master/test/functional/TestExample/src/org/openj9/test/example/MyTest.java) for
 the format to use.
 
-- If you have many new test cases to add and special build requirements, then you may want to copy the [TestExample](https://github.com/eclipse/openj9/blob/master/test/functional/TestExample) update the build.xml and playlist.xml files to match your new Test class names. The playlist.xml format is defined in TestConfig/playlist.xsd.
+- If you have many new test cases to add and special build requirements, then you may want to copy the [TestExample](https://github.com/eclipse/openj9/blob/master/test/functional/TestExample) update the build.xml and playlist.xml files to match your new Test class names. The playlist.xml format is defined in TKG/playlist.xsd.
 
 - A test can be tagged with following elements:
       - level:   [sanity|extended|special] (extended default value)
@@ -198,13 +200,11 @@ e.g.,
 Above command will run [all possible variations in _testExample](https://github.com/eclipse/openj9/blob/master/test/functional/TestExample/playlist.xml#L28-L30)
 target
 
-#### Run a directory of tests <br />
-cd path/to/directory; make -f autoGen.mk testTarget <br /> 
-or make -C path/to/directory -f autoGen.mk testTarget <br />
-e.g., 
+#### Run a list of tests <br />
+make _testList TESTLIST=_testTargetName1,_testTargetName2,_testTargetName3 <br />
+e.g.,
 ```
-    cd test/functional/TestExample
-    make -f autoGen.mk _sanity
+make _testList TESTLIST=jit_jitt,jit_recognizedMethod,testSCCMLTests2_1
 ```
 
 #### Run all tests
@@ -214,12 +214,15 @@ e.g.,
 ```
 - run all tests without recompiling them
 ```
-        make runtest
+        make _all
 ```
 
 #### Run tests against specific (e.g., hotspot 8) SDK
 
-`<impl>` and `<subset>` elements are used to annotate tests in playlist.xml, so that the tests will be run against the targeted JDK_IMPL and JDK_VERSION (and is determined by the SDK defined in TEST_JDK_HOME variable)
+`<impl>` and `<subset>` elements are used to annotate tests in playlist.xml, so that the tests will be run against the targeted JDK_IMPL and JDK_VERSION (and is determined by the SDK defined in TEST_JDK_HOME variable).  
+
+For example, adding a `<subsets><subset>8</subset></subsets>` block into the [target definition of TestExample](https://github.com/eclipse/openj9/blob/master/test/functional/TestExample/playlist.xml#L26-L49) would mean that test would only get run against jdk8 and would be skipped for other JDK versions.  If `<subsets>` or `<impls>` are not included in the target definition, then it is assumed that ALL versions and implementations are valid for that test target.
+
 
 #### Rerun the failed tests from the last run
 ```
@@ -341,7 +344,7 @@ If a test is disabled, it means that this test is disabled using `<disabled>` ta
 
 TestNG tests produce html (and xml) output from the tests are 
 created and stored in a test_output_xxxtimestamp folder in the 
-TestConfig directory (or from where you ran "make test"). 
+TKG directory (or from where you ran "make test"). 
 
 The output is organized by tests, each test having its own set of 
 output.  If you open the index.html file in a web browser, you will

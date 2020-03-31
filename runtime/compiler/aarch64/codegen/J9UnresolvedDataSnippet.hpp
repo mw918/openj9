@@ -57,11 +57,7 @@ class UnresolvedDataSnippet : public J9::UnresolvedDataSnippet
    /**
     * @brief Constructor
     */
-   UnresolvedDataSnippet(TR::CodeGenerator *cg, TR::Node *node, TR::SymbolReference *symRef, bool isStore, bool isGCSafePoint) :
-      J9::UnresolvedDataSnippet(cg, node, symRef, isStore, isGCSafePoint),
-      _memoryReference(NULL)
-      {
-      }
+   UnresolvedDataSnippet(TR::CodeGenerator *cg, TR::Node *node, TR::SymbolReference *symRef, bool isStore, bool isGCSafePoint);
 
    /**
     * @brief Answers the Snippet kind
@@ -85,6 +81,12 @@ class UnresolvedDataSnippet : public J9::UnresolvedDataSnippet
     * @return MemoryReference
     */
    TR::MemoryReference *setMemoryReference(TR::MemoryReference *mr) { return (_memoryReference = mr); }
+
+   /**
+    * @brief Answers runtime helper
+    * @return runtime helper
+    */
+   TR_RuntimeHelper getHelper();
 
    /**
     * @brief Emits the Snippet body

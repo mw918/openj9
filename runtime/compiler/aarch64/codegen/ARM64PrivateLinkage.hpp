@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,6 +24,8 @@
 #define ARM64_PRIVATELINKAGE_INCL
 
 #include "codegen/Linkage.hpp"
+#include "codegen/LinkageConventionsEnum.hpp"
+#include "codegen/PrivateLinkage.hpp"
 
 #include "infra/Assert.hpp"
 
@@ -32,9 +34,13 @@ namespace TR { class Instruction; }
 namespace TR { class Register; }
 namespace TR { class ResolvedMethodSymbol; }
 
-namespace TR {
+namespace J9
+{
 
-class ARM64PrivateLinkage : public TR::Linkage
+namespace ARM64
+{
+
+class PrivateLinkage : public J9::PrivateLinkage
    {
    protected:
 
@@ -51,13 +57,26 @@ class ARM64PrivateLinkage : public TR::Linkage
          TR::RegisterDependencyConditions *dependencies,
          TR_LinkageConventions linkage);
 
+   /**
+    * @brief Store informaiton of outgoing memory argument
+    * @param[in] argReg : argument register
+    * @param[in] offset : offset from Java SP
+    * @param[in] opCode : opcode for storing argument
+    * @param[in] memArg : MemoryArgument
+    */
+   void pushOutgoingMemArgument(
+      TR::Register *argReg,
+      int32_t offset,
+      TR::InstOpCode::Mnemonic opCode,
+      TR::ARM64MemoryArgument &memArg);
+
    public:
 
    /**
     * @brief Constructor
     * @param[in] cg : CodeGenerator
     */
-   ARM64PrivateLinkage(TR::CodeGenerator *cg);
+   PrivateLinkage(TR::CodeGenerator *cg);
 
    /**
     * @brief Answers linkage properties
@@ -89,6 +108,20 @@ class ARM64PrivateLinkage : public TR::Linkage
    virtual void initARM64RealRegisterLinkage();
 
    /**
+    * @brief Calculates the amount of frame space required to save the
+    *    preserved registers in this method.
+    *
+    * @param[out] registerSaveDescription : the bitmask of registers to preserve
+    * @param[out] numGPRsSaved : the number of GPRs saved
+    *
+    * @return : number of bytes required to reserve on the frame for
+    *           preserved registers
+    */
+   int32_t calculatePreservedRegisterSaveSize(
+      uint32_t &registerSaveDescription,
+      uint32_t &numGPRsSaved);
+
+   /**
     * @brief Copy linkage register indices to parameter symbols
     *
     * @param[in] method : the resolved method symbol
@@ -107,6 +140,37 @@ class ARM64PrivateLinkage : public TR::Linkage
    virtual void createEpilogue(TR::Instruction *cursor);
 
    /**
+    * @brief Loads all parameters passed on the stack from the interpreter into
+    *        the corresponding JITed method private linkage register.
+    *
+    * @param[in] cursor : the TR::Instruction to begin generating
+    *        the load sequence at.
+    *
+    * @return : the instruction cursor after the load sequence
+    */
+   TR::Instruction *loadStackParametersToLinkageRegisters(TR::Instruction *cursor);
+
+   /**
+    * @brief Stores parameters passed in linkage registers to the stack where the
+    *        method body expects to find them.
+    *
+    * @param[in] cursor : the instruction cursor to begin inserting copy instructions
+    * @param[in] parmsHaveBeenStored : true if the parameters have been stored to the stack
+    *
+    * @return The instruction cursor after copies inserted.
+    */
+   TR::Instruction *copyParametersToHomeLocation(TR::Instruction *cursor, bool parmsHaveBeenStored);
+
+   /**
+    * @brief Stores parameters passed in linkage registers to the stack. This method is used only in FSD mode.
+    *
+    * @param[in] cursor : the instruction cursor to begin inserting copy instructions
+    *
+    * @return The instruction cursor after copies inserted.
+    */
+   TR::Instruction *saveParametersToStack(TR::Instruction *cursor);
+
+   /**
     * @brief Builds method arguments
     * @param[in] node : caller node
     * @param[in] dependencies : register dependency conditions
@@ -122,13 +186,90 @@ class ARM64PrivateLinkage : public TR::Linkage
    virtual TR::Register *buildDirectDispatch(TR::Node *callNode);
 
    /**
+    * @brief Builds direct call to method
+    * @param[in] node : caller node
+    * @param[in] callSymRef : target symbol reference
+    * @param[in] dependencies : register dependency conditions
+    * @param[in] pp : linkage properties
+    * @param[in] argSize : size of arguments
+    */
+   void buildDirectCall(
+      TR::Node *callNode,
+      TR::SymbolReference *callSymRef,
+      TR::RegisterDependencyConditions *dependencies,
+      const TR::ARM64LinkageProperties &pp,
+      uint32_t argSize);
+
+   /**
     * @brief Builds indirect dispatch to method
     * @param[in] node : caller node
     */
    virtual TR::Register *buildIndirectDispatch(TR::Node *callNode);
+
+   /**
+    * @brief Builds virtual dispatch to method
+    * @param[in] node : caller node
+    * @param[in] dependencies : register dependency conditions
+    * @param[in] argSize : size of arguments
+    */
+   virtual void buildVirtualDispatch(
+      TR::Node *callNode,
+      TR::RegisterDependencyConditions *dependencies,
+      uint32_t argSize);
+
+   /**
+    * @brief J9 private linkage override of OMR function
+    */
+   virtual intptr_t entryPointFromCompiledMethod();
+
+   /**
+    * @brief J9 private linkage override of OMR function
+    */
+   virtual intptr_t entryPointFromInterpretedMethod();
+
+   /**
+    * J9 private linkage override of OMR function
+    */
+   virtual void performPostBinaryEncoding();
+
+   /**
+    * @return Retrieve the interpretedMethodEntryPoint instruction
+    */
+   TR::Instruction *getInterpretedMethodEntryPoint() { return _interpretedMethodEntryPoint; }
+
+   /**
+    * @brief Sets the interpreted method entry point instruction
+    * @param[in] ins : interpreted method entry point instruction
+    */
+   void setInterpretedMethodEntryPoint(TR::Instruction *ins) { _interpretedMethodEntryPoint = ins; }
+
+   /**
+    * @return Retrieve the jittedMethodEntryPoint instruction
+    */
+   TR::Instruction *getJittedMethodEntryPoint() { return _jittedMethodEntryPoint; }
+
+   /**
+    * @brief Sets the jitted method entry point instruction
+    * @param[in] ins : jitted method entry point instruction
+    */
+   void setJittedMethodEntryPoint(TR::Instruction *ins) { _jittedMethodEntryPoint = ins; }
+
+   protected:
+
+   /**
+    * The first TR::Instruction of the method when called from an interpreted method.
+    */
+   TR::Instruction *_interpretedMethodEntryPoint;
+
+   /**
+    * The first TR::Instruction of the method when called from a jitted method.
+    */
+   TR::Instruction *_jittedMethodEntryPoint;
+
    };
 
-class ARM64HelperLinkage : public TR::ARM64PrivateLinkage
+
+class HelperLinkage : public PrivateLinkage
    {
    public:
 
@@ -137,7 +278,7 @@ class ARM64HelperLinkage : public TR::ARM64PrivateLinkage
     * @param[in] cg : CodeGenerator
     * @param[in] helperLinkage : linkage convention
     */
-   ARM64HelperLinkage(TR::CodeGenerator *cg, TR_LinkageConventions helperLinkage) : _helperLinkage(helperLinkage), TR::ARM64PrivateLinkage(cg)
+   HelperLinkage(TR::CodeGenerator *cg, TR_LinkageConventions helperLinkage) : _helperLinkage(helperLinkage), PrivateLinkage(cg)
       {
       TR_ASSERT(helperLinkage == TR_Helper || helperLinkage == TR_CHelper, "Unexpected helper linkage convention");
       }
@@ -154,7 +295,10 @@ class ARM64HelperLinkage : public TR::ARM64PrivateLinkage
    protected:
 
    TR_LinkageConventions _helperLinkage;
+
    };
+
+}
 
 }
 

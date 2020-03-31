@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -938,19 +938,19 @@ gcParseSovereignArguments(J9JavaVM *vm)
 		goto _error;
 	}
 
-	if(-1 != FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, "-Xgcthreads", NULL)) {
-		result = option_set_to_opt_integer(vm, "-Xgcthreads", &index, EXACT_MEMORY_MATCH, &extensions->gcThreadCount);
+	if(-1 != FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, VMOPT_XGCTHREADS, NULL)) {
+		result = option_set_to_opt_integer(vm, VMOPT_XGCTHREADS, &index, EXACT_MEMORY_MATCH, &extensions->gcThreadCount);
 		if (OPTION_OK != result) {
 			if (OPTION_MALFORMED == result) {
-				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_MUST_BE_NUMBER, "-Xgcthreads");
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_MUST_BE_NUMBER, VMOPT_XGCTHREADS);
 			} else {
-				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_OVERFLOWED, "-Xgcthreads");
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_OVERFLOWED, VMOPT_XGCTHREADS);
 			}
 			goto _error;
 		}
 
 		if(0 == extensions->gcThreadCount) {
-			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_MUST_BE_ABOVE, "-Xgcthreads", (UDATA)0);
+			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_MUST_BE_ABOVE, VMOPT_XGCTHREADS, (UDATA)0);
 			goto _error;
 		}
 
@@ -996,12 +996,12 @@ gcParseSovereignArguments(J9JavaVM *vm)
 	}
 
 #if defined(OMR_GC_MODRON_CONCURRENT_MARK)
-	result = option_set_to_opt_integer(vm, "-Xconcurrentbackground", &index, EXACT_MEMORY_MATCH, &extensions->concurrentBackground);
+	result = option_set_to_opt_integer(vm, VMOPT_XCONCURRENTBACKGROUND, &index, EXACT_MEMORY_MATCH, &extensions->concurrentBackground);
 	if (OPTION_OK != result) {
 		if (OPTION_MALFORMED == result) {
-			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_MUST_BE_NUMBER, "-Xconcurrentbackground");
+			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_MUST_BE_NUMBER, VMOPT_XCONCURRENTBACKGROUND);
 		} else {
-			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_OVERFLOWED, "-Xconcurrentbackground");
+			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_OVERFLOWED, VMOPT_XCONCURRENTBACKGROUND);
 		}
 		goto _error;
 	}
@@ -1369,7 +1369,19 @@ scan_udata_memory_size_helper(J9JavaVM *javaVM, char **cursor, UDATA *value, con
 		return false;
 	}
 	
-	if(try_scan(cursor, "G") || try_scan(cursor, "g")) {
+	if(try_scan(cursor, "T") || try_scan(cursor, "t")) {
+		if (0 != *value) {
+#if defined(J9VM_ENV_DATA64)
+			if (*value <= (((UDATA)-1) >> 40)) {
+				*value <<= 40;
+			} else
+#endif /* defined(J9VM_ENV_DATA64) */
+			{
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_OVERFLOWED, argName);
+				return false;
+			}
+		}
+	} else if(try_scan(cursor, "G") || try_scan(cursor, "g")) {
 		if (*value <= (((UDATA)-1) >> 30)) {
 			*value <<= 30;
 		} else {
@@ -1460,6 +1472,20 @@ gcParseCommandLineAndInitializeWithValues(J9JavaVM *vm, IDATA *memoryParameters)
 	/* Parse the command line 
 	 * Order is important for parameters that match as substrings (-Xmrx/-Xmr)
 	 */
+	{
+		bool enableOriginalJDK8HeapSizeCompatibilityOption = false;
+		/* only parse VMOPT_XXENABLEORIGINALJDK8HEAPSIZECOMPATIBILITY option for Java 8 and below */
+		if (J2SE_18 >= J2SE_VERSION(vm)) {
+
+			IDATA enabled = FIND_AND_CONSUME_ARG(EXACT_MATCH, VMOPT_XXENABLEORIGINALJDK8HEAPSIZECOMPATIBILITY, NULL);
+			IDATA disabled = FIND_AND_CONSUME_ARG(EXACT_MATCH, VMOPT_XXDISABLEORIGINALJDK8HEAPSIZECOMPATIBILITY, NULL);
+			if (enabled > disabled) {
+				enableOriginalJDK8HeapSizeCompatibilityOption = true;
+			}
+		}
+		/* set default max heap for Java */
+		extensions->computeDefaultMaxHeapForJava(enableOriginalJDK8HeapSizeCompatibilityOption);
+	}
 	result = option_set_to_opt(vm, OPT_XMCA, &index, EXACT_MEMORY_MATCH, &vm->ramClassAllocationIncrement);
 	if (OPTION_OK != result) {
 		goto _error;

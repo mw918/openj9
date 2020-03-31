@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -21,10 +21,12 @@
  *******************************************************************************/
 
 #include "runtime/JITClientSession.hpp"
-#include "runtime/RuntimeAssumptions.hpp" // for TR_AddressSet
-#include "net/ServerStream.hpp" // for JITServer::ServerStream
-#include "control/MethodToBeCompiled.hpp" // for TR_MethodToBeCompiled
+
 #include "control/CompilationRuntime.hpp" // for CompilationInfo
+#include "control/MethodToBeCompiled.hpp" // for TR_MethodToBeCompiled
+#include "control/JITServerHelpers.hpp"
+#include "net/ServerStream.hpp" // for JITServer::ServerStream
+#include "runtime/RuntimeAssumptions.hpp" // for TR_AddressSet
 
 
 ClientSessionData::ClientSessionData(uint64_t clientUID, uint32_t seqNo) : 
@@ -72,7 +74,10 @@ ClientSessionData::~ClientSessionData()
       }
    _staticMapMonitor->destroy();
    if (_vmInfo)
+      {
+      destroyJ9SharedClassCacheDescriptorList();
       jitPersistentFree(_vmInfo);
+      }
    _thunkSetMonitor->destroy();
    }
 
@@ -117,7 +122,7 @@ ClientSessionData::processUnloadedClasses(JITServer::ServerStream *stream, const
       for (auto clazz : classes)
          {
          if (updateUnloadedClasses)
-            _unloadedClassAddresses->add((uintptrj_t)clazz);
+            _unloadedClassAddresses->add((uintptr_t)clazz);
 
          auto it = _romClassMap.find((J9Class*)clazz);
          if (it == _romClassMap.end())
@@ -150,7 +155,7 @@ ClientSessionData::processUnloadedClasses(JITServer::ServerStream *stream, const
                IPTable_t *ipDataHT = iter->second._IPData;
                if (ipDataHT)
                   {
-                  for (auto entryIt : *ipDataHT)
+                  for (auto& entryIt : *ipDataHT)
                      {
                      auto entryPtr = entryIt.second;
                      if (entryPtr)
@@ -271,82 +276,56 @@ ClientSessionData::printStats()
    j9tty_printf(PORTLIB, "\tNum cached ROM classes: %d\n", _romClassMap.size());
    j9tty_printf(PORTLIB, "\tNum cached ROM methods: %d\n", _J9MethodMap.size());
    size_t total = 0;
-   for (auto it : _romClassMap)
+   for (auto& it : _romClassMap)
       total += it.second._romClass->romSize;
 
    j9tty_printf(PORTLIB, "\tTotal size of cached ROM classes + methods: %d bytes\n", total);
+   }
+
+ClientSessionData::ClassInfo::ClassInfo() :
+   _romClass(NULL),
+   _remoteRomClass(NULL),
+   _methodsOfClass(NULL),
+   _baseComponentClass(NULL),
+   _numDimensions(0),
+   _parentClass(NULL),
+   _interfaces(NULL),
+   _classHasFinalFields(false),
+   _classDepthAndFlags(0),
+   _classInitialized(false),
+   _byteOffsetToLockword(0),
+   _leafComponentClass(NULL),
+   _classLoader(NULL),
+   _hostClass(NULL),
+   _componentClass(NULL),
+   _arrayClass(NULL),
+   _totalInstanceSize(0),
+   _constantPool(NULL),
+   _classFlags(0),
+   _classChainOffsetOfIdentifyingLoaderForClazz(0),
+   _remoteROMStringsCache(decltype(_remoteROMStringsCache)::allocator_type(TR::Compiler->persistentAllocator())),
+   _fieldOrStaticNameCache(decltype(_fieldOrStaticNameCache)::allocator_type(TR::Compiler->persistentAllocator())),
+   _classOfStaticCache(decltype(_classOfStaticCache)::allocator_type(TR::Compiler->persistentAllocator())),
+   _constantClassPoolCache(decltype(_constantClassPoolCache)::allocator_type(TR::Compiler->persistentAllocator())),
+   _fieldAttributesCache(decltype(_fieldAttributesCache)::allocator_type(TR::Compiler->persistentAllocator())),
+   _staticAttributesCache(decltype(_staticAttributesCache)::allocator_type(TR::Compiler->persistentAllocator())),
+   _fieldAttributesCacheAOT(decltype(_fieldAttributesCacheAOT)::allocator_type(TR::Compiler->persistentAllocator())),
+   _staticAttributesCacheAOT(decltype(_fieldAttributesCacheAOT)::allocator_type(TR::Compiler->persistentAllocator())),
+   _jitFieldsCache(decltype(_jitFieldsCache)::allocator_type(TR::Compiler->persistentAllocator())),
+   _fieldOrStaticDeclaringClassCache(decltype(_fieldOrStaticDeclaringClassCache)::allocator_type(TR::Compiler->persistentAllocator())),
+   _fieldOrStaticDefiningClassCache(decltype(_fieldOrStaticDefiningClassCache)::allocator_type(TR::Compiler->persistentAllocator())),	
+   _J9MethodNameCache(decltype(_J9MethodNameCache)::allocator_type(TR::Compiler->persistentAllocator()))
+   {
    }
 
 void
 ClientSessionData::ClassInfo::freeClassInfo()
    {
    TR_Memory::jitPersistentFree(_romClass);
-   // If string cache exists, free it
-   if (_remoteROMStringsCache)
-      {
-      _remoteROMStringsCache->~PersistentUnorderedMap<TR_RemoteROMStringKey, std::string>();
-      jitPersistentFree(_remoteROMStringsCache);
-      }
 
-   // if fieldOrStaticNameCache exists, free it
-   if (_fieldOrStaticNameCache)
-      {
-      _fieldOrStaticNameCache->~PersistentUnorderedMap<int32_t, std::string>();
-      jitPersistentFree(_fieldOrStaticNameCache);
-      }
    // free cached _interfaces
    _interfaces->~PersistentVector<TR_OpaqueClassBlock *>();
    jitPersistentFree(_interfaces);
-
-   // if class of static cache exists, free it
-   if (_classOfStaticCache)
-      {
-      _classOfStaticCache->~PersistentUnorderedMap<int32_t, TR_OpaqueClassBlock *>();
-      jitPersistentFree(_classOfStaticCache);
-      }
-
-   if (_constantClassPoolCache)
-      {
-      _constantClassPoolCache->~PersistentUnorderedMap<int32_t, TR_OpaqueClassBlock *>();
-      jitPersistentFree(_constantClassPoolCache);
-      }
-
-   if (_fieldAttributesCache)
-      {
-      _fieldAttributesCache->~TR_FieldAttributesCache();
-      jitPersistentFree(_fieldAttributesCache);
-      }
-   if (_staticAttributesCache)
-      {
-      _staticAttributesCache->~TR_FieldAttributesCache();
-      jitPersistentFree(_staticAttributesCache);
-      }
-
-   if (_fieldAttributesCacheAOT)
-      {
-      _fieldAttributesCacheAOT->~TR_FieldAttributesCache();
-      jitPersistentFree(_fieldAttributesCacheAOT);
-      }
-   if (_staticAttributesCacheAOT)
-      {
-      _staticAttributesCacheAOT->~TR_FieldAttributesCache();
-      jitPersistentFree(_staticAttributesCacheAOT);
-      }
-   if (_jitFieldsCache)
-      {
-      _jitFieldsCache->~TR_JitFieldsCache();
-      jitPersistentFree(_jitFieldsCache);
-      }
-   if (_fieldOrStaticDeclaringClassCache)
-      {
-      _fieldOrStaticDeclaringClassCache->~PersistentUnorderedMap<int32_t, TR_OpaqueClassBlock *>();
-      jitPersistentFree(_fieldOrStaticDeclaringClassCache);
-      }
-   if (_J9MethodNameCache)
-      {
-      _J9MethodNameCache->~PersistentUnorderedMap<int32_t, J9MethodNameAndSignature>();
-      jitPersistentFree(_J9MethodNameCache);
-      }
    }
 
 ClientSessionData::VMInfo *
@@ -355,9 +334,57 @@ ClientSessionData::getOrCacheVMInfo(JITServer::ServerStream *stream)
    if (!_vmInfo)
       {
       stream->write(JITServer::MessageType::VM_getVMInfo, JITServer::Void());
-      _vmInfo = new (PERSISTENT_NEW) VMInfo(std::get<0>(stream->read<VMInfo>()));
+      auto recv = stream->read<VMInfo, std::vector<uintptr_t>, std::vector<uintptr_t> >();
+      _vmInfo = new (PERSISTENT_NEW) VMInfo(std::get<0>(recv));
+      _vmInfo->_j9SharedClassCacheDescriptorList = reconstructJ9SharedClassCacheDescriptorList(std::get<1>(recv), std::get<2>(recv));
       }
    return _vmInfo;
+   }
+
+J9SharedClassCacheDescriptor *
+ClientSessionData::reconstructJ9SharedClassCacheDescriptorList(const std::vector<uintptr_t> &listOfCacheStartAddress, const std::vector<uintptr_t> &listOfCacheSizeBytes)
+   {
+   J9SharedClassCacheDescriptor * cur = NULL;
+   J9SharedClassCacheDescriptor * prev = NULL;
+   J9SharedClassCacheDescriptor * head = NULL;
+   for (size_t i = 0; i < listOfCacheStartAddress.size(); i++)
+      {
+      cur = new (PERSISTENT_NEW) J9SharedClassCacheDescriptor();
+      cur->cacheStartAddress = (J9SharedCacheHeader*)(listOfCacheStartAddress[i]);
+      cur->cacheSizeBytes = listOfCacheSizeBytes[i];
+      if (prev)
+         {
+         prev->next = cur;
+         cur->previous = prev;
+         }
+      else
+         {
+         head = cur;
+         }
+      prev = cur;
+      }
+   if (!head)
+      return NULL;
+   head->previous = prev; // assign head's previous to tail
+   prev->next = head; // assign tail's previous to head
+   return head;
+   }
+
+void
+ClientSessionData::destroyJ9SharedClassCacheDescriptorList()
+   {
+   if (!_vmInfo->_j9SharedClassCacheDescriptorList)
+      return;
+   J9SharedClassCacheDescriptor * cur = _vmInfo->_j9SharedClassCacheDescriptorList;
+   J9SharedClassCacheDescriptor * next = NULL;
+   _vmInfo->_j9SharedClassCacheDescriptorList->previous->next = NULL; // break the circular links by setting tail's next pointer to be NULL 
+   while (cur)
+      {
+      next = cur->next;
+      jitPersistentFree(cur);
+      cur = next;
+      }
+   _vmInfo->_j9SharedClassCacheDescriptorList = NULL;
    }
 
 
@@ -370,13 +397,13 @@ ClientSessionData::clearCaches()
       }
    OMR::CriticalSection getRemoteROMClass(getROMMapMonitor());
    // Free memory for all hashtables with IProfiler info
-   for (auto it : _J9MethodMap)
+   for (auto& it : _J9MethodMap)
       {
       IPTable_t *ipDataHT = it.second._IPData;
       // It it exists, walk the collection of <pc, TR_IPBytecodeHashTableEntry*> mappings
       if (ipDataHT)
          {
-         for (auto entryIt : *ipDataHT)
+         for (auto& entryIt : *ipDataHT)
             {
             auto entryPtr = entryIt.second;
             if (entryPtr)
@@ -390,7 +417,7 @@ ClientSessionData::clearCaches()
 
    _J9MethodMap.clear();
    // Free memory for j9class info
-   for (auto it : _romClassMap)
+   for (auto& it : _romClassMap)
       it.second.freeClassInfo();
 
    _romClassMap.clear();
@@ -398,7 +425,7 @@ ClientSessionData::clearCaches()
    _classChainDataMap.clear();
 
    // Free CHTable 
-   for (auto it : _chTableClassMap)
+   for (auto& it : _chTableClassMap)
       {
       TR_PersistentClassInfo *classInfo = it.second;
       classInfo->removeSubClasses();
@@ -432,9 +459,74 @@ ClientSessionData::notifyAndDetachFirstWaitingThread()
    return entry;
    }
 
+char *
+ClientSessionData::ClassInfo::getRemoteROMString(int32_t &len, void *basePtr, std::initializer_list<size_t> offsets)
+   {
+   auto offsetFirst = *offsets.begin();
+   auto offsetSecond = (offsets.size() == 2) ? *(offsets.begin() + 1) : 0;
+
+   TR_ASSERT(offsetFirst < (1 << 16) && offsetSecond < (1 << 16), "Offsets are larger than 16 bits");
+   TR_ASSERT(offsets.size() <= 2, "Number of offsets is greater than 2"); 
+
+   // create a key for hashing into a table of strings
+   TR_RemoteROMStringKey key;
+   uint32_t offsetKey = (offsetFirst << 16) + offsetSecond;
+   key._basePtr = basePtr;
+   key._offsets = offsetKey;
+   
+   std::string *cachedStr = NULL;
+   bool isCached = false;
+   auto gotStr = _remoteROMStringsCache.find(key);
+   if (gotStr != _remoteROMStringsCache.end())
+      {
+      cachedStr = &(gotStr->second);
+      isCached = true;
+      }
+
+   // only make a query if a string hasn't been cached
+   if (!isCached)
+      {
+      size_t offsetFromROMClass = (uint8_t*) basePtr - (uint8_t*) _romClass;
+      std::string offsetsStr((char*) offsets.begin(), offsets.size() * sizeof(size_t));
+      
+      JITServer::ServerStream *stream = TR::CompilationInfo::getStream();      
+      stream->write(JITServer::MessageType::ClassInfo_getRemoteROMString, _remoteRomClass, offsetFromROMClass, offsetsStr);
+      cachedStr = &(_remoteROMStringsCache.insert({key, std::get<0>(stream->read<std::string>())}).first->second);
+      }
+
+   len = cachedStr->length();
+   return &(cachedStr->at(0));
+   }
+
+// Takes a pointer to some data which is placed statically relative to the rom class,
+// as well as a list of offsets to J9SRP fields. The first offset is applied before the first
+// SRP is followed.
+//
+// If at any point while following the chain of SRP pointers we land outside the ROM class,
+// then we fall back to getRemoteROMString which follows the same process on the client.
+//
+// This is a workaround because some data referenced in the ROM constant pool is located outside of
+// it, but we cannot easily determine if the reference is outside or not (or even if it is a reference!)
+// because the data is untyped.
+char *
+ClientSessionData::ClassInfo::getROMString(int32_t &len, void *basePtr, std::initializer_list<size_t> offsets)
+   {
+   uint8_t *ptr = (uint8_t*) basePtr;
+   for (size_t offset : offsets)
+      {
+      ptr += offset;
+      if (!JITServerHelpers::isAddressInROMClass(ptr, _romClass))
+         return getRemoteROMString(len, basePtr, offsets);
+      ptr = ptr + *(J9SRP*)ptr;
+      }
+   if (!JITServerHelpers::isAddressInROMClass(ptr, _romClass))
+      return getRemoteROMString(len, basePtr, offsets);
+   char *data = utf8Data((J9UTF8*) ptr, len);
+   return data;
+   }
 
 template <typename map, typename key>
-void ClientSessionData::purgeCache(std::vector<ClassUnloadedData> *unloadedClasses, map m, key ClassUnloadedData::*k)
+void ClientSessionData::purgeCache(std::vector<ClassUnloadedData> *unloadedClasses, map& m, key ClassUnloadedData::*k)
    {
    ClassUnloadedData *data = unloadedClasses->data();
    std::vector<ClassUnloadedData>::iterator it = unloadedClasses->begin();

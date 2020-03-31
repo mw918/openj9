@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,7 +20,7 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
-#include "p/codegen/PPCJNILinkage.hpp"
+#include "codegen/PPCJNILinkage.hpp"
 
 #include "codegen/CodeGenerator.hpp"
 #include "codegen/CodeGeneratorUtils.hpp"
@@ -36,9 +36,9 @@
 #include "env/CompilerEnv.hpp"
 #include "env/VMJ9.h"
 #include "env/jittypes.h"
+#include "il/LabelSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
-#include "il/symbol/LabelSymbol.hpp"
 #include "infra/SimpleRegex.hpp"
 #include "p/codegen/CallSnippet.hpp"
 #include "p/codegen/GenerateInstructions.hpp"
@@ -48,8 +48,8 @@
 #include "p/codegen/PPCTableOfConstants.hpp"
 #include "p/codegen/StackCheckFailureSnippet.hpp"
 
-TR::PPCJNILinkage::PPCJNILinkage(TR::CodeGenerator *cg)
-   :TR::PPCPrivateLinkage(cg)
+J9::Power::JNILinkage::JNILinkage(TR::CodeGenerator *cg)
+   : J9::Power::PrivateLinkage(cg)
    {
    //Copy out SystemLinkage properties. Assumes no objects in TR::PPCLinkageProperties.
    TR::Linkage *sysLinkage = cg->getLinkage(TR_System);
@@ -65,35 +65,35 @@ TR::PPCJNILinkage::PPCJNILinkage(TR::CodeGenerator *cg)
 
    }
 
-int32_t TR::PPCJNILinkage::buildArgs(TR::Node *callNode,
+int32_t J9::Power::JNILinkage::buildArgs(TR::Node *callNode,
                              TR::RegisterDependencyConditions *dependencies,
                              const TR::PPCLinkageProperties &properties)
    {
-   TR_ASSERT(0, "Should call TR::PPCJNILinkage::buildJNIArgs instead.");
+   TR_ASSERT(0, "Should call J9::Power::JNILinkage::buildJNIArgs instead.");
    return 0;
    }
 
-TR::Register *TR::PPCJNILinkage::buildIndirectDispatch(TR::Node  *callNode)
+TR::Register *J9::Power::JNILinkage::buildIndirectDispatch(TR::Node  *callNode)
    {
-   TR_ASSERT(0, "Calling TR::PPCJNILinkage::buildIndirectDispatch does not make sense.");
+   TR_ASSERT(0, "Calling J9::Power::JNILinkage::buildIndirectDispatch does not make sense.");
    return NULL;
    }
 
-void         TR::PPCJNILinkage::buildVirtualDispatch(TR::Node   *callNode,
+void         J9::Power::JNILinkage::buildVirtualDispatch(TR::Node   *callNode,
                                                     TR::RegisterDependencyConditions *dependencies,
                                                     uint32_t                           sizeOfArguments)
    {
-   TR_ASSERT(0, "Calling TR::PPCJNILinkage::buildVirtualDispatch does not make sense.");
+   TR_ASSERT(0, "Calling J9::Power::JNILinkage::buildVirtualDispatch does not make sense.");
    }
 
-const TR::PPCLinkageProperties& TR::PPCJNILinkage::getProperties()
+const TR::PPCLinkageProperties& J9::Power::JNILinkage::getProperties()
    {
    return _properties;
    }
 
-TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
+TR::Register *J9::Power::JNILinkage::buildDirectDispatch(TR::Node *callNode)
    {
-   bool aix_style_linkage = (TR::Compiler->target.isAIX() || (TR::Compiler->target.is64Bit() && TR::Compiler->target.isLinux()));
+   bool aix_style_linkage = (comp()->target().isAIX() || (comp()->target().is64Bit() && comp()->target().isLinux()));
    TR::LabelSymbol           *returnLabel = generateLabelSymbol(cg());
    TR::SymbolReference      *callSymRef = callNode->getSymbolReference();
    TR::MethodSymbol         *callSymbol = callSymRef->getSymbol()->castToMethodSymbol();
@@ -110,14 +110,21 @@ TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
    bool wrapRefs;
    bool passReceiver;
    bool passThread;
-   uintptrj_t targetAddress;
+   uintptr_t targetAddress;
 
    bool crc32m1 = (callSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_update);
    bool crc32m2 = (callSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateBytes);
    bool crc32m3 = (callSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateByteBuffer);
 
    // TODO: How to handle discontiguous array?
+   // The specialCaseJNI shortcut will mangle register dependencies and use system/C dispatch.
+   // The addresses of the optimized helpers in the server process will not necessarily
+   // match the client-side addresses, so we can't take this shortcut in JITServer mode.
    bool specialCaseJNI = (crc32m1 || crc32m2 || crc32m3) && !comp()->requiresSpineChecks();
+
+#ifdef J9VM_OPT_JITSERVER
+   specialCaseJNI = specialCaseJNI && !comp()->isOutOfProcessCompilation();
+#endif
 
    bool isGPUHelper = callSymbol->isHelper() && (callSymRef->getReferenceNumber() == TR_estimateGPU ||
                                                  callSymRef->getReferenceNumber() == TR_getStateGPU ||
@@ -147,7 +154,7 @@ TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
       wrapRefs = !fej9->jniDoNotWrapObjects(resolvedMethod);
       passReceiver = !fej9->jniDoNotPassReceiver(resolvedMethod);
       passThread = !fej9->jniDoNotPassThread(resolvedMethod);
-      targetAddress = (uintptrj_t)resolvedMethod->startAddressForJNIMethod(comp());
+      targetAddress = (uintptr_t)resolvedMethod->startAddressForJNIMethod(comp());
       }
    else
       {
@@ -168,7 +175,7 @@ TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
       wrapRefs = false; //unused for this code path
       passReceiver = true;
       passThread = false;
-      targetAddress = (uintptrj_t)callSymbol->getMethodAddress();
+      targetAddress = (uintptr_t)callSymbol->getMethodAddress();
       }
 
    if (!isGPUHelper && (callSymbol->isPureFunction() || resolvedMethodSymbol->canDirectNativeCall() || specialCaseJNI))
@@ -193,7 +200,7 @@ TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
    TR::RealRegister *metaReg = cg()->getMethodMetaDataRegister();
    TR::Register        *gr2Reg, *gr30Reg, *gr31Reg;
    int32_t             argSize;
-   intptrj_t           aValue;
+   intptr_t           aValue;
 
    TR::RegisterDependencyConditions *deps = new (trHeapMemory()) TR::RegisterDependencyConditions(104,104, trMemory());
    const TR::PPCLinkageProperties& jniLinkageProperties = getProperties();
@@ -210,7 +217,7 @@ TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
       {
       // We need to kill all the non-volatiles so that they'll be in a stack frame in case
       // gc needs to find them.
-      if (TR::Compiler->target.is32Bit())
+      if (comp()->target().is32Bit())
          {
          // gr15 and gr16 are reserved in 64-bit, normal non-volatile in 32-bit
          TR::addDependency(deps, NULL, TR::RealRegister::gr15, TR_GPR, cg());
@@ -257,13 +264,13 @@ TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
       // No argument change is needed
       if (crc32m1)
          {
-         targetAddress = (uintptrj_t)crc32_oneByte;
+         targetAddress = (uintptr_t)crc32_oneByte;
          }
 
       // Argument changes are needed
       if (crc32m2 || crc32m3)
          {
-         targetAddress = (uintptrj_t)((TR::Compiler->target.cpu.id() >= TR_PPCp8 && TR::Compiler->target.cpu.getPPCSupportsVSX())?crc32_vpmsum:crc32_no_vpmsum);
+         targetAddress = (uintptr_t)((comp()->target().cpu.id() >= TR_PPCp8 && comp()->target().cpu.getPPCSupportsVSX())?crc32_vpmsum:crc32_no_vpmsum);
 
          // Assuming pre/postCondition have the same index, we use preCondition to map
          OMR::RegisterDependencyMap map(deps->getPreConditions()->getRegisterDependency(0), deps->getAddCursorForPre());
@@ -282,10 +289,10 @@ TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
 
          if (crc32m3)
             {
-            addrArg = map.getSourceWithTarget(TR::Compiler->target.is64Bit()?(TR::RealRegister::gr4):(TR::RealRegister::gr5));
-            posArg = map.getSourceWithTarget(TR::Compiler->target.is64Bit()?(TR::RealRegister::gr5):(TR::RealRegister::gr6));
-            lenArg = map.getSourceWithTarget(TR::Compiler->target.is64Bit()?(TR::RealRegister::gr6):(TR::RealRegister::gr7));
-            if (!TR::Compiler->target.is64Bit())
+            addrArg = map.getSourceWithTarget(comp()->target().is64Bit()?(TR::RealRegister::gr4):(TR::RealRegister::gr5));
+            posArg = map.getSourceWithTarget(comp()->target().is64Bit()?(TR::RealRegister::gr5):(TR::RealRegister::gr6));
+            lenArg = map.getSourceWithTarget(comp()->target().is64Bit()?(TR::RealRegister::gr6):(TR::RealRegister::gr7));
+            if (!comp()->target().is64Bit())
                wasteArg = map.getSourceWithTarget(TR::RealRegister::gr4);
             }
          generateTrg1Src2Instruction(cg(), TR::InstOpCode::add, callNode, addrArg, addrArg, posArg);
@@ -299,7 +306,7 @@ TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
          deps->getPreConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr6), posArg, TR::RealRegister::gr6, UsesDependentRegister);
          deps->getPostConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr6), posArg, TR::RealRegister::gr6, UsesDependentRegister);
 
-         if (crc32m3 && !TR::Compiler->target.is64Bit())
+         if (crc32m3 && !comp()->target().is64Bit())
             {
             deps->getPreConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr7), wasteArg, TR::RealRegister::gr7, UsesDependentRegister);
             deps->getPostConditions()->setDependencyInfo(map.getTargetIndex(TR::RealRegister::gr7), wasteArg, TR::RealRegister::gr7, UsesDependentRegister);
@@ -347,7 +354,7 @@ TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
             }
          break;
       case TR::lcall:
-         if (TR::Compiler->target.is64Bit())
+         if (comp()->target().is64Bit())
             {
             if (!gr3Reg)
                {
@@ -429,7 +436,7 @@ TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
       generateMemSrc1Instruction(cg(),TR::InstOpCode::Op_stu, callNode,  new (trHeapMemory()) TR::MemoryReference(stackPtr, -TR::Compiler->om.sizeofReferenceAddress(), TR::Compiler->om.sizeofReferenceAddress(), cg()),gr11Reg);
 
       // push the RAM method for the native
-      aValue = (uintptrj_t)resolvedMethod->resolvedMethodAddress();
+      aValue = (uintptr_t)resolvedMethod->resolvedMethodAddress();
       // use loadAddressConstantFixed - fixed instruction count 2 32-bit, or 5 64-bit
       // loadAddressRAM needs a resolved method symbol so the gpuHelper SumRef is passed in instead of
       // the callSymRef which does not have a resolved method symbol
@@ -482,7 +489,7 @@ TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
    cg()->getJNICallSites().push_front(new (trHeapMemory()) TR_Pair<TR_ResolvedMethod, TR::Instruction>(resolvedMethod, current->getNext())); // the first instruction generated by loadAddressC...
 
    if (aix_style_linkage &&
-      !(TR::Compiler->target.is64Bit() && TR::Compiler->target.isLinux() && TR::Compiler->target.cpu.isLittleEndian()))
+      !(comp()->target().is64Bit() && comp()->target().isLinux() && comp()->target().cpu.isLittleEndian()))
       {
       // get the target address
       generateTrg1MemInstruction(cg(),TR::InstOpCode::Op_load, callNode, gr0Reg, new (trHeapMemory()) TR::MemoryReference(gr12Reg, 0, TR::Compiler->om.sizeofReferenceAddress(), cg()));
@@ -587,7 +594,7 @@ TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
          simplifyANDRegImm(callNode, gr31Reg, gr30Reg, flagValue, cg());
          generateTrg1Src1ImmInstruction(cg(),TR::InstOpCode::Op_cmpi, callNode, cr0Reg, gr31Reg, 0);
          generateConditionalBranchInstruction(cg(), TR::InstOpCode::beq, callNode, refPoolRestartLabel, cr0Reg);
-         generateDepImmSymInstruction(cg(), TR::InstOpCode::bl, callNode, (uintptrj_t)collapseSymRef->getMethodAddress(), new (trHeapMemory()) TR::RegisterDependencyConditions(0,0, trMemory()), collapseSymRef, NULL);
+         generateDepImmSymInstruction(cg(), TR::InstOpCode::bl, callNode, (uintptr_t)collapseSymRef->getMethodAddress(), new (trHeapMemory()) TR::RegisterDependencyConditions(0,0, trMemory()), collapseSymRef, NULL);
          generateLabelInstruction(cg(), TR::InstOpCode::label, callNode, refPoolRestartLabel);
          }
 
@@ -623,7 +630,7 @@ TR::Register *TR::PPCJNILinkage::buildDirectDispatch(TR::Node *callNode)
    }
 
 // tempReg0 to tempReg2 are temporary registers
-void TR::PPCJNILinkage::releaseVMAccess(TR::Node* callNode, TR::RegisterDependencyConditions* deps, TR::RealRegister* metaReg, TR::Register* tempReg0, TR::Register* tempReg1, TR::Register* tempReg2)
+void J9::Power::JNILinkage::releaseVMAccess(TR::Node* callNode, TR::RegisterDependencyConditions* deps, TR::RealRegister* metaReg, TR::Register* tempReg0, TR::Register* tempReg1, TR::Register* tempReg2)
    {
    // Release vm access - use hardware registers because of the control flow
    TR::Instruction  *gcPoint;
@@ -636,7 +643,7 @@ void TR::PPCJNILinkage::releaseVMAccess(TR::Node* callNode, TR::RegisterDependen
    TR::addDependency(deps, gr28Reg, TR::RealRegister::gr28, TR_GPR, cg());
    TR::addDependency(deps, gr29Reg, TR::RealRegister::gr29, TR_GPR, cg());
 
-   intptrj_t aValue;
+   intptr_t aValue;
 
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
    aValue = fej9->constReleaseVMAccessOutOfLineMask();
@@ -670,7 +677,7 @@ void TR::PPCJNILinkage::releaseVMAccess(TR::Node* callNode, TR::RegisterDependen
    generateConditionalBranchInstruction(cg(), TR::InstOpCode::bne, callNode, longReleaseLabel, cr0Reg);
    generateMemSrc1Instruction(cg(),TR::InstOpCode::Op_stcx_r, callNode, new (trHeapMemory()) TR::MemoryReference(NULL, gr28Reg, TR::Compiler->om.sizeofReferenceAddress(), cg()), tempReg2);
 
-   if (TR::Compiler->target.cpu.id() >= TR_PPCgp)
+   if (comp()->target().cpu.id() >= TR_PPCgp)
       // use PPC AS branch hint
       generateConditionalBranchInstruction(cg(), TR::InstOpCode::bne, PPCOpProp_BranchUnlikely, callNode, loopHead, cr0Reg);
    else
@@ -685,7 +692,7 @@ void TR::PPCJNILinkage::releaseVMAccess(TR::Node* callNode, TR::RegisterDependen
    }
 
 // tempReg0 to tempReg2 are temporary registers
-void TR::PPCJNILinkage::acquireVMAccess(TR::Node* callNode, TR::RegisterDependencyConditions* deps, TR::RealRegister* metaReg, TR::Register* tempReg0, TR::Register* tempReg1, TR::Register* tempReg2)
+void J9::Power::JNILinkage::acquireVMAccess(TR::Node* callNode, TR::RegisterDependencyConditions* deps, TR::RealRegister* metaReg, TR::Register* tempReg0, TR::Register* tempReg1, TR::Register* tempReg2)
    {
    // Acquire VM Access
    TR::Instruction  *gcPoint;
@@ -714,7 +721,7 @@ void TR::PPCJNILinkage::acquireVMAccess(TR::Node* callNode, TR::RegisterDependen
    generateConditionalBranchInstruction(cg(), TR::InstOpCode::bne, callNode, longReacquireLabel, cr0Reg);
    generateMemSrc1Instruction(cg(),TR::InstOpCode::Op_stcx_r, callNode, new (trHeapMemory()) TR::MemoryReference(NULL, tempReg0, TR::Compiler->om.sizeofReferenceAddress(), cg()), tempReg1);
 
-   if (TR::Compiler->target.cpu.id() >= TR_PPCgp)
+   if (comp()->target().cpu.id() >= TR_PPCgp)
       // use PPC AS branch hint
       generateConditionalBranchInstruction(cg(), TR::InstOpCode::bne, PPCOpProp_BranchUnlikely, callNode, loopHead2, cr0Reg);
    else
@@ -730,7 +737,7 @@ void TR::PPCJNILinkage::acquireVMAccess(TR::Node* callNode, TR::RegisterDependen
    }
 
 #ifdef J9VM_INTERP_ATOMIC_FREE_JNI
-void TR::PPCJNILinkage::releaseVMAccessAtomicFree(TR::Node* callNode, TR::RegisterDependencyConditions* deps, TR::RealRegister* metaReg, TR::Register* cr0Reg, TR::Register* tempReg1, TR::Register* tempReg2)
+void J9::Power::JNILinkage::releaseVMAccessAtomicFree(TR::Node* callNode, TR::RegisterDependencyConditions* deps, TR::RealRegister* metaReg, TR::Register* cr0Reg, TR::Register* tempReg1, TR::Register* tempReg2)
    {
    TR_J9VMBase *fej9 = (TR_J9VMBase *)fe();
 
@@ -754,13 +761,13 @@ void TR::PPCJNILinkage::releaseVMAccessAtomicFree(TR::Node* callNode, TR::Regist
       cg()->addSnippet(new (trHeapMemory()) TR::PPCHelperCallSnippet(cg(), callNode, releaseVMAccessSnippetLabel, jitReleaseVMAccessSymRef));
       }
 
-   if (TR::Compiler->target.cpu.id() >= TR_PPCgp)
+   if (comp()->target().cpu.id() >= TR_PPCgp)
       generateConditionalBranchInstruction(cg(), TR::InstOpCode::bnel, PPCOpProp_BranchUnlikely, callNode, releaseVMAccessSnippetLabel, cr0Reg);
    else
       generateConditionalBranchInstruction(cg(), TR::InstOpCode::bnel, callNode, releaseVMAccessSnippetLabel, cr0Reg);
    }
 
-void TR::PPCJNILinkage::acquireVMAccessAtomicFree(TR::Node* callNode, TR::RegisterDependencyConditions* deps, TR::RealRegister* metaReg, TR::Register* cr0Reg, TR::Register* tempReg1, TR::Register* tempReg2)
+void J9::Power::JNILinkage::acquireVMAccessAtomicFree(TR::Node* callNode, TR::RegisterDependencyConditions* deps, TR::RealRegister* metaReg, TR::Register* cr0Reg, TR::Register* tempReg1, TR::Register* tempReg2)
    {
    TR_J9VMBase *fej9 = (TR_J9VMBase *)fe();
 
@@ -781,14 +788,14 @@ void TR::PPCJNILinkage::acquireVMAccessAtomicFree(TR::Node* callNode, TR::Regist
       cg()->addSnippet(new (trHeapMemory()) TR::PPCHelperCallSnippet(cg(), callNode, acquireVMAccessSnippetLabel, jitAcquireVMAccessSymRef));
       }
 
-   if (TR::Compiler->target.cpu.id() >= TR_PPCgp)
+   if (comp()->target().cpu.id() >= TR_PPCgp)
       generateConditionalBranchInstruction(cg(), TR::InstOpCode::bnel, PPCOpProp_BranchUnlikely, callNode, acquireVMAccessSnippetLabel, cr0Reg);
    else
       generateConditionalBranchInstruction(cg(), TR::InstOpCode::bnel, callNode, acquireVMAccessSnippetLabel, cr0Reg);
    }
 #endif /* J9VM_INTERP_ATOMIC_FREE_JNI */
 
-int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
+int32_t J9::Power::JNILinkage::buildJNIArgs(TR::Node *callNode,
                                        TR::RegisterDependencyConditions *dependencies,
                                        const TR::PPCLinkageProperties &properties,
                                        bool isFastJNI,
@@ -814,7 +821,7 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
 
    uint32_t firstArgumentChild = callNode->getFirstArgumentIndex();
 
-   bool aix_style_linkage = (TR::Compiler->target.isAIX() || (TR::Compiler->target.is64Bit() && TR::Compiler->target.isLinux()));
+   bool aix_style_linkage = (comp()->target().isAIX() || (comp()->target().is64Bit() && comp()->target().isLinux()));
 
    if (isFastJNI)  // Account for extra parameters (env and obj)
       {
@@ -862,7 +869,7 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
             numIntegerArgs++;
             break;
          case TR::Int64:
-            if (TR::Compiler->target.is64Bit())
+            if (comp()->target().is64Bit())
                {
                if (numIntegerArgs >= properties.getNumIntArgRegs())
                   memArgs++;
@@ -904,7 +911,7 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
          case TR::Double:
             if (aix_style_linkage)
                {
-               if (TR::Compiler->target.is64Bit())
+               if (comp()->target().is64Bit())
                   {
                   if (numIntegerArgs >= properties.getNumIntArgRegs())
                      memArgs++;
@@ -998,7 +1005,7 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
                // We can do this blindly in Java since there is no unsigned types
                // WCode will have to do something better!
                if (isFastJNI &&
-                   (TR::Compiler->target.isLinux() && TR::Compiler->target.is64Bit()) &&
+                   (comp()->target().isLinux() && comp()->target().is64Bit()) &&
                    childType != TR::Address)
                   generateTrg1Src1Instruction(cg(), TR::InstOpCode::extsw, callNode, argRegister, argRegister);
 
@@ -1022,7 +1029,7 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
                   dependencies->addPreCondition(argRegister, TR::RealRegister::gr3);
                   dependencies->addPostCondition(resultReg, TR::RealRegister::gr3);
                   }
-               else if (TR::Compiler->target.is32Bit() && numIntegerArgs == 1 && resType.isInt64())
+               else if (comp()->target().is32Bit() && numIntegerArgs == 1 && resType.isInt64())
                   {
                   TR::Register *resultReg = cg()->allocateRegister();
                   dependencies->addPreCondition(argRegister, TR::RealRegister::gr4);
@@ -1059,7 +1066,7 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
                {
                if (!cg()->canClobberNodesRegister(child, 0))
                   {
-                  if (TR::Compiler->target.is64Bit())
+                  if (comp()->target().is64Bit())
                      {
                      tempRegister = cg()->allocateRegister();
                      generateTrg1Src1Instruction(cg(), TR::InstOpCode::mr, callNode, tempRegister, argRegister);
@@ -1081,13 +1088,13 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
                      resultReg = cg()->allocateCollectedReferenceRegister();
                   else
                      resultReg = cg()->allocateRegister();
-                  if (TR::Compiler->target.is64Bit())
+                  if (comp()->target().is64Bit())
                      dependencies->addPreCondition(argRegister, TR::RealRegister::gr3);
                   else
                      dependencies->addPreCondition(argRegister->getRegisterPair()->getHighOrder(), TR::RealRegister::gr3);
                   dependencies->addPostCondition(resultReg, TR::RealRegister::gr3);
                   }
-               else if (TR::Compiler->target.is32Bit() && numIntegerArgs == 1 && resType.isInt64())
+               else if (comp()->target().is32Bit() && numIntegerArgs == 1 && resType.isInt64())
                   {
                   TR::Register *resultReg = cg()->allocateRegister();
                   dependencies->addPreCondition(argRegister, TR::RealRegister::gr4);
@@ -1095,12 +1102,12 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
                   }
                else
                   {
-                  if (TR::Compiler->target.is64Bit())
+                  if (comp()->target().is64Bit())
                      TR::addDependency(dependencies, argRegister, properties.getIntegerArgumentRegister(numIntegerArgs), TR_GPR, cg());
                   else
                      TR::addDependency(dependencies, argRegister->getRegisterPair()->getHighOrder(), properties.getIntegerArgumentRegister(numIntegerArgs), TR_GPR, cg());
                   }
-               if (TR::Compiler->target.is32Bit())
+               if (comp()->target().is32Bit())
                   {
                   if (numIntegerArgs < properties.getNumIntArgRegs()-1)
                      {
@@ -1129,7 +1136,7 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
                }
             else // numIntegerArgs >= properties.getNumIntArgRegs()
                {
-               if (TR::Compiler->target.is64Bit())
+               if (comp()->target().is64Bit())
                   {
                   mref = getOutgoingArgumentMemRef(argSize, argRegister, TR::InstOpCode::std, pushToMemory[argIndex++], TR::Compiler->om.sizeofReferenceAddress(), properties);
                   }
@@ -1204,7 +1211,7 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
                   }
                else // numIntegerArgs >= properties.getNumIntArgRegs()
                   {
-                  if (TR::Compiler->target.is64Bit() && TR::Compiler->target.isLinux())
+                  if (comp()->target().is64Bit() && comp()->target().isLinux())
                      {
                      mref = getOutgoingArgumentMemRef(argSize+4, argReg, TR::InstOpCode::stfs, pushToMemory[argIndex++], 4, properties);
                      }
@@ -1278,7 +1285,7 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
                   else
                      TR::addDependency(dependencies, NULL, properties.getIntegerArgumentRegister(numIntegerArgs), TR_GPR, cg());
 
-                  if (TR::Compiler->target.is32Bit())
+                  if (comp()->target().is32Bit())
                      {
                      if ((numIntegerArgs+1) < properties.getNumIntArgRegs())
                         TR::addDependency(dependencies, NULL, properties.getIntegerArgumentRegister(numIntegerArgs+1), TR_GPR, cg());
@@ -1293,7 +1300,7 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
                   mref = getOutgoingArgumentMemRef(argSize, argReg, TR::InstOpCode::stfd, pushToMemory[argIndex++], 8, properties);
                   }
 
-               numIntegerArgs += TR::Compiler->target.is64Bit()?1:2;
+               numIntegerArgs += comp()->target().is64Bit()?1:2;
                }
             numFloatArgs++;
             if (aix_style_linkage)
@@ -1345,19 +1352,12 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
 
    int32_t floatRegsUsed = (numFloatArgs>properties.getNumFloatArgRegs())?properties.getNumFloatArgRegs():numFloatArgs;
 
-   bool isHelper = false;
-   if (callNode->getSymbolReference()->getReferenceNumber() == TR_PPCVectorLogDouble)
-      {
-      isHelper = true;
-      }
-
    if (liveVMX || liveVSXScalar || liveVSXVector)
       {
       for (i=(TR::RealRegister::RegNum)((uint32_t)TR::RealRegister::LastFPR+1); i<=TR::RealRegister::LastVSR; i++)
          {
          // isFastJNI implying: no call back into Java, such that preserved is preserved
-         if (!properties.getPreserved((TR::RealRegister::RegNum)i) ||
-             (!isFastJNI  && !isHelper))
+         if (!properties.getPreserved((TR::RealRegister::RegNum)i) || !isFastJNI)
             {
             TR::addDependency(dependencies, NULL, (TR::RealRegister::RegNum)i, TR_VSX_SCALAR, cg());
             }
@@ -1389,7 +1389,7 @@ int32_t TR::PPCJNILinkage::buildJNIArgs(TR::Node *callNode,
    return argSize;
    }
 
-TR::Register *TR::PPCJNILinkage::pushJNIReferenceArg(TR::Node *child)
+TR::Register *J9::Power::JNILinkage::pushJNIReferenceArg(TR::Node *child)
    {
    TR::Register *pushRegister;
    bool         checkSplit = true;

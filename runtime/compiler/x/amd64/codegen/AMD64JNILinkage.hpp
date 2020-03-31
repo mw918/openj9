@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -38,14 +38,21 @@ namespace TR { class RegisterDependencyConditions; }
 
 #define IMCOMPLETELINKAGE  "This class is only used to generate call-out sequence but no call-in sequence, so it is not used as a complete linkage."
 
-namespace TR {
+namespace J9
+{
 
-class AMD64JNILinkage : public TR::AMD64PrivateLinkage
+namespace X86
+{
+
+namespace AMD64
+{
+
+class JNILinkage : public PrivateLinkage
    {
    public:
 
-   AMD64JNILinkage(TR::AMD64SystemLinkage *systemLinkage, TR::CodeGenerator *cg) :
-      TR::AMD64PrivateLinkage(cg),
+   JNILinkage(TR::AMD64SystemLinkage *systemLinkage, TR::CodeGenerator *cg) :
+      PrivateLinkage(cg),
          _systemLinkage(systemLinkage) {}
 
    int32_t computeMemoryArgSize(TR::Node *callNode, int32_t first, int32_t last, bool passThread = true);
@@ -61,7 +68,7 @@ class AMD64JNILinkage : public TR::AMD64PrivateLinkage
    void buildJNIMergeLabelDependencies(TR::Node *callNode, bool killNonVolatileGPRs = true);
    void buildOutgoingJNIArgsAndDependencies(TR::Node *callNode, bool passThread = true, bool passReceiver = true, bool killNonVolatileGPRs = true);
    TR::Register *processJNIReferenceArg(TR::Node *child);
-   TR::Instruction *generateMethodDispatch(TR::Node *callNode, bool isJNIGCPoint = true, uintptrj_t targetAddress = 0);
+   TR::Instruction *generateMethodDispatch(TR::Node *callNode, bool isJNIGCPoint = true, uintptr_t targetAddress = 0);
    void releaseVMAccess(TR::Node *callNode);
    void acquireVMAccess(TR::Node *callNode);
 #ifdef J9VM_INTERP_ATOMIC_FREE_JNI
@@ -96,6 +103,10 @@ class AMD64JNILinkage : public TR::AMD64PrivateLinkage
       } _JNIDispatchInfo;
 
    };
+
+}
+
+}
 
 }
 

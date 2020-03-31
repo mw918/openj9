@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2018 IBM Corp. and others
+# Copyright (c) 2017, 2019 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,6 +26,7 @@ add_tracegen(j9bcverify.tdf)
 
 add_library(j9bcv STATIC
 	bcverify.c
+	classrelationships.c
 	clconstraints.c
 	rtverify.c
 	staticverify.c
@@ -35,6 +36,7 @@ add_library(j9bcv STATIC
 	${CMAKE_CURRENT_BINARY_DIR}/ut_j9bcverify.c
 )
 target_include_directories(j9bcv PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_compile_definitions(j9dyn PRIVATE J9_INTERNAL_TO_VM)
 
 target_link_libraries(j9bcv
 	PRIVATE

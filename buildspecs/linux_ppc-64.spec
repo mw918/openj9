@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Copyright (c) 2006, 2019 IBM Corp. and others
+Copyright (c) 2006, 2020 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -40,7 +40,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<property name="graph_commands.chroot" value=""/>
 		<property name="graph_commands.unix.remote_host" value=""/>
 		<property name="graph_datamines" value="commands.unix.datamine,site-ottawa.datamine,use.local.datamine"/>
-		<property name="graph_enable_gcc7_cmd" value="source {$buildinfo.fsroot.unixBin$}/platform/linux_ppc-64/set_gcc7_env &amp;&amp;"/>
+		<property name="graph_enable_gcc7_cmd" value="source {$buildinfo.fsroot.unixBin$}/platform/linux_ppc-64/set_gcc7.5_env &amp;&amp;"/>
 		<property name="graph_label.classlib" value="150"/>
 		<property name="graph_label.java5" value="j9vmxp6424"/>
 		<property name="graph_label.java6" value="pxp6460"/>
@@ -57,8 +57,8 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<property name="graph_req.arch1" value="arch:64bit"/>
 		<property name="graph_req.aux0" value=""/>
 		<property name="graph_req.aux1" value=""/>
-		<property name="graph_req.build" value="build:java8sr5fp27+"/>
-		<property name="graph_req.build2" value="build:java8sr5fp27+"/>
+		<property name="graph_req.build" value="build:java8sr6fp5+"/>
+		<property name="graph_req.build2" value="build:java8sr6fp5+"/>
 		<property name="graph_req.machine" value="{$machine_mapping.ppc64$}"/>
 		<property name="graph_req.machine.test" value="{$spec.property.graph_req.machine$}"/>
 		<property name="graph_req.os" value="{$machine_mapping.linux$}"/>
@@ -138,6 +138,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="gc_debugAsserts" value="true"/>
 		<flag id="gc_idleHeapManager" value="true"/>
 		<flag id="gc_inlinedAllocFields" value="true"/>
+		<flag id="gc_enableDoubleMap" value="true"/>
 		<flag id="gc_minimumObjectSize" value="true"/>
 		<flag id="gc_subpoolsAlias" value="true"/>
 		<flag id="graph_cmdLineTester" value="true"/>
@@ -223,8 +224,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="opt_debugJsr45Support" value="true"/>
 		<flag id="opt_deprecatedMethods" value="true"/>
 		<flag id="opt_dynamicLoadSupport" value="true"/>
-		<flag id="opt_icbuilderSupport" value="true"/>
-		<flag id="opt_infoServer" value="true"/>
 		<flag id="opt_invariantInterning" value="true"/>
 		<flag id="opt_jvmti" value="true"/>
 		<flag id="opt_jxeLoadSupport" value="true"/>

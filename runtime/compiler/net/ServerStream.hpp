@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,17 +23,14 @@
 #ifndef SERVER_STREAM_H
 #define SERVER_STREAM_H
 
-#include <google/protobuf/io/zero_copy_stream_impl.h>
-#include "net/ProtobufTypeConvert.hpp"
+#include "net/RawTypeConvert.hpp"
 #include "net/CommunicationStream.hpp"
 #include "env/VerboseLog.hpp"
 #include "control/Options.hpp"
-
-#if defined(JITSERVER_ENABLE_SSL)
 #include <openssl/ssl.h>
+
 class SSLOutputStream;
 class SSLInputStream;
-#endif
 
 namespace JITServer
 {
@@ -73,11 +70,7 @@ public:
       @param ssl  BIO for the SSL enabled stream
       @param timeout timeout value (ms) to be set for connfd
    */
-#if defined(JITSERVER_ENABLE_SSL)
    explicit ServerStream(int connfd, BIO *ssl);
-#else
-   explicit ServerStream(int connfd);
-#endif
    virtual ~ServerStream()
       {
       _numConnectionsClosed++;
@@ -89,12 +82,12 @@ public:
       @param [in] type Message type to be sent
       @param [in] args Variable number of additional paramaters to be sent
    */
-   template <typename ...T>
-   void write(MessageType type, T... args)
+   template <typename ...Args>
+   void write(MessageType type, Args... args)
       {
-      setArgs<T...>(_sMsg.mutable_data(), args...);
-      _sMsg.set_type(type);
-      writeBlocking(_sMsg);
+      _sMsg.setType(type);
+      setArgsRaw<Args...>(_sMsg, args...);
+      writeMessage(_sMsg);
       }
 
    /**
@@ -112,7 +105,7 @@ public:
    template <typename ...T>
    std::tuple<T...> read()
       {
-      readBlocking(_cMsg);
+      readMessage(_cMsg);
       switch (_cMsg.type())
          {
          case MessageType::compilationInterrupted:
@@ -130,7 +123,7 @@ public:
                throw StreamMessageTypeMismatch(_sMsg.type(), _cMsg.type());
             }
          }
-      return getArgs<T...>(_cMsg.mutable_data());
+      return getArgsRaw<T...>(_cMsg);
       }
 
    /**
@@ -150,10 +143,10 @@ public:
    template <typename... T>
    std::tuple<T...> readCompileRequest()
       {
-      readBlocking(_cMsg);
-      if (_cMsg.version() != 0 && _cMsg.version() != getJITServerVersion())
+      readMessage(_cMsg);
+      if (_cMsg.fullVersion() != 0 && _cMsg.fullVersion() != getJITServerFullVersion())
          {
-         throw StreamVersionIncompatible(getJITServerVersion(), _cMsg.version());
+         throw StreamVersionIncompatible(getJITServerFullVersion(), _cMsg.fullVersion());
          }
 
       switch (_cMsg.type())
@@ -169,7 +162,7 @@ public:
             }
          case MessageType::compilationRequest:
             {
-            return getArgs<T...>(_cMsg.mutable_data());
+            return getArgsRaw<T...>(_cMsg);
             }
          default:
             {
@@ -184,7 +177,7 @@ public:
    template <typename... T>
    std::tuple<T...> getRecvData()
       {
-      return getArgs<T...>(_cMsg.mutable_data());
+      return getArgsRaw<T...>(_cMsg);
       }
 
    /**

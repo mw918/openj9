@@ -47,7 +47,7 @@
  * Function which builds a cache filename from a cache name, version data and generation.
  * A cache file name is currently a composite of the cache name with a version prefix and generation postfix
  * Note that the function returns different results for Windows and Unix.
- * 
+ *
  * @param [in] portlib  A portLibrary
  * @param [out] buffer  The buffer to write the filename into
  * @param [in] bufferSize  The size of the buffer in bytes
@@ -64,9 +64,9 @@ SH_OSCache::getCacheVersionAndGen(J9PortLibrary* portlib, J9JavaVM* vm, char* bu
 	char genString[7];
 	char versionStr[J9SH_VERSION_STRING_LEN+3];
 	UDATA versionStrLen = 0;
-	
+
 	PORT_ACCESS_FROM_PORT(portlib);
-	
+
 	Trc_SHR_OSC_getCacheVersionAndGen_Entry_V1(cacheName, generation, layer);
 
 	memset(versionStr, 0, J9SH_VERSION_STRING_LEN+1);
@@ -75,20 +75,20 @@ SH_OSCache::getCacheVersionAndGen(J9PortLibrary* portlib, J9JavaVM* vm, char* bu
 	} else {
 		U_64 curVMVersion = 0;
 		U_64 oldVMVersion = 0;
-		
-		/* CMVC 163957: 
+
+		/* CMVC 163957:
 		 * There is overlap Java 6 cache file generations and Java 7. For example:
 		 * - Java 6 SR8: C240D2A64P_java6sr8_G08
 		 * - Java 7 CVS HEAD: C260M3A64P_cvshead_G08
-		 * 
+		 *
 		 * If we use any thing older than Major=2, and Minor=60 we must use J9SH_GET_VERSION_G07ANDLOWER_STRING to get the file name.
-		 * 
+		 *
 		 * When called b/c of '-Xshareclasses:listAllCaches' if the wrong cache name is used the cache will fail to be started, and will
 		 * not be listed.
 		 */
-		 oldVMVersion = SH_OSCache::getCacheVersionToU64(2, 60);
-		 curVMVersion = SH_OSCache::getCacheVersionToU64(versionData->esVersionMajor, versionData->esVersionMinor);
-		 
+		oldVMVersion = SH_OSCache::getCacheVersionToU64(2, 60);
+		curVMVersion = SH_OSCache::getCacheVersionToU64(versionData->esVersionMajor, versionData->esVersionMinor);
+
 		if ( curVMVersion >= oldVMVersion) {
 			if (generation <= J9SH_GENERATION_29) {
 				J9SH_GET_VERSION_G07TO29_STRING(PORTLIB, versionStr, J9SH_VERSION(versionData->esVersionMajor, versionData->esVersionMinor), versionData->modlevel, versionData->addrmode);
@@ -97,7 +97,7 @@ SH_OSCache::getCacheVersionAndGen(J9PortLibrary* portlib, J9JavaVM* vm, char* bu
 			} else {
 				J9SH_GET_VERSION_STRING(PORTLIB, versionStr, J9SH_VERSION(versionData->esVersionMajor, versionData->esVersionMinor), versionData->modlevel, versionData->feature, versionData->addrmode);
 			}
-		} else {	
+		} else {
 			J9SH_GET_VERSION_G07ANDLOWER_STRING(PORTLIB, versionStr, J9SH_VERSION(versionData->esVersionMajor, versionData->esVersionMinor), versionData->modlevel, versionData->addrmode);
 		}
 	}
@@ -129,7 +129,7 @@ SH_OSCache::getCacheVersionAndGen(J9PortLibrary* portlib, J9JavaVM* vm, char* bu
 		j9str_printf(PORTLIB, buffer, bufferSize, "%s%c%s%c%s", versionStr, J9SH_PREFIX_SEPARATOR_CHAR, cacheName, J9SH_PREFIX_SEPARATOR_CHAR, genString);
 	} else {
 		const char* identifier = isMemoryType ? J9SH_MEMORY_ID : J9SH_SEMAPHORE_ID;
-		
+
 		j9str_printf(PORTLIB, buffer, bufferSize, "%s%s%s%c%s", versionStr, identifier, cacheName, J9SH_PREFIX_SEPARATOR_CHAR, genString);
 	}
 #endif
@@ -138,12 +138,12 @@ SH_OSCache::getCacheVersionAndGen(J9PortLibrary* portlib, J9JavaVM* vm, char* bu
 
 /**
  * Extract the cache name from a filename of the format created by getCacheVersionAndGen
- * 
+ *
  * @param [out] buffer  Buffer to extract the cache name into
  * @param [in] bufferSize  The size of the buffer in bytes
  * @param [in] versionLen  Length of the version prefix (is variable for different types of cache)
  * @param [in] cacheNameWithVGen  The filename to extract the name from
- * 
+ *
  * @return 0 on success or -1 for failure
  */
 IDATA
@@ -152,7 +152,7 @@ SH_OSCache::removeCacheVersionAndGen(char* buffer, UDATA bufferSize, UDATA versi
 	char* nameStart;
 	UDATA lengthMinusGenAndLayer = 0;
 	UDATA generation = getGenerationFromName(cacheNameWithVGen);
-	
+
 	Trc_SHR_OSC_removeCacheVersionAndGen_Entry(versionLen, cacheNameWithVGen);
 
 	/*
@@ -185,15 +185,15 @@ SH_OSCache::removeCacheVersionAndGen(char* buffer, UDATA bufferSize, UDATA versi
 
 /**
  * Determine the directory to use for the cache file or control file(s)
- * 
+ *
  * @param [in] vm  A J9JavaVM
  * @param [in] ctrlDirName  The control dir name
  * @param [out] buffer  The buffer to write the result into
  * @param [in] bufferSize  The size of the buffer in bytes
  * @param [in] cacheType  The Type of cache
- * @param [in] allowVerbose Whether to allow verbose message.
+ * @param [in] allowVerbose  Whether to allow verbose message.
  *
- * @return 0 on success or -1 for failure  
+ * @return 0 on success or -1 for failure
  */
 IDATA
 SH_OSCache::getCacheDir(J9JavaVM* vm, const char* ctrlDirName, char* buffer, UDATA bufferSize, U_32 cacheType, bool allowVerbose)
@@ -264,9 +264,9 @@ SH_OSCache::getCacheDir(J9JavaVM* vm, const char* ctrlDirName, char* buffer, UDA
  * Create the directory to use for the cache file or control file(s)
  *
  * @param [in] portLibrary  A portLibrary
- * @param[in] cacheDirName The name of the cache directory
- * @param[in] cleanMemorySegments, set TRUE to call cleanSharedMemorySegments. It will clean sysv memory segments.
- * 				It should be set to TRUE if the ctrlDirName is NULL.
+ * @param[in] cacheDirName  The name of the cache directory
+ * @param[in] cleanMemorySegments  set TRUE to call cleanSharedMemorySegments. It will clean sysv memory segments.
+ *              It should be set to TRUE if the ctrlDirName is NULL.
  *
  * Returns -1 for error, >=0 for success
  */
@@ -288,38 +288,38 @@ IDATA
 SH_OSCache::getCachePathName(J9PortLibrary* portLibrary, const char* cacheDirName, char* buffer, UDATA bufferSize, const char* cacheNameWithVGen)
 {
 	PORT_ACCESS_FROM_PORT(portLibrary);
-	
+
 	Trc_SHR_OSC_getCachePathName_Entry(cacheNameWithVGen);
-	
+
 	j9str_printf(PORTLIB, buffer, bufferSize, "%s%s", cacheDirName, cacheNameWithVGen);
-	
+
 	Trc_SHR_OSC_getCachePathName_Exit();
 	return 0;
 }
 
 /**
  * Stat to see if a named cache exists
- *  
+ *
  * @param [in] portLibrary  A portLibrary
  * @param [in] cacheNameWithVGen  The cache filename
  * @param [in] displayNotFoundMsg  If true, message is displayed if the cache is not found
- * 
- * @return 1 if the cache exists and 0 otherwise 
+ *
+ * @return 1 if the cache exists and 0 otherwise
  */
 UDATA
 SH_OSCache::statCache(J9PortLibrary* portLibrary, const char* cacheDirName, const char* cacheNameWithVGen, bool displayNotFoundMsg)
 {
 	PORT_ACCESS_FROM_PORT(portLibrary);
 	char fullPath[J9SH_MAXPATH];
-	
+
 	Trc_SHR_OSC_statCache_Entry(cacheNameWithVGen);
-	
+
 	j9str_printf(PORTLIB, fullPath, J9SH_MAXPATH, "%s%s", cacheDirName, cacheNameWithVGen);
 	if (j9file_attr(fullPath) == EsIsFile) {
 		Trc_SHR_OSC_statCache_cacheFound();
 		return 1;
 	}
-	
+
 	if (displayNotFoundMsg) {
 		j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_SHRC_OSCACHE_NOT_EXIST);
 	}
@@ -333,7 +333,7 @@ SH_OSCache::getGenerationFromName(const char* cacheNameWithVGen)
 {
 	char* cursor = (char*)cacheNameWithVGen;
 	UDATA genValue;
-	
+
 	if ((cursor = strrchr(cursor, J9SH_PREFIX_SEPARATOR_CHAR)) == NULL) {
 		return 0;
 	}
@@ -351,7 +351,9 @@ SH_OSCache::commonStartup(J9JavaVM* vm, const char* ctrlDirName, UDATA cacheDirP
 {
 	PORT_ACCESS_FROM_PORT(_portLibrary);
 
-	UDATA cacheNameLen=0, cachePathNameLen=0, versionStrLen=0;
+	UDATA cacheNameLen = 0;
+	UDATA cachePathNameLen = 0;
+	UDATA versionStrLen = 0;
 	char fullPathName[J9SH_MAXPATH];
 
 	Trc_SHR_OSC_commonStartup_Entry();
@@ -397,7 +399,7 @@ SH_OSCache::commonStartup(J9JavaVM* vm, const char* ctrlDirName, UDATA cacheDirP
 	} else {
 		versionStrLen = J9SH_VERSION_STRING_LEN;
 	}
-	
+
 	if(J9_ARE_ANY_BITS_SET(_createFlags, J9SH_OSCACHE_CREATE | J9SH_OSCACHE_OPEXIST_DESTROY | J9SH_OSCACHE_OPEXIST_STATS | J9SH_OSCACHE_OPEXIST_DO_NOT_CREATE)) {
 		/* okay, one of the flags are set */
 	} else {
@@ -428,16 +430,13 @@ SH_OSCache::commonStartup(J9JavaVM* vm, const char* ctrlDirName, UDATA cacheDirP
 	 */
 	Trc_SHR_Assert_True(_cacheNameWithVGen[OMR_MIN(cacheNameLen, CACHE_ROOT_MAXLEN) - 1] == '\0');
 	_cacheName = _cacheNameWithVGen + strlen(_cacheNameWithVGen) + 1;
-	strncpy(_cacheName, cacheName, strlen(cacheName));
+	memcpy(_cacheName, cacheName, strlen(cacheName) + 1);
 	setEnableVerbose(PORTLIB, vm, versionData, _cacheNameWithVGen);
 
 	if (getCachePathName(PORTLIB, _cacheDirName, fullPathName, J9SH_MAXPATH, _cacheNameWithVGen) == 0) {
 		cachePathNameLen = strlen(fullPathName);
 		if ((_cachePathName = (char*)j9mem_allocate_memory(cachePathNameLen + 1, J9MEM_CATEGORY_CLASSES))) {
 			strcpy(_cachePathName, fullPathName);
-			if (NULL == getCacheUniqueID(vm->internalVMFunctions->currentVMThread(vm))) {
-				return -1;
-			}
 		} else {
 			Trc_SHR_OSC_commonStartup_nomem_cachePathName();
 			OSC_ERR_TRACE(J9NLS_SHRC_OSCACHE_ALLOC_FAILED);
@@ -446,9 +445,9 @@ SH_OSCache::commonStartup(J9JavaVM* vm, const char* ctrlDirName, UDATA cacheDirP
 	}
 
 	_doCheckBuildID = ((openMode & J9OSCACHE_OPEN_MODE_CHECKBUILDID) != 0);
-		
+
 	Trc_SHR_OSC_commonStartup_copied_cachePathName(_cachePathName, cachePathNameLen);
-	
+
 	Trc_SHR_OSC_commonStartup_Exit();
 	return 0;
 }
@@ -474,7 +473,7 @@ SH_OSCache::commonInit(J9PortLibrary* portLibrary, UDATA generation, I_8 layer)
 	_cacheDirName = NULL;
 	_verboseFlags = 0;
 	_createFlags = 0;
-	_config = NULL;	
+	_config = NULL;
 	_openMode = 0;
 	_dataStart = NULL;
 	_dataLength = 0;
@@ -491,7 +490,7 @@ void
 SH_OSCache::commonCleanup()
 {
 	PORT_ACCESS_FROM_PORT(_portLibrary);
-	
+
 	Trc_SHR_OSC_commonCleanup_Entry();
 
 	if (_cacheNameWithVGen) {
@@ -509,14 +508,14 @@ SH_OSCache::commonCleanup()
 
 	/* If the cache is destroyed and then restarted, we still need portLibrary, versionData and generation */
 	commonInit(_portLibrary, _activeGeneration, _layer);
-	
+
 	Trc_SHR_OSC_commonCleanup_Exit();
 }
 
 /**
  * Static method to create a new OSCache instance
  *
- * @param [in] portLib The portlib
+ * @param [in] portLib  The portlib
  * @param [in] memForConstructor  Pointer to the memory to build the OSCache instance into
  * @param [in] cacheName  Name of the cache
  * @param [in] generation  Generation of the cache
@@ -524,7 +523,7 @@ SH_OSCache::commonCleanup()
  * @param [in] layer  The layer number of the cache
  *
  * @return A pointer to the new OSCache object (which will be the same as the memForConstructor parameter)
- * 			It never returns NULL.
+ *          It never returns NULL.
  */
 SH_OSCache*
 SH_OSCache::newInstance(J9PortLibrary* portlib, SH_OSCache* memForConstructor, const char* cacheName, UDATA generation, J9PortShcVersion* versionData, I_8 layer)
@@ -532,9 +531,9 @@ SH_OSCache::newInstance(J9PortLibrary* portlib, SH_OSCache* memForConstructor, c
 	SH_OSCache* newOSC = (SH_OSCache*)memForConstructor;
 
 	PORT_ACCESS_FROM_PORT(portlib);
-	
+
 	Trc_SHR_OSC_newInstance_Entry_V1(memForConstructor, cacheName, versionData->cacheType, layer);
-	
+
 	switch(versionData->cacheType) {
 	case J9PORT_SHR_CACHE_TYPE_PERSISTENT :
 		Trc_SHR_OSC_newInstance_creatingMmap(newOSC);
@@ -543,6 +542,8 @@ SH_OSCache::newInstance(J9PortLibrary* portlib, SH_OSCache* memForConstructor, c
 	case J9PORT_SHR_CACHE_TYPE_NONPERSISTENT :
 		Trc_SHR_OSC_newInstance_creatingSysv(newOSC);
 		new(newOSC) SH_OSCachesysv();
+		break;
+	case J9PORT_SHR_CACHE_TYPE_SNAPSHOT:
 		break;
 #if defined(J9SHR_CACHELET_SUPPORT)
 	case J9PORT_SHR_CACHE_TYPE_VMEM :
@@ -553,12 +554,12 @@ SH_OSCache::newInstance(J9PortLibrary* portlib, SH_OSCache* memForConstructor, c
 	}
 	Trc_SHR_OSC_newInstance_initializingNewObject();
 	newOSC->initialize(PORTLIB, ((char*)memForConstructor + SH_OSCache::getRequiredConstrBytes()), generation, layer);
-	
+
 	Trc_SHR_OSC_newInstance_Exit(newOSC);
 	return newOSC;
 }
 
-/** 
+/**
  * Static method to get the number of bytes required for an OSCache object
  *
  * @return The number of bytes required for an OSCache object
@@ -600,7 +601,7 @@ SH_OSCache::setEnableVerbose(J9PortLibrary* portLib, J9JavaVM* vm, J9PortShcVers
 
 /**
  * Return a list of all the caches/snapshots that can be found in the current cache directory
- * It is the responsibility of the caller to free the pool returned by this function 
+ * It is the responsibility of the caller to free the pool returned by this function
  * The function returns a semi-ordered pool with the compatible caches/snapshots first and incompatible ones last
  *
  * @param[in] vm  The Java VM
@@ -608,15 +609,14 @@ SH_OSCache::setEnableVerbose(J9PortLibrary* portLib, J9JavaVM* vm, J9PortShcVers
  * @param[in] groupPerm  Group permissions to open the cache directory
  * @param[in] localVerboseFlags  Flags indicating the level of verbose output in use
  * @param[in] j2seVersion  The j2se version that the VM is running
- * @param[in] includeOldGenerations  If true, include caches of older generations  
+ * @param[in] includeOldGenerations  If true, include caches of older generations
  * @param[in] ignoreCompatible  If true, only gets cache/snapshot statistics of incompatible caches
  * @param [in] reason Indicates the reason for getting cache/snapshot stats. Refer sharedconsts.h for valid values.
  * @param [in] isCache If true, get cache stats. If false, get snapshot stats.
- * 
- * @return a J9Pool that contains a semi-ordered list of caches/snapshots, NULL if no caches/snapshots are found
  *
+ * @return a J9Pool that contains a semi-ordered list of caches/snapshots, NULL if no caches/snapshots are found
  */
-J9Pool* 
+J9Pool*
 SH_OSCache::getAllCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, UDATA groupPerm, UDATA localVerboseFlags, UDATA j2seVersion, bool includeOldGenerations, bool ignoreCompatible, UDATA reason, bool isCache)
 {
 	J9PortLibrary* portlib = vm->portLibrary;
@@ -624,9 +624,13 @@ SH_OSCache::getAllCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, UDATA g
 	UDATA snapshotFindHandle = (UDATA)-1;
 	UDATA shmemFindHandle = (UDATA)-1;
 	UDATA mmapFindHandle = (UDATA)-1;
-	char snapshotNameWithVGen[EsMaxPath];	/* Essential that this is EsMaxPath otherwise j9file_findX will overflow */
-	char shmemNameWithVGen[EsMaxPath];		/* Essential that this is EsMaxPath otherwise j9file_findX will overflow */
-	char mmapNameWithVGen[EsMaxPath];		/* Essential that this is EsMaxPath otherwise j9file_findX will overflow */
+	/*
+	 * It is essential that the length of these three arrays
+	 * is EsMaxPath otherwise j9file_findX will overflow.
+	 */
+	char snapshotNameWithVGen[EsMaxPath];
+	char shmemNameWithVGen[EsMaxPath];
+	char mmapNameWithVGen[EsMaxPath];
 	char persistentCacheDir[J9SH_MAXPATH];
 	char nonpersistentCacheDir[J9SH_MAXPATH];
 	char* nameWithVGen = NULL;
@@ -640,6 +644,8 @@ SH_OSCache::getAllCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, UDATA g
 	bool doneSnapshot = true;
 	bool doneShmem = false;
 	bool donePerst = false;
+	bool outOfMem = false;
+	J9Pool* lowerLayerList = NULL;
 	J9Pool* rc = NULL;
 
 	Trc_SHR_OSC_getAllCacheStatistics_Entry();
@@ -653,8 +659,8 @@ SH_OSCache::getAllCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, UDATA g
 		getShmDirVal = getCacheDir(vm, ctrlDirName, nonpersistentCacheDir, J9SH_MAXPATH, J9PORT_SHR_CACHE_TYPE_SNAPSHOT);
 		if (-1 != getShmDirVal) {
 			snapshotFindHandle = SH_OSCacheFile::findfirst(PORTLIB,
-								    nonpersistentCacheDir,
-								    snapshotNameWithVGen, J9PORT_SHR_CACHE_TYPE_SNAPSHOT);
+									nonpersistentCacheDir,
+									snapshotNameWithVGen, J9PORT_SHR_CACHE_TYPE_SNAPSHOT);
 			if ((UDATA)-1 == snapshotFindHandle) {
 				doneSnapshot = true;
 			} else {
@@ -672,8 +678,8 @@ SH_OSCache::getAllCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, UDATA g
 										J9SH_MAXPATH,
 										J9PORT_SHR_CACHE_TYPE_NONPERSISTENT)) != -1) {
 			shmemFindHandle = SH_OSCachesysv::findfirst(PORTLIB,
-								    nonpersistentCacheDir,
-								    shmemNameWithVGen);
+									nonpersistentCacheDir,
+									shmemNameWithVGen);
 			if (shmemFindHandle == (UDATA)-1) {
 				doneShmem = true;
 			} else {
@@ -714,7 +720,7 @@ SH_OSCache::getAllCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, UDATA g
 	}
 
 	if (!ignoreCompatible) {
-		cacheList = pool_new(sizeof(SH_OSCache_Info),  0, 0, 0, J9_GET_CALLSITE(), J9MEM_CATEGORY_CLASSES, POOL_FOR_PORT(PORTLIB));
+		cacheList = pool_new(sizeof(SH_OSCache_Info), 0, 0, 0, J9_GET_CALLSITE(), J9MEM_CATEGORY_CLASSES, POOL_FOR_PORT(PORTLIB));
 		if (cacheList == NULL) {
 			Trc_SHR_OSC_getAllCacheStatistics_Exit2();
 			rc = NULL;
@@ -724,7 +730,7 @@ SH_OSCache::getAllCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, UDATA g
 	}
 
 	/* Incompatible caches are added after the compatible caches so are initially created in a different pool */
-	incompatibleList = pool_new(sizeof(SH_OSCache_Info),  0, 0, 0, J9_GET_CALLSITE(), J9MEM_CATEGORY_CLASSES, POOL_FOR_PORT(PORTLIB));
+	incompatibleList = pool_new(sizeof(SH_OSCache_Info), 0, 0, 0, J9_GET_CALLSITE(), J9MEM_CATEGORY_CLASSES, POOL_FOR_PORT(PORTLIB));
 	if (incompatibleList == NULL) {
 		Trc_SHR_OSC_getAllCacheStatistics_Exit3();
 		rc = NULL;
@@ -734,20 +740,72 @@ SH_OSCache::getAllCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, UDATA g
 
 	/* Walk all the cache files in the j9shmem dir and (optionally) the persistent cacheDir */
 	do {
-		if (getCacheStatistics(vm, ctrlDirName, (const char*)nameWithVGen, groupPerm, localVerboseFlags, j2seVersion, &tempInfo, reason) != -1) {
+		J9Pool** lowerLayerListPtr = &lowerLayerList;
+		bool isToplayer = isTopLayerCache(vm, ctrlDirName, nameWithVGen);
+		bool getLowerLayerStats = false;
+
+		if (getCacheStatistics(vm, ctrlDirName, (const char*)nameWithVGen, groupPerm, localVerboseFlags, j2seVersion, &tempInfo, reason, getLowerLayerStats, isToplayer, lowerLayerListPtr, NULL) != -1) {
 			if (includeOldGenerations || !tempInfo.isCompatible || (getCurrentCacheGen() == tempInfo.generation)) {
 				if (tempInfo.isCompatible) {
 					if (!ignoreCompatible) {
-						newElement = (SH_OSCache_Info*) pool_newElement(cacheList);
-						memcpy(newElement, &tempInfo, sizeof(SH_OSCache_Info));
+						if (isToplayer) {
+							/* nameWithVGen is a compatible top layer cache, lower layer stats are in lowerLayerList*/
+							newElement = (SH_OSCache_Info*) pool_newElement(cacheList);
+							if (NULL == newElement) {
+								Trc_SHR_OSC_getAllCacheStatistics_pool_newElement_failed(0);
+								outOfMem = true;
+								goto done;
+							}
+							memcpy(newElement, &tempInfo, sizeof(SH_OSCache_Info));
+							if (NULL != lowerLayerList) {
+								if (0 < pool_numElements(lowerLayerList)) {
+									pool_state poolState;
+									SH_OSCache_Info* anElement = (SH_OSCache_Info*)pool_startDo(lowerLayerList, &poolState);
+									do {
+										newElement = (SH_OSCache_Info*) pool_newElement(cacheList);
+										if (NULL == newElement) {
+											Trc_SHR_OSC_getAllCacheStatistics_pool_newElement_failed(1);
+											outOfMem = true;
+											goto done;
+										}
+										memcpy(newElement, anElement, sizeof(SH_OSCache_Info));
+										++cntr;
+									} while ((anElement = (SH_OSCache_Info*)pool_nextDo(&poolState)) != NULL);
+								}
+							}
+						} else {
+							if (SHR_STATS_REASON_ITERATE != reason) {
+								newElement = (SH_OSCache_Info*) pool_newElement(cacheList);
+								if (NULL == newElement) {
+									Trc_SHR_OSC_getAllCacheStatistics_pool_newElement_failed(2);
+									outOfMem = true;
+									goto done;
+								}
+								memcpy(newElement, &tempInfo, sizeof(SH_OSCache_Info));
+							}
+							/* nameWithVGen is a compatible lower layer cache and getLowerLayerStats is false, do nothing here. stats of non-top layers are included in the lowerLayerList of when calling getCacheStatistics() on the top layer */
+						}
+					} else {
+						/* ignoreCompatible is true, do nothing here */
 					}
 				} else {
 					newElement = (SH_OSCache_Info*) pool_newElement(incompatibleList);
+					if (NULL == newElement) {
+						Trc_SHR_OSC_getAllCacheStatistics_pool_newElement_failed(3);
+						outOfMem = true;
+						goto done;
+					}
 					memcpy(newElement, &tempInfo, sizeof(SH_OSCache_Info));
 				}
 			}
+			++cntr;
 		}
-		++cntr;
+		
+		if (NULL != lowerLayerList) {
+			pool_kill(lowerLayerList);
+			lowerLayerList = NULL;
+		}
+		
 		if (!doneSnapshot) {
 			if (-1 == SH_OSCacheFile::findnext(PORTLIB, snapshotFindHandle, snapshotNameWithVGen, J9PORT_SHR_CACHE_TYPE_SNAPSHOT)) {
 				doneSnapshot = true;
@@ -778,15 +836,21 @@ SH_OSCache::getAllCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, UDATA g
 		if (pool_numElements(incompatibleList)) {
 			pool_state poolState;
 			SH_OSCache_Info* anElement;
-			
+
 			anElement = (SH_OSCache_Info*)pool_startDo(incompatibleList, &poolState);
 			do {
 				newElement = (SH_OSCache_Info*) pool_newElement(cacheList);
+				if (NULL == newElement) {
+					Trc_SHR_OSC_getAllCacheStatistics_pool_newElement_failed(4);
+					outOfMem = true;
+					goto done;
+				}
 				memcpy(newElement, anElement, sizeof(SH_OSCache_Info));
 			} while ((anElement = (SH_OSCache_Info*)pool_nextDo(&poolState)));
 		}
 		pool_kill(incompatibleList);
 	}
+done:
 	if ((UDATA)-1 != snapshotFindHandle) {
 		SH_OSCacheFile::findclose(PORTLIB, snapshotFindHandle);
 	}
@@ -798,12 +862,23 @@ SH_OSCache::getAllCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, UDATA g
 	}
 
 	Trc_SHR_OSC_getAllCacheStatistics_Exit4();
-	if (!ignoreCompatible) {
-		rc = cacheList;
-		goto cleanup;
+	if (outOfMem) {
+		if (NULL != lowerLayerList) {
+			pool_kill(lowerLayerList);
+		}
+		if (NULL != cacheList) {
+			pool_kill(cacheList);
+		}
+		if (NULL != incompatibleList) {
+			pool_kill(cacheList);
+		}
+		rc = NULL;
 	} else {
-		rc = incompatibleList;
-		goto cleanup;
+		if (!ignoreCompatible) {
+			rc = cacheList;
+		} else {
+			rc = incompatibleList;
+		}
 	}
 cleanup:
 	return rc;
@@ -819,12 +894,16 @@ cleanup:
  * @param[in] localVerboseFlags  Flags indicating the level of verbose output in use
  * @param[in] j2seVersion  The j2se version that the JVM is running
  * @param[out] result  A pointer to a SH_OSCache_Info should be provided, which is filled in with the results
- * @param [in] reason Indicates the reason for getting cache stats. Refer sharedconsts.h for valid values.
+ * @param[in] reason Indicates the reason for getting cache stats. Refer sharedconsts.h for valid values.
+ * @param[in] getLowerLayerStats Indicates whether the statistics we are trying to get from cacheNameWithVGen is a lower (non-top) layer shared cache.
+ * @param[in] isTopLayer Indicates whether the cache is top layer or not.
+ * @param[out] lowerLayerStatsList A list of SH_OSCache_Info for all lower layer caches.
+ * @param[in] oscache An SH_OSCache. It is not NULL only when we are getting a  statistics on a compatible non-top layer cache.
  * 
  * @return 0 if the operations has been successful, -1 if an error has occured
  */
 IDATA 
-SH_OSCache::getCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, const char* cacheNameWithVGen, UDATA groupPerm, UDATA localVerboseFlags, UDATA j2seVersion, SH_OSCache_Info* result, UDATA reason)
+SH_OSCache::getCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, const char* cacheNameWithVGen, UDATA groupPerm, UDATA localVerboseFlags, UDATA j2seVersion, SH_OSCache_Info* result, UDATA reason, bool getLowerLayerStats, bool isTopLayer, J9Pool** lowerLayerList, SH_OSCache* oscache)
 {
 	J9PortLibrary* portlib = vm->portLibrary;
 	PORT_ACCESS_FROM_PORT(portlib);
@@ -834,9 +913,9 @@ SH_OSCache::getCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, const char
 	U_64 fileVMVersion = 0;
 	U_64 curVMVersion = 0;
 	char cacheDirName[J9SH_MAXPATH];
-	
+
 	Trc_SHR_OSC_getCacheStatistics_Entry();
-	
+
 	if (NULL == result) {
 		Trc_SHR_OSC_getCacheStatistics_NullResult();
 		return -1;
@@ -872,14 +951,14 @@ SH_OSCache::getCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, const char
 	}
 
 	setCurrentCacheVersion(vm, j2seVersion, &currentVersionData);
-	
+
 	fileVMVersion = SH_OSCache::getCacheVersionToU64(result->versionData.esVersionMajor, result->versionData.esVersionMinor);
 	curVMVersion = SH_OSCache::getCacheVersionToU64(currentVersionData.esVersionMajor, currentVersionData.esVersionMinor);
-	
+
 	if ( fileVMVersion <= curVMVersion ) {
 		/* The current JVM version can only see caches generated by:
 		 * - Equal or lower JVM versions
-		 * - Equal or lower JCL versions 
+		 * - Equal or lower JCL versions
 		 */
 		if (getShcModlevelForJCL(j2seVersion) < result->versionData.modlevel) {
 			Trc_SHR_OSC_getCacheStatistics_badModLevel_Exit(result->versionData.modlevel);
@@ -892,19 +971,39 @@ SH_OSCache::getCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, const char
 	}
 
 	result->isCompatible = (isCurrentGen && isCompatibleShcFilePrefix(portlib, (U_32)JAVA_SPEC_VERSION_FROM_J2SE(j2seVersion), getJVMFeature(vm), cacheNameWithVGen));
-
-	/* isCorrupt is only valid if SHR_STATS_REASON_ITERATE is specified */
+	/* isCorrupt is only valid if SHR_STATS_REASON_ITERATE is specified. */
 	result->isCorrupt = 0;
 	result->isJavaCorePopulated = 0;
 	memset(&(result->javacoreData), 0, sizeof(J9SharedClassJavacoreDataDescriptor));
-	
+
 	result->javacoreData.feature = getJVMFeature(vm);
+	
+	bool isCompatibleLowerLayer = (result->isCompatible) && (!isTopLayer);
+
+	if (SHR_STATS_REASON_ITERATE == reason) {
+		if (isCompatibleLowerLayer && !getLowerLayerStats) {
+			/* SH_OSCachemmap::getNonTopLayerCacheInfo() and SH_OSCachesysv::getNonTopLayerCacheInfo() are only called when iterating the caches. 
+			 * So check isCompatibleLowerLayer and getLowerLayerStats only when reason is SHR_STATS_REASON_ITERATE. */
+			return 0;
+		}
+	}
+
 	if (result->versionData.cacheType == J9PORT_SHR_CACHE_TYPE_PERSISTENT) {
-		Trc_SHR_OSC_getCacheStatistics_stattingMmap();
-		rc = SH_OSCachemmap::getCacheStats(vm, cacheDirName, cacheNameWithVGen, result, reason);
+		if (isCompatibleLowerLayer && getLowerLayerStats) {
+			Trc_SHR_Assert_True(NULL != oscache);
+			rc = SH_OSCachemmap::getNonTopLayerCacheInfo(vm, ctrlDirName, groupPerm, cacheNameWithVGen, result, reason, (SH_OSCachemmap*)oscache);
+		} else {
+			Trc_SHR_OSC_getCacheStatistics_stattingMmap();
+			rc = SH_OSCachemmap::getCacheStats(vm, ctrlDirName, groupPerm, cacheNameWithVGen, result, reason, lowerLayerList);
+		}
 	} else if (result->versionData.cacheType == J9PORT_SHR_CACHE_TYPE_NONPERSISTENT) {
-		Trc_SHR_OSC_getCacheStatistics_stattingSysv();
-		rc = SH_OSCachesysv::getCacheStats(vm, ctrlDirName, groupPerm, cacheNameWithVGen, result, reason);
+		if (isCompatibleLowerLayer && getLowerLayerStats) {
+			Trc_SHR_Assert_True(NULL != oscache);
+			rc = SH_OSCachesysv::getNonTopLayerCacheInfo(vm, ctrlDirName, groupPerm, cacheNameWithVGen, result, reason, (SH_OSCachesysv*)oscache);
+		} else {
+			Trc_SHR_OSC_getCacheStatistics_stattingSysv();
+			rc = SH_OSCachesysv::getCacheStats(vm, ctrlDirName, groupPerm, cacheNameWithVGen, result, reason, lowerLayerList);
+		}
 	} else if (J9PORT_SHR_CACHE_TYPE_SNAPSHOT == result->versionData.cacheType) {
 		Trc_SHR_OSC_getCacheStatistics_stattingSnapshot();
 		if (0 == removeCacheVersionAndGen(result->name, CACHE_ROOT_MAXLEN, J9SH_VERSION_STRING_LEN + 1, cacheNameWithVGen)) {
@@ -926,11 +1025,14 @@ SH_OSCache::getCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, const char
 	return rc;
 }
 
+
 /* THREADING: Pre-req the cache header must be locked */
-void 
+void
 SH_OSCache::initOSCacheHeader(OSCache_header_version_current* header, J9PortShcVersion* versionData, UDATA headerLen)
 {
 	Trc_SHR_OSC_initOSCacheHeader_Entry(header, versionData, headerLen);
+	PORT_ACCESS_FROM_PORT(_portLibrary);
+	UDATA success = 0;
 
 	memcpy(&(header->versionData), versionData, sizeof(J9PortShcVersion));
 	header->size = (U_32)_cacheSize;
@@ -939,6 +1041,7 @@ SH_OSCache::initOSCacheHeader(OSCache_header_version_current* header, J9PortShcV
 	header->generation = (U_32)_activeGeneration;
 	header->buildID = getOpenJ9Sha();
 	header->cacheInitComplete = 0;
+	header->createTime = j9time_current_time_nanos(&success);
 
 	Trc_SHR_OSC_initOSCacheHeader_Exit();
 }
@@ -949,9 +1052,9 @@ SH_OSCache::checkOSCacheHeader(OSCache_header_version_current* header, J9PortShc
 {
 	UDATA dataStartValue;
 	PORT_ACCESS_FROM_PORT(_portLibrary);
-	
+
 	Trc_SHR_OSC_checkOSCacheHeader_Entry(header, versionData, headerLen);
-	
+
 	if (versionData == NULL) {
 		/* If it's not the current generation, the cache header will simply not look right and can't be verified */
 		if (header->generation != (U_32)_activeGeneration) {
@@ -960,8 +1063,8 @@ SH_OSCache::checkOSCacheHeader(OSCache_header_version_current* header, J9PortShc
 		}
 	} else {
 		/* Check whether the version data contained in the header indeed matches the platform
- 		 * specifications of the current target.
- 		 */
+		 * specifications of the current target.
+		 */
 
 		if (memcmp(versionData, &(header->versionData), sizeof(J9PortShcVersion)) != 0) {
 			Trc_SHR_OSC_checkOSCacheHeader_wrongVersion();
@@ -983,13 +1086,12 @@ SH_OSCache::checkOSCacheHeader(OSCache_header_version_current* header, J9PortShc
 		setCorruptionContext(CACHE_HEADER_INCORRECT_DATA_START_ADDRESS, dataStartValue);
 		return J9SH_OSCACHE_HEADER_CORRUPT;
 	}
-	
 
 	if ((J9_ARE_ALL_BITS_SET(_runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_TEST_BAD_BUILDID))
 		&& (J9_ARE_NO_BITS_SET(_runtimeFlags, J9SHR_RUNTIMEFLAG_SNAPSHOT))
 	) {
 		Trc_SHR_OSC_checkOSCacheHeader_testBadBuildID();
-		/* The flag J9SHR_RUNTIMEFLAG_ENABLE_TEST_BAD_BUILDID is unset after 
+		/* The flag J9SHR_RUNTIMEFLAG_ENABLE_TEST_BAD_BUILDID is unset after
 		 * the first call to SH_OSCache:startup() in SH_CompositeCacheImpl::startup().
 		 * This ensures that this failure only occurs once. Running "snapshotCache"
 		 * with "badBuildID" means to write a bad build ID into the snapshot, rather than running
@@ -997,7 +1099,7 @@ SH_OSCache::checkOSCacheHeader(OSCache_header_version_current* header, J9PortShc
 		 */
 		return J9SH_OSCACHE_HEADER_DIFF_BUILDID;
 	}
-	
+
 	U_64 OpenJ9Sha = getOpenJ9Sha();
 	if (_doCheckBuildID && (header->buildID != OpenJ9Sha)) {
 		Trc_SHR_OSC_checkOSCacheHeader_wrongBuildID_3(OpenJ9Sha, header->buildID);
@@ -1017,7 +1119,7 @@ SH_OSCache::isRunningReadOnly() {
 }
 
 /* Used for connecting to legacy cache headers */
-void* 
+void*
 SH_OSCache::getHeaderFieldAddressForGen(void* header, UDATA headerGen, UDATA fieldID)
 {
 	return (U_8*)header + getHeaderFieldOffsetForGen(headerGen, fieldID);
@@ -1086,7 +1188,7 @@ SH_OSCache::getHeaderFieldOffsetForGen(UDATA headerGen, UDATA fieldID)
 
 /**
  * Returns the amount of bytes in the cache available for data
- * 
+ *
  * @return the bytes available for data
  */
 U_32
@@ -1097,7 +1199,7 @@ SH_OSCache::getDataSize()
 
 /**
  * Generate a U_64 from the major, and minor numbers from a cache file name
- * 
+ *
  * @return U_64
  */
 U_64
@@ -1114,13 +1216,16 @@ SH_OSCache::getCacheVersionToU64(U_32 major, U_32 minor)
  * Get statistics on a given named cache
  *
  * @param[in] vm  The Java VM
+ * @parma[in] ctrlDirName The cache directory
+ * @param[in] groupPerm Group permissions to open the cache directory
  * @param[in] cache The OSCache to use
  * @param[in] cacheInfo Where to put statistics about this Cache
- * 
+ * @param[out] cacheInfo A list of SH_OSCache_Info for all lower layer caches.
+ *
  * @return true if the operations has been successful, false if an error has occured
  */
 bool
-SH_OSCache::getCacheStatsCommon(J9JavaVM* vm, SH_OSCache *cache, SH_OSCache_Info *cacheInfo)
+SH_OSCache::getCacheStatsCommon(J9JavaVM* vm, const char* ctrlDirName, UDATA groupPerm, SH_OSCache *cache, SH_OSCache_Info *cacheInfo, J9Pool **lowerLayerList)
 {
 	bool retval = true;
 	UDATA bytesRequired = 0;
@@ -1152,7 +1257,7 @@ SH_OSCache::getCacheStatsCommon(J9JavaVM* vm, SH_OSCache *cache, SH_OSCache_Info
 		goto done;
 	}
 
-	startedForStats = cmStats->startupForStats(currentThread, cache, &runtimeflags);
+	startedForStats = cmStats->startupForStats(currentThread, ctrlDirName, groupPerm, cache, &runtimeflags, lowerLayerList);
 
 	if (startedForStats != CC_STARTUP_OK) {
 		if (startedForStats == CC_STARTUP_CORRUPT) {
@@ -1165,13 +1270,13 @@ SH_OSCache::getCacheStatsCommon(J9JavaVM* vm, SH_OSCache *cache, SH_OSCache_Info
 	if (cmStats->getJavacoreData(vm, &(cacheInfo->javacoreData)) == 1) {
 		cacheInfo->isJavaCorePopulated = 1;
 	}
-	
+
 done:
 	/*If startedForStats != CC_STARTUP_OK then shutdownForStats was already called by startupForStats in the failure condition*/
 	if ((cmStats != NULL) && (startedForStats == CC_STARTUP_OK)) {
 		cmStats->shutdownForStats(currentThread);
 	}
-	
+
 	if (cmPtr != NULL) {
 		j9mem_free_memory(cmPtr);
 	}
@@ -1201,8 +1306,8 @@ SH_OSCache::setCorruptionContext(IDATA corruptionCode, UDATA corruptValue)
  * if corruptionCode = ACQUIRE_HEADER_WRITE_LOCK_FAILED, corruptValue contains the error code for the failure to acquire lock.
  * if corruptionCode = CACHE_SIZE_INVALID, corruptValue contains invalid cache size.
  *
- * @param [out] corruptionCode	if non-null, it is populated with a code indicating corruption type.
- * @param [out] corruptValue	if non-null, it is populated with a value to be interpreted depending on corruptionCode.
+ * @param [out] corruptionCode  if non-null, it is populated with a code indicating corruption type.
+ * @param [out] corruptValue    if non-null, it is populated with a value to be interpreted depending on corruptionCode.
  *
  * @return void
  */
@@ -1229,11 +1334,16 @@ SH_OSCache::getOSCacheStart() {
 /**
  * Get the unique ID of the current cache
  * @param[in] currentThread  The current VM thread.
+ * @param [in] createtime The cache create time which is stored in OSCache_header2.
+ * @param[in] metadataBytes  The size of the metadata section of current oscache.
+ * @param[in] classesBytes  The size of the classes section of current oscache.
+ * @param[in] lineNumTabBytes  The size of the line number table section of current oscache.
+ * @param[in] varTabBytes  The size of the variable table section of current oscache.
  *
  * @return the cache unique ID
  */
 const char*
-SH_OSCache::getCacheUniqueID(J9VMThread* currentThread)
+SH_OSCache::getCacheUniqueID(J9VMThread* currentThread, U_64 createtime, UDATA metadataBytes, UDATA classesBytes, UDATA lineNumTabBytes, UDATA varTabBytes)
 {
 	PORT_ACCESS_FROM_VMC(currentThread);
 	if (NULL != _cacheUniqueID) {
@@ -1243,13 +1353,13 @@ SH_OSCache::getCacheUniqueID(J9VMThread* currentThread)
 	Trc_SHR_Assert_True(NULL != _cacheName);
 
 	U_32 cacheType = J9_ARE_ALL_BITS_SET(_runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_PERSISTENT_CACHE) ? J9PORT_SHR_CACHE_TYPE_PERSISTENT : J9PORT_SHR_CACHE_TYPE_NONPERSISTENT;
-	UDATA sizeRequired = generateCacheUniqueID(currentThread, _cacheDirName, _cacheName, _layer, cacheType, NULL, 0);
+	UDATA sizeRequired = generateCacheUniqueID(currentThread, _cacheDirName, _cacheName, _layer, cacheType, NULL, 0, createtime, metadataBytes, classesBytes, lineNumTabBytes,varTabBytes);
 
 	_cacheUniqueID = (char*)j9mem_allocate_memory(sizeRequired, J9MEM_CATEGORY_VM);
 	if (NULL == _cacheUniqueID) {
 		return NULL;
 	}
-	generateCacheUniqueID(currentThread, _cacheDirName, _cacheName, _layer, cacheType, _cacheUniqueID, sizeRequired);
+	generateCacheUniqueID(currentThread, _cacheDirName, _cacheName, _layer, cacheType, _cacheUniqueID, sizeRequired, createtime, metadataBytes, classesBytes, lineNumTabBytes, varTabBytes);
 	return _cacheUniqueID;
 }
 
@@ -1262,12 +1372,17 @@ SH_OSCache::getCacheUniqueID(J9VMThread* currentThread)
  * @param[in] cacheType  The cache type
  * @param[out] buf  The buffer for the cache unique ID
  * @param[out] bufLen  The length of the buffer
+ * @param[in] createtime The cache create time which is stored in OSCache_header2.
+ * @param[in] metadataBytes  The size of the metadata section of current oscache.
+ * @param[in] classesBytes  The size of the classes section of current oscache.
+ * @param[in] lineNumTabBytes  The size of the line number table section of current oscache.
+ * @param[in] varTabBytes  The size of the variable table section of current oscache.
  *
  * @return If buf is not NULL, the number of characters printed into buf is returned , not including the NUL terminator.
- * 			If buf is NULL, the size of the buffer required to print to the unique ID, including the NUL terminator is returned.
+ *          If buf is NULL, the size of the buffer required to print to the unique ID, including the NUL terminator is returned.
  */
 UDATA
-SH_OSCache::generateCacheUniqueID(J9VMThread* currentThread, const char* cacheDirName, const char* cacheName, I_8 layer, U_32 cacheType, char* buf, UDATA bufLen)
+SH_OSCache::generateCacheUniqueID(J9VMThread* currentThread, const char* cacheDirName, const char* cacheName, I_8 layer, U_32 cacheType, char* buf, UDATA bufLen, U_64 createtime, UDATA metadataBytes, UDATA classesBytes, UDATA lineNumTabBytes, UDATA varTabBytes)
 {
 	char nameWithVGen[J9SH_MAXPATH];
 	char cacheFilePathName[J9SH_MAXPATH];
@@ -1281,29 +1396,34 @@ SH_OSCache::generateCacheUniqueID(J9VMThread* currentThread, const char* cacheDi
 	getCacheVersionAndGen(PORTLIB, vm, nameWithVGen, J9SH_MAXPATH, cacheName, &versionData, OSCACHE_CURRENT_CACHE_GEN, true, layer);
 	/* Directory is included here, so if the cache directory is renamed, caches with layer > 0 becomes unusable */
 	getCachePathName(PORTLIB, cacheDirName, cacheFilePathName, J9SH_MAXPATH, nameWithVGen);
-	I_64 timeStamp = j9file_lastmod(cacheFilePathName);
 	I_64 fileSize = j9file_length(cacheFilePathName);
-	return j9str_printf(PORTLIB, buf, bufLen, "%s-%llx_%llx", cacheFilePathName, fileSize, timeStamp);
+	if (NULL != buf) {
+		UDATA bufLenrequired = j9str_printf(PORTLIB, NULL, 0, "%s-%llx_%llx_%zx_%zx_%zx_%zx", cacheFilePathName, fileSize, createtime, metadataBytes, classesBytes, lineNumTabBytes, varTabBytes);
+		Trc_SHR_Assert_True(bufLenrequired <= bufLen);
+	}
+	return j9str_printf(PORTLIB, buf, bufLen, "%s-%llx_%llx_%zx_%zx_%zx_%zx", cacheFilePathName, fileSize, createtime, metadataBytes, classesBytes, lineNumTabBytes, varTabBytes);
 }
 
 /**
  * Get the cache name and layer number from the unique cache ID.
  * @param[in] vm  The Java VM.
- * @param[in] cacheDirName  The cache directory
  * @param[in] uniqueID  The cache unique ID
  * @param[in] idLen  The length of the cache unique ID
  * @param[out] nameBuf  The buffer for the cache name
  * @param[out] nameBuffLen  The length of cache name buffer
  * @param[out] layer  The layer number in the cache unique ID
- *
  */
 void
-SH_OSCache::getCacheNameAndLayerFromUnqiueID(J9JavaVM* vm, const char* cacheDirName, const char* uniqueID, UDATA idLen, char* nameBuf, UDATA nameBuffLen, I_8* layer)
+SH_OSCache::getCacheNameAndLayerFromUnqiueID(J9JavaVM* vm, const char* uniqueID, UDATA idLen, char* nameBuf, UDATA nameBuffLen, I_8* layer)
 {
-	UDATA dirLen = strlen(cacheDirName);
-	const char* cacheNameWithVGenStart = uniqueID + dirLen;
-	char* cacheNameWithVGenEnd = strnrchrHelper(cacheNameWithVGenStart, '-', idLen - dirLen);
-	if (NULL == cacheNameWithVGenEnd) {
+	PORT_ACCESS_FROM_JAVAVM(vm);
+	char versionStr[J9SH_VERSION_STRING_LEN +3];
+	J9PortShcVersion versionData;
+	setCurrentCacheVersion(vm, J2SE_VERSION(vm), &versionData);
+	J9SH_GET_VERSION_STRING(PORTLIB, versionStr, J9SH_VERSION(versionData.esVersionMajor, versionData.esVersionMinor), versionData.modlevel, versionData.feature, versionData.addrmode);
+	const char* cacheNameWithVGenStart = strstr(uniqueID, versionStr);
+	char* cacheNameWithVGenEnd = strnrchrHelper(cacheNameWithVGenStart, '-', idLen - (cacheNameWithVGenStart - uniqueID));
+	if (NULL == cacheNameWithVGenStart || NULL == cacheNameWithVGenEnd) {
 		Trc_SHR_Assert_ShouldNeverHappen();
 	}
 
@@ -1311,16 +1431,33 @@ SH_OSCache::getCacheNameAndLayerFromUnqiueID(J9JavaVM* vm, const char* cacheDirN
 	memset(nameWithVGenCopy, 0, J9SH_MAXPATH);
 	strncpy(nameWithVGenCopy, cacheNameWithVGenStart, cacheNameWithVGenEnd - cacheNameWithVGenStart);
 
-	SH_OSCache::removeCacheVersionAndGen(nameBuf, nameBuffLen, J9SH_VERSION_STRING_LEN + 1, nameWithVGenCopy);
+	getValuesFromShcFilePrefix(PORTLIB, nameWithVGenCopy, &versionData);
+	UDATA prefixLen = J9SH_VERSION_STRING_LEN + 1;
+	/* 
+	 * For example, a persistent cache file is C290M11F1A64P_Cache1_G41L00. The prefix size is the length of "C290M11F1A64P"(J9SH_VERSION_STRING_LEN) + the length of "_"(1), which is J9SH_VERSION_STRING_LEN + 1
+	 * A non-persistent cache
+	 * 		On Windows, a cache file is C290M11F1A64_Cache1_G41L00, the prefix size is the length of "C290M11F1A64"(J9SH_VERSION_STRING_LEN - 1) + the length of "_"(1), which is J9SH_VERSION_STRING_LEN.
+	 * 		On non-Windows, a cache file is C290M11F1A64_memory_Cache1_G41L00, the prefix size is the length of "C290M11F1A64"(J9SH_VERSION_STRING_LEN - 1) + the length of "_memory_"(strlen(J9SH_MEMORY_ID)), 
+	 * 		which is J9SH_VERSION_STRING_LEN + strlen(J9SH_MEMORY_ID) - 1.
+	 */
+	if (J9PORT_SHR_CACHE_TYPE_NONPERSISTENT == versionData.cacheType) {
+#if defined(WIN32)
+		prefixLen = J9SH_VERSION_STRING_LEN;
+#else
+		prefixLen = J9SH_VERSION_STRING_LEN + strlen(J9SH_MEMORY_ID) - 1;
+#endif
+	}
+
+	SH_OSCache::removeCacheVersionAndGen(nameBuf, nameBuffLen, prefixLen, nameWithVGenCopy);
 	I_8 layerNo = getLayerFromName(nameWithVGenCopy);
-	Trc_SHR_Assert_True(((layerNo >= 0) 
+	Trc_SHR_Assert_True(((layerNo >= 0)
 						&& (layerNo <= J9SH_LAYER_NUM_MAX_VALUE))
 						);
 	*layer = layerNo;
 }
 
-/* 
- * Return the layer number 
+/*
+ * Return the layer number.
  */
 I_8
 SH_OSCache::getLayer()
@@ -1328,3 +1465,73 @@ SH_OSCache::getLayer()
 	return _layer;
 }
 
+/* 
+ * Return the cache type.
+ */
+U_32
+SH_OSCache::getCacheType()
+{
+	PORT_ACCESS_FROM_PORT(_portLibrary);
+	J9PortShcVersion versionData;
+	getValuesFromShcFilePrefix(PORTLIB, _cacheNameWithVGen, &versionData);
+		
+	return versionData.cacheType;
+}
+
+/* 
+ * Return the cache file name.
+ */
+const char*
+SH_OSCache::getCacheNameWithVGen()
+{
+	return _cacheNameWithVGen;
+}
+
+/*
+ * Returns if the cache is top layer or not.
+ * 
+ * @param[in] vm  The Java VM.
+ * @param[in] ctrlDirName  The cache control directory
+ * @param[in] nameWithVGen  The cache file name
+ */
+bool
+SH_OSCache::isTopLayerCache(J9JavaVM* vm, const char* ctrlDirName, char* nameWithVGen)
+{
+	bool rc = true;
+	PORT_ACCESS_FROM_JAVAVM(vm);
+	J9PortShcVersion versionData;
+	char cacheName[CACHE_ROOT_MAXLEN];
+	char cacheNameWithVGen[J9SH_MAXPATH];
+	char cacheDirName[J9SH_MAXPATH];
+	UDATA prefixLen = J9SH_VERSION_STRING_LEN + 1;
+		
+	if (0 == getValuesFromShcFilePrefix(PORTLIB, nameWithVGen, &versionData)) {
+		goto done;
+	}
+	/* 
+	 * For example, a persistent cache file is C290M11F1A64P_Cache1_G41L00. The prefix size is the length of "C290M11F1A64P"(J9SH_VERSION_STRING_LEN) + the length of "_"(1), which is J9SH_VERSION_STRING_LEN + 1.
+	 * A non-persistent cache
+	 * 		On Windows, a cache file is C290M11F1A64_Cache1_G41L00, the prefix size is the length of "C290M11F1A64"(J9SH_VERSION_STRING_LEN - 1) + the length of "_"(1), which is J9SH_VERSION_STRING_LEN.
+	 * 		On non-Windows, a cache file is C290M11F1A64_memory_Cache1_G41L00, the prefix size is the length of "C290M11F1A64"(J9SH_VERSION_STRING_LEN - 1) + the length of "_memory_"(strlen(J9SH_MEMORY_ID)), 
+	 * 		which is J9SH_VERSION_STRING_LEN + strlen(J9SH_MEMORY_ID) - 1.
+	 */
+	if (J9PORT_SHR_CACHE_TYPE_NONPERSISTENT == versionData.cacheType) {
+#if defined(WIN32)
+		prefixLen = J9SH_VERSION_STRING_LEN;
+#else
+		prefixLen = J9SH_VERSION_STRING_LEN + strlen(J9SH_MEMORY_ID) - 1;
+#endif
+	}
+	if (0 != removeCacheVersionAndGen(cacheName, CACHE_ROOT_MAXLEN, prefixLen, nameWithVGen)) {
+		goto done;
+	}
+	
+	getCacheVersionAndGen(PORTLIB, vm, cacheNameWithVGen, J9SH_MAXPATH, cacheName, &versionData, getGenerationFromName(nameWithVGen), true, getLayerFromName(nameWithVGen) + 1);
+	getCacheDir(vm, ctrlDirName, cacheDirName, J9SH_MAXPATH, versionData.cacheType);
+	
+	if (1 == statCache(PORTLIB, cacheDirName, cacheNameWithVGen, false)) {
+		rc = false;
+	}
+done:
+	return rc;
+}

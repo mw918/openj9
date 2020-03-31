@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,6 +23,7 @@
 #include "j9.h"
 #include "ut_j9vm.h"
 #include "ObjectAccessBarrierAPI.hpp"
+#include "valueTypeHelpers.hpp"
 
 extern "C" {
 void
@@ -53,5 +54,30 @@ defaultValueWithUnflattenedFlattenables(J9VMThread *currentThread, J9Class *claz
                                                                                 false);
                 }
         }
+}
+
+BOOLEAN
+valueTypeCapableAcmp(J9VMThread *currentThread, j9object_t lhs, j9object_t rhs)
+{
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+		bool acmpResult = false;
+		if (rhs == lhs) {
+			acmpResult = true;
+		} else {
+			if ((NULL != rhs) && (NULL != lhs)) {
+				J9Class * lhsClass = J9OBJECT_CLAZZ(_currentThread, lhs);
+				J9Class * rhsClass = J9OBJECT_CLAZZ(_currentThread, rhs);
+				if ((J9_IS_J9CLASS_VALUETYPE(rhsClass)
+					&& J9_IS_J9CLASS_VALUETYPE(lhsClass))
+					&& (rhsClass == lhsClass)
+				) {
+					acmpResult = ValueTypeHelpers::isSubstitutable(currentThread, lhs, rhs, J9VMTHREAD_OBJECT_HEADER_SIZE(_currentThread), lhsClass);
+				}
+			}
+		}
+		return acmpResult;
+#else /* J9VM_OPT_VALHALLA_VALUE_TYPES */
+		return (rhs == lhs);
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 }
 } /* extern "C" */

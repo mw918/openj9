@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -243,7 +243,7 @@ getVMThreadStateHelper(J9VMThread *targetThread,
 			lockWord = getLockWord(targetThread, lockObject);
 	
 			if (J9_LOCK_IS_INFLATED(lockWord)) {
-				J9ThreadAbstractMonitor *objmon = getInflatedObjectMonitor(targetThread->javaVM, targetThread, lockObject, lockWord);
+				J9ThreadAbstractMonitor *objmon = getInflatedObjectMonitor(targetThread->javaVM, lockObject, lockWord);
 
 				/*
 				 * If the monitor is out-of-line and NULL, then it was never entered,
@@ -299,7 +299,7 @@ getVMThreadStateHelper(J9VMThread *targetThread,
 	
 				if (lockOwner && (lockOwner != targetThread)) {
 					count = J9_FLATLOCK_COUNT(lockWord);
-					rawLock = (omrthread_monitor_t)monitorTablePeekMonitor(targetThread->javaVM, targetThread, lockObject);
+					rawLock = (omrthread_monitor_t)monitorTablePeekMonitor(targetThread->javaVM, lockObject);
 					vmstate = J9VMTHREAD_STATE_BLOCKED;
 				}
 			}
@@ -432,186 +432,6 @@ getVMThreadStateHelper(J9VMThread *targetThread,
 	return vmstate;
 }
 
-/*
- * THIS FUNCTION IS OBSOLETE.
- * Use getVMThreadObjectState() or getVMThreadRawState() instead.
- *
- * Determine the status of the specified thread.
- * The thread should be suspended or the results may not be accurate.
- * If the thread is blocked or waiting, return the monitor it's blocked on, as well
- * as the owner of the monitor and the count. 
- * If the thread is blocked on a flat lock, then the owner and count will reflect 
- * the owner and count of the flat lock, not of the associated fat lock. 
- * If the thread is not blocked or waiting, the return values will all be NULL or 0.
- * If the owner of the blocking monitor is unattached, then the return value in
- * powner will be NULL. The osthread which actually owns the monitor can be
- * determined by inspecting the monitor.
- *
- * Returns one of:
- *   J9VMTHREAD_STATE_RUNNING
- *   J9VMTHREAD_STATE_BLOCKED
- *   J9VMTHREAD_STATE_WAITING
- * 	 J9VMTHREAD_STATE_WAITING_TIMED
- *   J9VMTHREAD_STATE_SLEEPING
- *   J9VMTHREAD_STATE_SUSPENDED
- *
- * Out-of-process notes:
- *    Input vmStruct is a LOCAL pointer to a J9VMThread. It must be bound to a LOCAL J9JavaVM
- *    Output *pmonitor and *powner are TARGET pointers
- */
-UDATA 
-getVMThreadStatus_DEPRECATED(J9VMThread* thread, J9ThreadAbstractMonitor** pmonitor, J9VMThread** powner, UDATA* pcount)
-{
-	omrthread_monitor_t blockingMonitor = NULL;
-	j9object_t blockingEnterObject = thread->blockingEnterObject;
-	J9VMThread* owner = NULL;
-	UDATA count = 0;
-	UDATA status = J9VMTHREAD_STATE_RUNNING;
-
-	Trc_VMUtil_getVMThreadStatus_Entry(thread, pmonitor, powner, pcount);
-
-	if (blockingEnterObject) {
-		/* This function assumes that blockingEnterObject is set only if the
-		 * thread is blocked on an object monitor.
-		 * VMDesign 1231 changed this, so compensate here.
-		 */
-		if (!(thread->publicFlags & J9_PUBLIC_FLAGS_THREAD_BLOCKED)) {
-			blockingEnterObject = NULL;
-		}
-	}
-
-	if (blockingEnterObject) {
-		j9objectmonitor_t lockWord = getLockWord(thread, blockingEnterObject);
-
-		if (J9_LOCK_IS_INFLATED(lockWord)) {
-			J9ThreadAbstractMonitor *monitorStruct = getInflatedObjectMonitor(thread->javaVM, thread, blockingEnterObject, lockWord);
-			omrthread_t j9ThreadOwner = NULL;
-
-			/*
-			 * If the monitor is out-of-line and NULL, then no one has attempted to enter it yet,
-			 * so the target thread is still runnable.
-			 */
-			if (monitorStruct) {
-				j9ThreadOwner = (omrthread_t)(monitorStruct->owner);
-				blockingMonitor = (omrthread_monitor_t)monitorStruct;
-				status = J9VMTHREAD_STATE_BLOCKED;
-			}
-
-			if ( j9ThreadOwner != NULL ) {
-				owner = getVMThreadFromOMRThread(thread->javaVM, j9ThreadOwner);
-				/*
-				 * Special case where the thread being queried has released VM access, dropped to the thread lib
-				 * to take ownership of a monitor, acquired ownership of the monitor, but hasn't set blockingEnterObject 
-				 * back to NULL yet... All while another thread has exclusive VM access.
-				 * See CMVC 99377
-				 */
-				if (owner == thread) {
-					blockingMonitor = NULL;
-					owner = NULL;
-					status = J9VMTHREAD_STATE_RUNNING;
-				} else {
-					count = monitorStruct->count;
-				}
-			} else {
-				/*
-				 * The Java thread being examined is in a transitional state.
-				 * It couldn't take non-blocking ownership of the monitor, but while in the process of 
-				 * doing the blocking call to take ownership, the monitor was released by the owner.
-				 * The java thread may or may not soon block, but right now it's still running.
-				 */
-				blockingMonitor = NULL;
-				owner = NULL;
-				status = J9VMTHREAD_STATE_RUNNING;
-			}
-		} else {
-			/* 
-			 * Not an inflated monitor
-			 */
-			blockingMonitor = (omrthread_monitor_t)monitorTablePeekMonitor(thread->javaVM, thread, blockingEnterObject);
-			owner = J9_FLATLOCK_OWNER(lockWord);
-			count = J9_FLATLOCK_COUNT(lockWord);
-			status = J9VMTHREAD_STATE_BLOCKED;
-		} 
-	} else {
-		/* 
-		 * No blockingEnterObject
-		 */
-		UDATA flags = omrthread_get_flags(thread->osThread, &blockingMonitor);
-		if (blockingMonitor) {
-			omrthread_t osOwner = (omrthread_t)(((J9ThreadAbstractMonitor*)blockingMonitor)->owner);
-			count = ((J9ThreadAbstractMonitor*)blockingMonitor)->count;
-			owner = getVMThreadFromOMRThread(thread->javaVM, osOwner);
-		}
-
-		/* 
-		 * CMVC 109614.
-		 * Because blockingMonitor and blockingMonitor->owner are not read together atomically,
-		 * some inconsistent "blocked/waiting on self" states can occur. These are checked and
-		 * described below.
-		 */
-		if (flags & J9THREAD_FLAG_BLOCKED) {
-			if (owner == thread) {
-				/* 
-				 * CMVC 109614.
-				 * (3-tier) The thread is in monitor_enter_three_tier() (via monitor_wait()).
-				 * It has acquired the spinlock and marked itself as the monitor's owner, 
-				 * but has not yet cleared its BLOCKED flag.
-				 * The thread is RUNNABLE in this case.
-				 * 
-				 * (non 3-tier) In monitor_wait(), thread->flags and thread->monitor were read 
-				 * after the thread was notified, but monitor->owner was not read until
-				 * after the thread has marked itself as the monitor's owner.
-				 * The thread is RUNNABLE in this case.
-				 * This can also happen in monitor_enter(), but blockingEnterObject should be non-NULL
-				 * in this case, so it should be handled above.
-				 */
-				 owner = NULL;
-				 blockingMonitor = NULL;
-				 status = J9VMTHREAD_STATE_RUNNING;
-			} else {
-				status = J9VMTHREAD_STATE_BLOCKED;
-			}
-		} else if (flags & J9THREAD_FLAG_WAITING) {
-			if (owner == thread) {
-				/* 
-				 * CMVC 109614.
-				 * The thread is in monitor_wait() and preparing to wait, but has not yet released the monitor. 
-				 * The thread is still RUNNABLE in this case.
-				 */
-				owner = NULL;
-				blockingMonitor = NULL;
-				status = J9VMTHREAD_STATE_RUNNING;
-			} else {
-				if (flags & J9THREAD_FLAG_TIMER_SET) {
-					status = J9VMTHREAD_STATE_WAITING_TIMED;
-				} else {
-					status = J9VMTHREAD_STATE_WAITING;
-				}
-			}
-		} else if (flags & J9THREAD_FLAG_SLEEPING) {
-			status = J9VMTHREAD_STATE_SLEEPING;
-		} else if (flags & J9THREAD_FLAG_SUSPENDED) {
-			status = J9VMTHREAD_STATE_SUSPENDED;
-		} else if (flags & J9THREAD_FLAG_DEAD) {
-			status = J9VMTHREAD_STATE_DEAD;
-		} 
-	}
-
-	if (pmonitor) {
-		*pmonitor = (J9ThreadAbstractMonitor*)blockingMonitor;
-	}
-	if (powner) {
-		*powner = owner;
-	}
-	if (pcount) {
-		*pcount = count;
-	}
-
-	Trc_VMUtil_getVMThreadStatus_Exit(status, blockingMonitor, owner, count);
-
-	return status;
-}
-
 static void
 getInflatedMonitorState(const J9VMThread *targetThread, const omrthread_t j9self,
 		const omrthread_state_t *j9state, UDATA *vmstate,
@@ -665,7 +485,6 @@ getInflatedMonitorState(const J9VMThread *targetThread, const omrthread_t j9self
  * 
  * @param[in] vm the JavaVM. For out-of-process: may be a local or target pointer. 
  * vm->monitorTable must be a target value.
- * @param[in] targetVMThread the target J9VMThread.
  * @param[in] object the object. For out-of-process: a target pointer.
  * @param[in] lockWord The object's lockword.
  * @returns a J9ThreadAbstractMonitor 
@@ -674,7 +493,7 @@ getInflatedMonitorState(const J9VMThread *targetThread, const omrthread_t j9self
  * @see monitorTablePeekMonitor, monitorTablePeek
  */
 J9ThreadAbstractMonitor *
-getInflatedObjectMonitor(J9JavaVM *vm, J9VMThread *targetVMThread, j9object_t object, j9objectmonitor_t lockWord)
+getInflatedObjectMonitor(J9JavaVM *vm, j9object_t object, j9objectmonitor_t lockWord)
 {
 	return J9THREAD_MONITOR_FROM_LOCKWORD(lockWord);
 }
@@ -688,7 +507,7 @@ getLockWord(J9VMThread *vmThread, j9object_t object)
 		j9objectmonitor_t *lwEA = J9OBJECT_MONITOR_EA(vmThread, object);
 		lockWord = J9_LOAD_LOCKWORD(vmThread, lwEA);
 	} else {
-		J9ObjectMonitor *objectMonitor = monitorTablePeek(vmThread->javaVM, vmThread, object);
+		J9ObjectMonitor *objectMonitor = monitorTablePeek(vmThread->javaVM, object);
 		if (objectMonitor != NULL){
 			lockWord = J9_LOAD_LOCKWORD(vmThread, &objectMonitor->alternateLockword);
 		}
@@ -706,7 +525,6 @@ getLockWord(J9VMThread *vmThread, j9object_t object)
  * 
  * @param[in] vm the JavaVM. For out-of-process: may be a local or target pointer. 
  * vm->monitorTable must be a target value.
- * @param[in] targetVMThread	the target J9VMThread
  * @param[in] object the object. For out-of-process: a target pointer.
  * @returns the J9ThreadAbstractMonitor from a hashtable entry
  * @retval NULL There is no corresponding monitor in vm->monitorTable.
@@ -714,12 +532,12 @@ getLockWord(J9VMThread *vmThread, j9object_t object)
  * @see monitorTablePeek
  */
 J9ThreadAbstractMonitor *
-monitorTablePeekMonitor(J9JavaVM *vm, J9VMThread *targetVMThread, j9object_t object)
+monitorTablePeekMonitor(J9JavaVM *vm, j9object_t object)
 {
 	J9ThreadAbstractMonitor *monitor = NULL;
 	J9ObjectMonitor *objectMonitor = NULL;
 	
-	objectMonitor = monitorTablePeek(vm, targetVMThread, object);
+	objectMonitor = monitorTablePeek(vm, object);
 	if (objectMonitor) {
 		monitor = (J9ThreadAbstractMonitor *)objectMonitor->monitor;
 	}
@@ -743,7 +561,7 @@ monitorTablePeekMonitor(J9JavaVM *vm, J9VMThread *targetVMThread, j9object_t obj
  * @see monitorTablePeekMonitor
  */
 J9ObjectMonitor *
-monitorTablePeek(J9JavaVM *vm, J9VMThread *targetVMThread, j9object_t object)
+monitorTablePeek(J9JavaVM *vm, j9object_t object)
 {
 
 	J9ObjectMonitor *monitor = NULL;

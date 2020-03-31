@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -104,13 +104,11 @@ GC_CheckEngine::verifyOwnableSynchronizerObjectCounts()
 {
 	bool ret = true;
 
-	if (!MM_GCExtensions::getExtensions(_javaVM)->isConcurrentScavengerEnabled()) {
-		if ((UNINITIALIZED_SIZE_FOR_OWNABLESYNCHRONIER != _ownableSynchronizerObjectCountOnList) && (UNINITIALIZED_SIZE_FOR_OWNABLESYNCHRONIER != _ownableSynchronizerObjectCountOnHeap)) {
-			if (_ownableSynchronizerObjectCountOnList != _ownableSynchronizerObjectCountOnHeap) {
-				PORT_ACCESS_FROM_PORT(_portLibrary);
-				j9tty_printf(PORTLIB, "  <gc check: found count=%zu of OwnableSynchronizerObjects on Heap doesn't match count=%zu on lists>\n", _ownableSynchronizerObjectCountOnHeap, _ownableSynchronizerObjectCountOnList);
-				ret = false;
-			}
+	if ((UNINITIALIZED_SIZE_FOR_OWNABLESYNCHRONIER != _ownableSynchronizerObjectCountOnList) && (UNINITIALIZED_SIZE_FOR_OWNABLESYNCHRONIER != _ownableSynchronizerObjectCountOnHeap)) {
+		if (_ownableSynchronizerObjectCountOnList != _ownableSynchronizerObjectCountOnHeap) {
+			PORT_ACCESS_FROM_PORT(_portLibrary);
+			j9tty_printf(PORTLIB, "  <gc check: found count=%zu of OwnableSynchronizerObjects on Heap doesn't match count=%zu on lists>\n", _ownableSynchronizerObjectCountOnHeap, _ownableSynchronizerObjectCountOnList);
+			ret = false;
 		}
 	}
 
@@ -288,7 +286,7 @@ GC_CheckEngine::checkJ9ObjectPointer(J9JavaVM *javaVM, J9Object *objectPtr, J9Ob
 		if ((regionType & MEMORY_TYPE_NEW) || extensions->isVLHGC()) {
 			// TODO: ideally, we should only check this in the evacuate segment
 			// TODO: do some safety checks first -- is there enough room in the segment?
-			MM_ScavengerForwardedHeader scavengerForwardedHeader(objectPtr);
+			MM_ScavengerForwardedHeader scavengerForwardedHeader(objectPtr, extensions);
 			if (scavengerForwardedHeader.isForwardedPointer()) {
 				*newObjectPtr = scavengerForwardedHeader.getForwardedObject();
 				
@@ -473,7 +471,7 @@ GC_CheckEngine::checkJ9Object(J9JavaVM *javaVM, J9Object* objectPtr, J9MM_Iterat
 		}
 
 		/* TODO: find out what the indexable header size should really be */
-		if (extensions->objectModel.isIndexable(objectPtr) && (delta < sizeof(J9IndexableObjectContiguous))) {
+		if (extensions->objectModel.isIndexable(objectPtr) && (delta < J9JAVAVM_CONTIGUOUS_HEADER_SIZE(javaVM))) {
 			return J9MODRON_GCCHK_RC_INVALID_RANGE;
 		}
 
@@ -1066,15 +1064,13 @@ GC_CheckEngine::checkObjectHeap(J9JavaVM *javaVM, J9MM_IterateObjectDescriptor *
 		result = userData.result;
 	}
 
-	if (!extensions->isConcurrentScavengerEnabled()) {
-		/* check Ownable Synchronizer Object consistency */
-		if ((OBJECT_HEADER_SHAPE_MIXED == J9GC_CLASS_SHAPE(clazz)) && (0 != (J9CLASS_FLAGS(clazz) & J9AccClassOwnableSynchronizer))) {
-			if (NULL == extensions->accessBarrier->isObjectInOwnableSynchronizerList(objectDesc->object)) {
-				PORT_ACCESS_FROM_PORT(_portLibrary);
-				j9tty_printf(PORTLIB, "  <gc check: found Ownable SynchronizerObject %p is not on the list >\n", objectDesc->object);
-			} else {
-				_ownableSynchronizerObjectCountOnHeap += 1;
-			}
+	/* check Ownable Synchronizer Object consistency */
+	if ((OBJECT_HEADER_SHAPE_MIXED == J9GC_CLASS_SHAPE(clazz)) && (0 != (J9CLASS_FLAGS(clazz) & J9AccClassOwnableSynchronizer))) {
+		if (NULL == extensions->accessBarrier->isObjectInOwnableSynchronizerList(objectDesc->object)) {
+			PORT_ACCESS_FROM_PORT(_portLibrary);
+			j9tty_printf(PORTLIB, "  <gc check: found Ownable SynchronizerObject %p is not on the list >\n", objectDesc->object);
+		} else {
+			_ownableSynchronizerObjectCountOnHeap += 1;
 		}
 	}
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -33,6 +33,9 @@
 #include "env/jittypes.h"
 #include "infra/Link.hpp"
 #include "runtime/RuntimeAssumptions.hpp"
+#if defined(J9VM_OPT_JITSERVER)
+#include "env/JITServerCHTable.hpp"
+#endif
 
 class TR_FrontEnd;
 class TR_OpaqueClassBlock;
@@ -99,7 +102,7 @@ class TR_PatchNOPedGuardSiteOnClassExtend : public TR::PatchNOPedGuardSite
    protected:
    TR_PatchNOPedGuardSiteOnClassExtend(TR_PersistentMemory *pm, TR_OpaqueClassBlock *clazz,
                                          uint8_t *loc, uint8_t *dest)
-      : TR::PatchNOPedGuardSite(pm, (uintptrj_t)clazz, RuntimeAssumptionOnClassExtend,
+      : TR::PatchNOPedGuardSite(pm, (uintptr_t)clazz, RuntimeAssumptionOnClassExtend,
                                  loc, dest) {}
    public:
    static TR_PatchNOPedGuardSiteOnClassExtend *make(
@@ -112,7 +115,7 @@ class TR_PatchNOPedGuardSiteOnMethodOverride : public TR::PatchNOPedGuardSite
    protected:
    TR_PatchNOPedGuardSiteOnMethodOverride(TR_PersistentMemory *pm, TR_OpaqueMethodBlock *method,
                                          uint8_t *loc, uint8_t *dest)
-      : TR::PatchNOPedGuardSite(pm, (uintptrj_t)method, RuntimeAssumptionOnMethodOverride,
+      : TR::PatchNOPedGuardSite(pm, (uintptr_t)method, RuntimeAssumptionOnMethodOverride,
                                  loc, dest) {}
    public:
    static TR_PatchNOPedGuardSiteOnMethodOverride *make(
@@ -125,22 +128,22 @@ class TR_PatchNOPedGuardSiteOnClassPreInitialize : public TR::PatchNOPedGuardSit
    public:
    static TR_PatchNOPedGuardSiteOnClassPreInitialize *make(
       TR_FrontEnd *fe, TR_PersistentMemory *, char *sig, uint32_t sigLen, uint8_t *loc, uint8_t *dest, OMR::RuntimeAssumption **sentinel);
-   static uintptrj_t hashCode(char *sig, uint32_t sigLen);
+   static uintptr_t hashCode(char *sig, uint32_t sigLen);
 
    /** \copydoc OMR::RuntimeAssumption::reclaim()
     *     See base class documentation for more details.
     */
    virtual void reclaim();
 
-   virtual bool matches(uintptrj_t key) { return false; }
+   virtual bool matches(uintptr_t key) { return false; }
    virtual bool matches(char *sig, uint32_t sigLen);
-   virtual uintptrj_t hashCode() { return hashCode((char*)getKey(), _sigLen); }
+   virtual uintptr_t hashCode() { return hashCode((char*)getKey(), _sigLen); }
    virtual TR_RuntimeAssumptionKind getAssumptionKind() { return RuntimeAssumptionOnClassPreInitialize; }
 
    private:
    TR_PatchNOPedGuardSiteOnClassPreInitialize(TR_PersistentMemory *pm, char *sig, uint32_t sigLen,
                                               uint8_t *loc, uint8_t *dest)
-      : TR::PatchNOPedGuardSite(pm, (uintptrj_t)sig, RuntimeAssumptionOnClassPreInitialize,
+      : TR::PatchNOPedGuardSite(pm, (uintptr_t)sig, RuntimeAssumptionOnClassPreInitialize,
                                loc, dest), _sigLen(sigLen) {}
    uint32_t _sigLen;
    };
@@ -150,24 +153,24 @@ class TR_PatchNOPedGuardSiteOnClassRedefinition: public TR::PatchNOPedGuardSite
    protected:
    TR_PatchNOPedGuardSiteOnClassRedefinition(TR_PersistentMemory *pm, TR_OpaqueClassBlock *clazz,
                                              uint8_t *loc, uint8_t *dest)
-      : TR::PatchNOPedGuardSite(pm, (uintptrj_t)clazz, RuntimeAssumptionOnClassRedefinitionNOP, loc, dest) {}
+      : TR::PatchNOPedGuardSite(pm, (uintptr_t)clazz, RuntimeAssumptionOnClassRedefinitionNOP, loc, dest) {}
    public:
    static TR_PatchNOPedGuardSiteOnClassRedefinition *make(
       TR_FrontEnd *fe, TR_PersistentMemory *pm, TR_OpaqueClassBlock *clazz, uint8_t *loc, uint8_t *dest, OMR::RuntimeAssumption **sentinel);
    virtual TR_RuntimeAssumptionKind getAssumptionKind() { return RuntimeAssumptionOnClassRedefinitionNOP; }
-   void setKey(uintptrj_t newKey) {_key = newKey;}
+   void setKey(uintptr_t newKey) {_key = newKey;}
    };
 
 class TR_PatchMultipleNOPedGuardSitesOnClassRedefinition : public TR::PatchMultipleNOPedGuardSites
    {
    protected:
    TR_PatchMultipleNOPedGuardSitesOnClassRedefinition(TR_PersistentMemory *pm, TR_OpaqueClassBlock *clazz, TR::PatchSites *sites)
-      : TR::PatchMultipleNOPedGuardSites(pm, (uintptrj_t)clazz, RuntimeAssumptionOnClassRedefinitionNOP, sites) {}
+      : TR::PatchMultipleNOPedGuardSites(pm, (uintptr_t)clazz, RuntimeAssumptionOnClassRedefinitionNOP, sites) {}
    public:
    static TR_PatchMultipleNOPedGuardSitesOnClassRedefinition *make(
       TR_FrontEnd *fe, TR_PersistentMemory *pm, TR_OpaqueClassBlock *clazz, TR::PatchSites *sites, OMR::RuntimeAssumption **sentinel);
    virtual TR_RuntimeAssumptionKind getAssumptionKind() { return RuntimeAssumptionOnClassRedefinitionNOP; }
-   void setKey(uintptrj_t newKey) {_key = newKey;}
+   void setKey(uintptr_t newKey) {_key = newKey;}
    };
 
 class TR_PatchNOPedGuardSiteOnStaticFinalFieldModification : public TR::PatchNOPedGuardSite
@@ -175,7 +178,7 @@ class TR_PatchNOPedGuardSiteOnStaticFinalFieldModification : public TR::PatchNOP
    protected:
    TR_PatchNOPedGuardSiteOnStaticFinalFieldModification(TR_PersistentMemory *pm, TR_OpaqueClassBlock *clazz,
                                              uint8_t *loc, uint8_t *dest)
-      : TR::PatchNOPedGuardSite(pm, (uintptrj_t)clazz, RuntimeAssumptionOnStaticFinalFieldModification, loc, dest) {}
+      : TR::PatchNOPedGuardSite(pm, (uintptr_t)clazz, RuntimeAssumptionOnStaticFinalFieldModification, loc, dest) {}
    public:
    static TR_PatchNOPedGuardSiteOnStaticFinalFieldModification *make(
       TR_FrontEnd *fe, TR_PersistentMemory *pm, TR_OpaqueClassBlock *clazz, uint8_t *loc, uint8_t *dest, OMR::RuntimeAssumption **sentinel);
@@ -186,7 +189,7 @@ class TR_PatchMultipleNOPedGuardSitesOnStaticFinalFieldModification : public TR:
    {
    protected:
    TR_PatchMultipleNOPedGuardSitesOnStaticFinalFieldModification(TR_PersistentMemory *pm, TR_OpaqueClassBlock *clazz, TR::PatchSites *sites)
-      : TR::PatchMultipleNOPedGuardSites(pm, (uintptrj_t)clazz, RuntimeAssumptionOnStaticFinalFieldModification, sites) {}
+      : TR::PatchMultipleNOPedGuardSites(pm, (uintptr_t)clazz, RuntimeAssumptionOnStaticFinalFieldModification, sites) {}
    public:
    static TR_PatchMultipleNOPedGuardSitesOnStaticFinalFieldModification *make(
       TR_FrontEnd *fe, TR_PersistentMemory *pm, TR_OpaqueClassBlock *clazz, TR::PatchSites *sites, OMR::RuntimeAssumption **sentinel);
@@ -196,12 +199,12 @@ class TR_PatchMultipleNOPedGuardSitesOnStaticFinalFieldModification : public TR:
 class TR_PatchNOPedGuardSiteOnMutableCallSiteChange : public TR::PatchNOPedGuardSite
    {
    protected:
-   TR_PatchNOPedGuardSiteOnMutableCallSiteChange(TR_PersistentMemory *pm, uintptrj_t key,
+   TR_PatchNOPedGuardSiteOnMutableCallSiteChange(TR_PersistentMemory *pm, uintptr_t key,
                                          uint8_t *loc, uint8_t *dest)
       : TR::PatchNOPedGuardSite(pm, key, RuntimeAssumptionOnMutableCallSiteChange, loc, dest) {}
    public:
    static TR_PatchNOPedGuardSiteOnMutableCallSiteChange *make(
-      TR_FrontEnd *fe, TR_PersistentMemory *pm, uintptrj_t KEY_WILL_GO_HERE, uint8_t *loc, uint8_t *dest, OMR::RuntimeAssumption **sentinel);
+      TR_FrontEnd *fe, TR_PersistentMemory *pm, uintptr_t KEY_WILL_GO_HERE, uint8_t *loc, uint8_t *dest, OMR::RuntimeAssumption **sentinel);
    virtual TR_RuntimeAssumptionKind getAssumptionKind() { return RuntimeAssumptionOnMutableCallSiteChange; }
    };
 
@@ -210,7 +213,7 @@ class TR_PatchNOPedGuardSiteOnMethodBreakPoint : public TR::PatchNOPedGuardSite
    protected:
    TR_PatchNOPedGuardSiteOnMethodBreakPoint(TR_PersistentMemory *pm, TR_OpaqueMethodBlock *j9method,
                        uint8_t *location, uint8_t *destination)
-      : TR::PatchNOPedGuardSite(pm, (uintptrj_t)j9method, RuntimeAssumptionOnMethodBreakPoint, location, destination) {}
+      : TR::PatchNOPedGuardSite(pm, (uintptr_t)j9method, RuntimeAssumptionOnMethodBreakPoint, location, destination) {}
 
    public: 
    static TR_PatchNOPedGuardSiteOnMethodBreakPoint *make(
@@ -223,13 +226,13 @@ class TR_PatchNOPedGuardSiteOnMethodBreakPoint : public TR::PatchNOPedGuardSite
 class TR_PatchJNICallSite : public OMR::ValueModifyRuntimeAssumption
    {
    protected:
-   TR_PatchJNICallSite(TR_PersistentMemory *pm, uintptrj_t key, uint8_t *pc)
+   TR_PatchJNICallSite(TR_PersistentMemory *pm, uintptr_t key, uint8_t *pc)
       : OMR::ValueModifyRuntimeAssumption(pm, key), _pc(pc) {}
 
    public:
    TR_PERSISTENT_ALLOC_THROW(TR_Memory::CallSiteInfo)
    static TR_PatchJNICallSite *make(
-      TR_FrontEnd *fe, TR_PersistentMemory * pm, uintptrj_t key, uint8_t *pc, OMR::RuntimeAssumption **sentinel);
+      TR_FrontEnd *fe, TR_PersistentMemory * pm, uintptr_t key, uint8_t *pc, OMR::RuntimeAssumption **sentinel);
 
    virtual void dumpInfo();
 
@@ -253,7 +256,7 @@ class TR_PatchJNICallSite : public OMR::ValueModifyRuntimeAssumption
 class TR_PreXRecompile : public OMR::LocationRedirectRuntimeAssumption
    {
    protected:
-   TR_PreXRecompile(TR_PersistentMemory *pm, uintptrj_t key, TR_RuntimeAssumptionKind kind, uint8_t *startPC)
+   TR_PreXRecompile(TR_PersistentMemory *pm, uintptr_t key, TR_RuntimeAssumptionKind kind, uint8_t *startPC)
       : OMR::LocationRedirectRuntimeAssumption(pm, key), _startPC(startPC) {}
 
    public:
@@ -283,7 +286,7 @@ class TR_PreXRecompileOnClassExtend : public TR_PreXRecompile
    {
    protected:
    TR_PreXRecompileOnClassExtend(TR_PersistentMemory *pm, TR_OpaqueClassBlock *clazz, uint8_t *startPC)
-      : TR_PreXRecompile(pm, (uintptrj_t)clazz, RuntimeAssumptionOnClassExtend, startPC) {}
+      : TR_PreXRecompile(pm, (uintptr_t)clazz, RuntimeAssumptionOnClassExtend, startPC) {}
    public:
    virtual TR_RuntimeAssumptionKind getAssumptionKind() { return RuntimeAssumptionOnClassExtend; }
    static TR_PreXRecompileOnClassExtend *make(
@@ -294,7 +297,7 @@ class TR_PreXRecompileOnMethodOverride : public TR_PreXRecompile
    {
    protected:
    TR_PreXRecompileOnMethodOverride(TR_PersistentMemory *pm, TR_OpaqueMethodBlock *method, uint8_t *startPC)
-      : TR_PreXRecompile(pm, (uintptrj_t)method, RuntimeAssumptionOnMethodOverride, startPC) {}
+      : TR_PreXRecompile(pm, (uintptr_t)method, RuntimeAssumptionOnMethodOverride, startPC) {}
    public:
    virtual TR_RuntimeAssumptionKind getAssumptionKind() { return RuntimeAssumptionOnMethodOverride; }
    static TR_PreXRecompileOnMethodOverride *make(
@@ -414,6 +417,9 @@ class TR_CHTable
    void commitVirtualGuard(TR_VirtualGuard *info, List<TR_VirtualGuardSite> &sites,
                            TR_PersistentCHTable *table, TR::Compilation *comp);
    void commitOSRVirtualGuards(TR::Compilation *comp, TR::list<TR_VirtualGuard*> &vguards);
+#if defined(J9VM_OPT_JITSERVER)
+   CHTableCommitData computeDataForCHTableCommit(TR::Compilation *comp);
+#endif
 
    TR_Array<TR_OpaqueClassBlock *> *getClasses() { return _classes;}
    TR_Array<TR_OpaqueClassBlock *> *getClassesThatShouldNotBeNewlyExtended() { return _classesThatShouldNotBeNewlyExtended;}

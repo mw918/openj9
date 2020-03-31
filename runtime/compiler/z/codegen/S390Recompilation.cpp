@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,11 +25,13 @@
 #include "codegen/CodeGenerator.hpp"
 #include "codegen/Linkage_inlines.hpp"
 #include "codegen/Machine.hpp"
+#include "codegen/PrivateLinkage.hpp"
 #include "compile/ResolvedMethod.hpp"
 #include "control/Recompilation.hpp"
 #include "control/RecompilationInfo.hpp"
 #include "env/CompilerEnv.hpp"
 #include "env/jittypes.h"
+#include "env/j9method.h"
 #include "env/VMJ9.h"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
@@ -59,19 +61,8 @@ TR_S390Recompilation::getExistingMethodInfo(TR_ResolvedMethod * method)
    // start PC address. The mechanism is different depending on whether the
    // method was compiled for sampling or counting.
    //
-   char * startPC = (char *) method->startAddressForInterpreterOfJittedMethod();
-   if (NULL == startPC)
-      {
-      return NULL;
-      }
-   // need to pass in StartPC, which is the entry point of the interpreter ie includes the loads
-   TR_PersistentMethodInfo *info = getMethodInfoFromPC(startPC);
-   if (debug("traceRecompilation"))
-      {
-      //diagnostic("RC>>Recompiling %s at level %d\n", signature(_compilation->getCurrentMethod()), info->getHotness());
-      }
-
-   return info;
+   TR_PersistentJittedBodyInfo *bodyInfo = ((TR_ResolvedJ9Method*) method)->getExistingJittedBodyInfo();
+   return bodyInfo ? bodyInfo->getMethodInfo() : NULL;
    }
 
 TR_S390Recompilation::TR_S390Recompilation(TR::Compilation * comp)
@@ -205,10 +196,10 @@ TR_S390Recompilation::generatePrePrologue()
 
       AOTcgDiag4(comp, "Add encodingRelocation = %p reloType = %p symbolRef = %p helperId = %x\n", encodingRelocation, encodingRelocation->getReloType(), encodingRelocation->getSymbolReference(), TR_S390samplingRecompileMethod);
 
-      const intptrj_t samplingRecompileMethodAddress = reinterpret_cast<intptrj_t>(helperSymRef->getMethodAddress());
+      const intptr_t samplingRecompileMethodAddress = reinterpret_cast<intptr_t>(helperSymRef->getMethodAddress());
 
       // Encode the address of the sampling method
-      if (TR::Compiler->target.is64Bit())
+      if (cg->comp()->target().is64Bit())
          {
          cursor = generateDataConstantInstruction(cg, TR::InstOpCode::DC, node, UPPER_4_BYTES(samplingRecompileMethodAddress), cursor);
          cursor->setEncodingRelocation(encodingRelocation);
@@ -249,11 +240,11 @@ TR_S390Recompilation::generatePrePrologue()
 
    AOTcgDiag3(comp, "Add encodingRelocation = %p reloType = %p symbolRef = %p\n", encodingRelocation, encodingRelocation->getReloType(), encodingRelocation->getSymbolReference());
 
-   const intptrj_t bodyInfoAddress = reinterpret_cast<intptrj_t>(getJittedBodyInfo());
+   const intptr_t bodyInfoAddress = reinterpret_cast<intptr_t>(getJittedBodyInfo());
 
    // Encode the persistent body info address. Note that we must generate this irregardless of whether we are sampling
    // or not as the counting recompilation generated in the prologue will use this location.
-   if (TR::Compiler->target.is64Bit())
+   if (cg->comp()->target().is64Bit())
       {
       cursor = generateDataConstantInstruction(cg, TR::InstOpCode::DC, node, UPPER_4_BYTES(bodyInfoAddress), cursor);
       cursor->setEncodingRelocation(encodingRelocation);
@@ -300,7 +291,7 @@ TR_S390Recompilation::generatePrePrologue()
       }
 
    // Save the preprologue size to the JIT entry point for use of JIT entry point alignment
-   cg->setPreprologueOffset(preprologueSize);
+   cg->setPreJitMethodEntrySize(preprologueSize);
 
    return cursor;
    }
@@ -419,9 +410,9 @@ TR_S390Recompilation::generatePrologue(TR::Instruction* cursor)
 
    AOTcgDiag4(comp, "Add encodingRelocation = %p reloType = %p symbolRef = %p helperId = %x\n", encodingRelocation, encodingRelocation->getReloType(), encodingRelocation->getSymbolReference(), TR_S390countingRecompileMethod);
 
-   const intptrj_t countingRecompileMethodAddress = reinterpret_cast<intptrj_t>(helperSymRef->getMethodAddress());
+   const intptr_t countingRecompileMethodAddress = reinterpret_cast<intptr_t>(helperSymRef->getMethodAddress());
 
-   if (TR::Compiler->target.is64Bit())
+   if (cg->comp()->target().is64Bit())
       {
       cursor = generateDataConstantInstruction(cg, TR::InstOpCode::DC, node, UPPER_4_BYTES(countingRecompileMethodAddress), cursor);
       cursor->setEncodingRelocation(encodingRelocation);
@@ -504,9 +495,9 @@ TR_S390Recompilation::generatePrologue(TR::Instruction* cursor)
 
    AOTcgDiag4(comp, "Add encodingRelocation = %p reloType = %p symbolRef = %p helperId = %x\n", encodingRelocation, encodingRelocation->getReloType(), encodingRelocation->getSymbolReference(), TR_S390countingPatchCallSite);
 
-   const intptrj_t countingPatchCallSiteAddress = reinterpret_cast<intptrj_t>(helperSymRef->getMethodAddress());
+   const intptr_t countingPatchCallSiteAddress = reinterpret_cast<intptr_t>(helperSymRef->getMethodAddress());
 
-   if (TR::Compiler->target.is64Bit())
+   if (cg->comp()->target().is64Bit())
       {
       cursor = generateDataConstantInstruction(cg, TR::InstOpCode::DC, node, UPPER_4_BYTES(countingPatchCallSiteAddress), cursor);
       cursor->setEncodingRelocation(encodingRelocation);
@@ -560,7 +551,7 @@ void TR_S390Recompilation::postCompilation()
    if(!couldBeCompiledAgain()) return;
 
    uint8_t  *startPC = _compilation->cg()->getCodeStart();
-   TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get(startPC);
+   J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
    int32_t jitEntryOffset = linkageInfo->getReservedWord() & 0x0ffff;
    uint32_t * jitEntryPoint = (uint32_t*)(startPC + jitEntryOffset);
    uint32_t * saveLocn = (uint32_t*)(startPC + OFFSET_INTEP_JITEP_SAVE_RESTORE_LOCATION);

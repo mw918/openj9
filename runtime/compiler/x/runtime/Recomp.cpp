@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,14 +24,16 @@
 
 #include <limits.h>
 #include <stdint.h>
+#include "codegen/PrivateLinkage.hpp"
 #include "env/jittypes.h"
 #include "runtime/CodeCacheManager.hpp"
 #include "runtime/J9Runtime.hpp"
 #include "x/runtime/X86Runtime.hpp"
 #include "env/VMJ9.h"
+#include "control/CompilationRuntime.hpp"
 
 #if defined(TR_HOST_X86) && defined(TR_HOST_64BIT)
-#define IS_32BIT_RIP(x,rip)  ((intptrj_t)(x) == (intptrj_t)(rip) + (int32_t)((intptrj_t)(x) - (intptrj_t)(rip)))
+#define IS_32BIT_RIP(x,rip)  ((intptr_t)(x) == (intptr_t)(rip) + (int32_t)((intptr_t)(x) - (intptr_t)(rip)))
 
 extern "C" void mcc_callPointPatching_unwrapper(void **argsPtr, void *resPtr);
 
@@ -62,7 +64,7 @@ extern "C" void mcc_AMD64callPointPatching_unwrapper(void **argsPtr, void **resP
       // Maybe it's a call through a trampoline.
       //
       static char *alwaysUseTrampolines = feGetEnv("TR_AlwaysUseTrampolines");
-      if (!IS_32BIT_RIP(oldJitEntry, (intptrj_t)(callSite+5)) || alwaysUseTrampolines)
+      if (!IS_32BIT_RIP(oldJitEntry, (intptr_t)(callSite+5)) || alwaysUseTrampolines)
          {
          trampoline = (uint8_t*)TR::CodeCacheManager::instance()->findMethodTrampoline(method, callSite);
          }
@@ -104,15 +106,26 @@ extern "C" void mcc_AMD64callPointPatching_unwrapper(void **argsPtr, void **resP
 //
 TR_PersistentJittedBodyInfo *J9::Recompilation::getJittedBodyInfoFromPC(void *startPC)
    {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      TR_ASSERT(TR::comp(), "Must be used during compilation when calling getJittedBodyInfoFromPC on the server");
+      stream->write(JITServer::MessageType::Recompilation_getJittedBodyInfoFromPC, startPC);
+      auto recv = stream->read<std::string, std::string>();
+      auto &bodyInfoStr = std::get<0>(recv);
+      auto &methodInfoStr = std::get<1>(recv);
+      return J9::Recompilation::persistentJittedBodyInfoFromString(bodyInfoStr, methodInfoStr, TR::comp()->trMemory());
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
    // The body info pointer is stored in the pre-prologue of the method. The
    // location of the field depends upon the type of the method header.  Use the
    // header-type bits in the linkage info fields to determine what kind of header
    // this is.
    //
-   TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get(startPC);
+   J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
    return linkageInfo->isRecompMethodBody() ?
       *(TR_PersistentJittedBodyInfo **)((uint8_t*)startPC + START_PC_TO_METHOD_INFO_ADDRESS) :
-      0;
+      NULL;
    }
 
 // This method should only be called for methods compiled for sampling
@@ -135,7 +148,7 @@ bool J9::Recompilation::isAlreadyPreparedForRecompile(void *startPC)
 //
 void J9::Recompilation::fixUpMethodCode(void *startPC)
    {
-   TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get(startPC);
+   J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
    if (linkageInfo->isCountingMethodBody())
       {
       TR_PersistentJittedBodyInfo   *bodyInfo = getJittedBodyInfoFromPC(startPC);
@@ -162,7 +175,7 @@ void J9::Recompilation::methodHasBeenRecompiled(void *oldStartPC, void *newStart
    char *startByte = (char*)oldStartPC + jitEntryOffset(oldStartPC);
    char *p;
    int32_t offset, bytesToSaveAtStart;
-   TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get(oldStartPC);
+   J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(oldStartPC);
    if (linkageInfo->isCountingMethodBody())
       {
       // The start of the old method looks like on IA32:
@@ -193,10 +206,10 @@ void J9::Recompilation::methodHasBeenRecompiled(void *oldStartPC, void *newStart
       //    DB    ??                     (8 bytes of junk)
       //    JL    recompilationSnippet   (6 bytes)
       //
-      intptrj_t helperAddr = (intptrj_t)runtimeHelperValue(COUNTING_PATCH_CALL_SITE);
+      intptr_t helperAddr = (intptr_t)runtimeHelperValue(COUNTING_PATCH_CALL_SITE);
 
 #if defined(TR_HOST_X86) && defined(TR_HOST_64BIT)
-      if (!IS_32BIT_RIP(helperAddr, (intptrj_t)(startByte+5)))
+      if (!IS_32BIT_RIP(helperAddr, (intptr_t)(startByte+5)))
          {
          helperAddr = TR::CodeCacheManager::instance()->findHelperTrampoline(COUNTING_PATCH_CALL_SITE, startByte);
          }
@@ -235,10 +248,10 @@ void J9::Recompilation::methodHasBeenRecompiled(void *oldStartPC, void *newStart
       //
       p = (char*)oldStartPC + START_PC_TO_RECOMPILE_SAMPLING + 1; // the immediate field of the call
 
-      intptrj_t helperAddr = (intptrj_t)runtimeHelperValue(SAMPLING_PATCH_CALL_SITE);
+      intptr_t helperAddr = (intptr_t)runtimeHelperValue(SAMPLING_PATCH_CALL_SITE);
 
 #if defined(TR_HOST_X86) && defined(TR_HOST_64BIT)
-      if (!IS_32BIT_RIP(helperAddr, (intptrj_t)(p+4)))
+      if (!IS_32BIT_RIP(helperAddr, (intptr_t)(p+4)))
          {
          helperAddr = TR::CodeCacheManager::instance()->findHelperTrampoline(SAMPLING_PATCH_CALL_SITE, p);
          }
@@ -271,7 +284,7 @@ void J9::Recompilation::methodHasBeenRecompiled(void *oldStartPC, void *newStart
 void J9::Recompilation::methodCannotBeRecompiled(void *oldStartPC, TR_FrontEnd *fe)
    {
    char *startByte = (char*)oldStartPC + jitEntryOffset(oldStartPC);
-   TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get(oldStartPC);
+   J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(oldStartPC);
    TR_J9VMBase *fej9 = (TR_J9VMBase *)fe;
    TR_ASSERT( linkageInfo->isSamplingMethodBody() && !linkageInfo->isCountingMethodBody() ||
           !linkageInfo->isSamplingMethodBody() &&  linkageInfo->isCountingMethodBody(),
@@ -340,7 +353,7 @@ void J9::Recompilation::invalidateMethodBody(void *startPC, TR_FrontEnd *fe)
    // Preexistence assumptions for this method have been violated.  Make the
    // method no-longer runnable and schedule it for a sync recompilation
    //
-   TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get(startPC);
+   J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
    //linkageInfo->setInvalidated();
    TR_PersistentJittedBodyInfo* bodyInfo = getJittedBodyInfoFromPC(startPC);
    bodyInfo->setIsInvalidated(); // bodyInfo must exist

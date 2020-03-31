@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -1173,6 +1173,12 @@ done:
 	return result;
 }
 
+jarray JNICALL
+Java_java_lang_Class_getRecordComponentsImpl(JNIEnv *env, jobject cls)
+{
+	return getRecordComponentsHelper(env, cls);
+}
+
 static UDATA
 frameIteratorGetAccSnapshotHelper(J9VMThread * currentThread, J9StackWalkState * walkState, j9object_t acc, j9object_t perm)
 {
@@ -1757,7 +1763,7 @@ storePDobjectsHelper(J9VMThread* vmThread, J9Class* arrayClass, J9StackWalkState
 		j9object_t lastPD = NULL;
 		I_32 resultIndex = startPos;
 		UDATA *cachePtr = walkState->cache;
-		j9object_t pd;
+		j9object_t pd = NULL;
 		for (i = framesWalked; i > 0; i--) {
 			pd = J9VMJAVALANGCLASS_PROTECTIONDOMAIN(vmThread, J9VM_J9CLASS_TO_HEAPCLASS(J9_CLASS_FROM_CP(*cachePtr)));
 			cachePtr += 1;
@@ -1838,7 +1844,6 @@ Java_java_lang_Class_getNestMembersImpl(JNIEnv *env, jobject recv)
 	U_16 nestMemberCount = 0;
 	J9Class *jlClass = NULL;
 	J9Class *arrayClass = NULL;
-	J9Class *nestMember = NULL;
 
 	vmFuncs->internalEnterVMFromJNI(currentThread);
 
@@ -1847,7 +1852,6 @@ Java_java_lang_Class_getNestMembersImpl(JNIEnv *env, jobject recv)
 
 	if (NULL == nestHost) {
 		if (J9_VISIBILITY_ALLOWED != vmFuncs->loadAndVerifyNestHost(currentThread, clazz, 0)) {
-			nestMember = clazz;
 			goto _done;
 		}
 		nestHost = clazz->nestHost;
@@ -1883,7 +1887,7 @@ Java_java_lang_Class_getNestMembersImpl(JNIEnv *env, jobject recv)
 			J9UTF8 *nestMemberName = NNSRP_GET(nestMembers[i], J9UTF8 *);
 
 			PUSH_OBJECT_IN_SPECIAL_FRAME(currentThread, resultObject);
-			nestMember = vmFuncs->internalFindClassUTF8(currentThread, J9UTF8_DATA(nestMemberName), J9UTF8_LENGTH(nestMemberName), classLoader, J9_FINDCLASS_FLAG_THROW_ON_FAIL);
+			J9Class *nestMember = vmFuncs->internalFindClassUTF8(currentThread, J9UTF8_DATA(nestMemberName), J9UTF8_LENGTH(nestMemberName), classLoader, J9_FINDCLASS_FLAG_THROW_ON_FAIL);
 			resultObject = POP_OBJECT_IN_SPECIAL_FRAME(currentThread);
 
 			if (NULL == nestMember) {

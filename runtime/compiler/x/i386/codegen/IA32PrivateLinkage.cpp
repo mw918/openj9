@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -22,6 +22,7 @@
 
 #include "codegen/IA32PrivateLinkage.hpp"
 
+#include "codegen/CodeGenerator.hpp"
 #include "codegen/Linkage_inlines.hpp"
 #include "codegen/LiveRegister.hpp"
 #include "codegen/Machine.hpp"
@@ -47,8 +48,8 @@
 #include "x/codegen/IA32LinkageUtils.hpp"
 #include "x/codegen/X86Instruction.hpp"
 
-TR::IA32PrivateLinkage::IA32PrivateLinkage(TR::CodeGenerator *cg)
-   : TR::X86PrivateLinkage(cg)
+J9::X86::I386::PrivateLinkage::PrivateLinkage(TR::CodeGenerator *cg)
+   : J9::X86::PrivateLinkage(cg)
    {
    _properties._properties = 0;
    _properties._registerFlags[TR::RealRegister::NoReg] = 0;
@@ -146,7 +147,7 @@ TR::IA32PrivateLinkage::IA32PrivateLinkage(TR::CodeGenerator *cg)
    _properties._allocationOrder[14] = TR::RealRegister::st7;
    }
 
-TR::Instruction *TR::IA32PrivateLinkage::savePreservedRegisters(TR::Instruction *cursor)
+TR::Instruction *J9::X86::I386::PrivateLinkage::savePreservedRegisters(TR::Instruction *cursor)
    {
    TR::ResolvedMethodSymbol *bodySymbol  = comp()->getJittedMethodSymbol();
    const int32_t          localSize   = _properties.getOffsetToFirstLocal() - bodySymbol->getLocalMappingCursor();
@@ -176,7 +177,7 @@ TR::Instruction *TR::IA32PrivateLinkage::savePreservedRegisters(TR::Instruction 
    return cursor;
    }
 
-TR::Instruction *TR::IA32PrivateLinkage::restorePreservedRegisters(TR::Instruction *cursor)
+TR::Instruction *J9::X86::I386::PrivateLinkage::restorePreservedRegisters(TR::Instruction *cursor)
    {
    TR::ResolvedMethodSymbol *bodySymbol  = comp()->getJittedMethodSymbol();
    const int32_t          localSize   = _properties.getOffsetToFirstLocal() - bodySymbol->getLocalMappingCursor();
@@ -206,7 +207,7 @@ TR::Instruction *TR::IA32PrivateLinkage::restorePreservedRegisters(TR::Instructi
    }
 
 
-int32_t TR::IA32PrivateLinkage::buildArgs(
+int32_t J9::X86::I386::PrivateLinkage::buildArgs(
       TR::Node *callNode,
       TR::RegisterDependencyConditions *dependencies)
    {
@@ -316,7 +317,7 @@ int32_t TR::IA32PrivateLinkage::buildArgs(
    }
 
 
-TR::UnresolvedDataSnippet *TR::IA32PrivateLinkage::generateX86UnresolvedDataSnippetWithCPIndex(
+TR::UnresolvedDataSnippet *J9::X86::I386::PrivateLinkage::generateX86UnresolvedDataSnippetWithCPIndex(
       TR::Node *child,
       TR::SymbolReference *symRef,
       int32_t cpIndex)
@@ -334,7 +335,7 @@ TR::UnresolvedDataSnippet *TR::IA32PrivateLinkage::generateX86UnresolvedDataSnip
    return snippet;
    }
 
-TR::Register *TR::IA32PrivateLinkage::pushIntegerWordArg(TR::Node *child)
+TR::Register *J9::X86::I386::PrivateLinkage::pushIntegerWordArg(TR::Node *child)
    {
    TR::Compilation *comp = cg()->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
@@ -382,7 +383,7 @@ TR::Register *TR::IA32PrivateLinkage::pushIntegerWordArg(TR::Node *child)
                {
                // Must pass symbol reference so that aot can put out a relocation for it
                //
-               TR::Instruction *instr = generateImmSymInstruction(PUSHImm4, child, (uintptrj_t)sym->getStaticAddress(), symRef, cg());
+               TR::Instruction *instr = generateImmSymInstruction(PUSHImm4, child, (uintptr_t)sym->getStaticAddress(), symRef, cg());
 
                // HCR register the class passed as a parameter
                //
@@ -402,7 +403,7 @@ TR::Register *TR::IA32PrivateLinkage::pushIntegerWordArg(TR::Node *child)
    return TR::IA32LinkageUtils::pushIntegerWordArg(child, cg());
    }
 
-TR::Register *TR::IA32PrivateLinkage::pushThis(TR::Node *child)
+TR::Register *J9::X86::I386::PrivateLinkage::pushThis(TR::Node *child)
    {
    // Don't decrement the reference count on the "this" child until we've
    // had a chance to set up its dependency conditions
@@ -426,7 +427,7 @@ static TR_AtomicRegion X86PicCallAtomicRegion[] =
    };
 
 
-TR::Instruction *TR::IA32PrivateLinkage::buildPICSlot(
+TR::Instruction *J9::X86::I386::PrivateLinkage::buildPICSlot(
       TR::X86PICSlot picSlot,
       TR::LabelSymbol *mismatchLabel,
       TR::LabelSymbol *doneLabel,
@@ -434,11 +435,11 @@ TR::Instruction *TR::IA32PrivateLinkage::buildPICSlot(
    {
    TR::Node *node = site.getCallNode();
    TR::Register *vftReg = site.evaluateVFT();
-   uintptrj_t addrToBeCompared = picSlot.getClassAddress();
+   uintptr_t addrToBeCompared = picSlot.getClassAddress();
    TR::Instruction *firstInstruction;
    if (picSlot.getMethodAddress())
       {
-      addrToBeCompared = (uintptrj_t) picSlot.getMethodAddress();
+      addrToBeCompared = (uintptr_t) picSlot.getMethodAddress();
       firstInstruction = generateMemImmInstruction(CMPMemImm4(false), node,
                                 generateX86MemoryReference(vftReg, picSlot.getSlot(), cg()), (uint32_t) addrToBeCompared, cg());
       }
@@ -493,12 +494,12 @@ TR::Instruction *TR::IA32PrivateLinkage::buildPICSlot(
    TR::Instruction *instr;
    if (picSlot.getMethod())
       {
-      instr = generateImmInstruction(CALLImm4, node, (uint32_t)(uintptrj_t)picSlot.getMethod()->startAddressForJittedMethod(), cg());
+      instr = generateImmInstruction(CALLImm4, node, (uint32_t)(uintptr_t)picSlot.getMethod()->startAddressForJittedMethod(), cg());
       }
    else if (picSlot.getHelperMethodSymbolRef())
       {
       TR::MethodSymbol *helperMethod = picSlot.getHelperMethodSymbolRef()->getSymbol()->castToMethodSymbol();
-      instr = generateImmSymInstruction(CALLImm4, node, (uint32_t)(uintptrj_t)helperMethod->getMethodAddress(), picSlot.getHelperMethodSymbolRef(), cg());
+      instr = generateImmSymInstruction(CALLImm4, node, (uint32_t)(uintptr_t)helperMethod->getMethodAddress(), picSlot.getHelperMethodSymbolRef(), cg());
       }
    else
       {
@@ -573,7 +574,7 @@ static TR_AtomicRegion ia32IPicAtomicRegionsRT[] =
    { 0,0 }      // (null terminator)
    };
 
-void TR::IA32PrivateLinkage::buildIPIC(
+void J9::X86::I386::PrivateLinkage::buildIPIC(
       TR::X86CallSite &site,
       TR::LabelSymbol *entryLabel,
       TR::LabelSymbol *doneLabel,
@@ -643,7 +644,7 @@ void TR::IA32PrivateLinkage::buildIPIC(
 
    TR::Method *method = site.getMethodSymbol()->getMethod();
    TR_OpaqueClassBlock *declaringClass = NULL;
-   uintptrj_t itableIndex;
+   uintptr_t itableIndex;
    if (  useLastITableCache
       && (declaringClass = site.getSymbolReference()->getOwningMethod(comp())->getResolvedInterfaceMethod(site.getSymbolReference()->getCPIndex(), &itableIndex))
       && performTransformation(comp(), "O^O useLastITableCache for n%dn itableIndex=%d: %.*s.%.*s%.*s\n",
@@ -686,7 +687,7 @@ void TR::IA32PrivateLinkage::buildIPIC(
    cg()->addSnippet(snippet);
    }
 
-void TR::IA32PrivateLinkage::buildVirtualOrComputedCall(
+void J9::X86::I386::PrivateLinkage::buildVirtualOrComputedCall(
       TR::X86CallSite &site,
       TR::LabelSymbol *entryLabel,
       TR::LabelSymbol *doneLabel,
@@ -707,7 +708,7 @@ void TR::IA32PrivateLinkage::buildVirtualOrComputedCall(
       if (entryLabel)
          generateLabelInstruction(LABEL, site.getCallNode(), entryLabel, cg());
 
-      intptrj_t offset=site.getSymbolReference()->getOffset();
+      intptr_t offset=site.getSymbolReference()->getOffset();
       if (!resolvedSite)
          offset = 0;
 
@@ -715,7 +716,7 @@ void TR::IA32PrivateLinkage::buildVirtualOrComputedCall(
       }
    else
       {
-      TR::X86PrivateLinkage::buildVPIC(site, entryLabel, doneLabel);
+      J9::X86::PrivateLinkage::buildVPIC(site, entryLabel, doneLabel);
       }
    }
 

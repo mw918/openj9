@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,9 +23,9 @@
 #include "control/J9Options.hpp"
 
 #include <algorithm>
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
 #include <random>
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
 #include <ctype.h>
 #include <stdint.h>
 #include "jitprotos.h"
@@ -34,9 +34,10 @@
 #include "j9cfg.h"
 #include "j9modron.h"
 #include "jvminit.h"
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
 #include "j9vmnls.h"
-#endif /* defined(JITSERVER_SUPPORT) */
+#include "omrformatconsts.h"
+#endif /* defined(J9VM_OPT_JITSERVER) */
 #include "codegen/CodeGenerator.hpp"
 #include "compile/Compilation.hpp"
 #include "control/Recompilation.hpp"
@@ -49,11 +50,10 @@
 #include "control/CompilationRuntime.hpp"
 #include "control/CompilationThread.hpp"
 #include "runtime/IProfiler.hpp"
-// JITSERVER_TODO guards the code that relies on other JITServer unmerged files.
-#if defined(JITSERVER_SUPPORT) && defined(JITSERVER_TODO)
+#if defined(J9VM_OPT_JITSERVER)
 #include "env/j9methodServer.hpp"
 #include "control/JITServerCompilationThread.hpp"
-#endif /* defined(JITSERVER_SUPPORT) && defined(JITSERVER_TODO) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 #if defined(J9VM_OPT_SHARED_CLASSES)
 #include "j9jitnls.h"
@@ -73,11 +73,11 @@ bool enableCompiledMethodLoadHookOnly = false;
 bool J9::Options::_doNotProcessEnvVars = false; // set through XX options in Java
 bool J9::Options::_reportByteCodeInfoAtCatchBlock = false;
 int32_t J9::Options::_samplingFrequencyInIdleMode = 1000; // ms
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
 int32_t J9::Options::_statisticsFrequency = 0; // ms
 uint32_t J9::Options::_compilationSequenceNumber = 0;
 static const size_t JITSERVER_LOG_FILENAME_MAX_SIZE = 1025;
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
 int32_t J9::Options::_samplingFrequencyInDeepIdleMode = 100000; // ms
 int32_t J9::Options::_resetCountThreshold = 0; // Disable the feature
 int32_t J9::Options::_scorchingSampleThreshold = 240;
@@ -120,7 +120,7 @@ bool J9::Options::_userClassLoadingPhase = false;
 int32_t J9::Options::_bigAppSampleThresholdAdjust = 3; //amount to shift the hot and scorching threshold
 int32_t J9::Options::_availableCPUPercentage = 100;
 int32_t J9::Options::_cpuCompTimeExpensiveThreshold = 4000;
-uintptrj_t J9::Options::_compThreadAffinityMask = 0;
+uintptr_t J9::Options::_compThreadAffinityMask = 0;
 
 int32_t J9::Options::_interpreterSamplingThreshold = 300;
 int32_t J9::Options::_interpreterSamplingDivisor = TR_DEFAULT_INTERPRETER_SAMPLING_DIVISOR;
@@ -320,11 +320,7 @@ qualifiedSize(UDATA *byteSize, char **qualifier)
 bool
 J9::Options::useCompressedPointers()
    {
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-   return true;
-#else
-   return false;
-#endif
+   return TR::Compiler->om.compressObjectReferences();
    }
 
 
@@ -656,7 +652,7 @@ Options::setJitConfigNumericValue(char *option, void *base, TR::OptionTable *ent
    {
    char *jitConfig = (char*)_feBase;
    // All numeric fields in jitConfig are declared as UDATA
-   *((intptrj_t*)(jitConfig + entry->parm1)) = (intptrj_t)TR::Options::getNumericValue(option);
+   *((intptr_t*)(jitConfig + entry->parm1)) = (intptr_t)TR::Options::getNumericValue(option);
    return option;
    }
 
@@ -669,39 +665,39 @@ Options::setJitConfigNumericValue(char *option, void *base, TR::OptionTable *ent
 TR::OptionTable OMR::Options::_feOptions[] = {
 
    {"activeThreadsThresholdForInterpreterSampling=", "M<nnn>\tSampling does not affect invocation count beyond this threshold",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_activeThreadsThreshold, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_activeThreadsThreshold, 0, "F%d", NOT_IN_SUBSET },
    {"aotMethodCompilesThreshold=", "R<nnn>\tIf this many AOT methods are compiled before exceeding aotMethodThreshold, don't stop AOT compiling",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_aotMethodCompilesThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_aotMethodCompilesThreshold, 0, " %d", NOT_IN_SUBSET},
    {"aotMethodThreshold=", "R<nnn>\tNumber of methods found in shared cache after which we stop AOTing",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_aotMethodThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_aotMethodThreshold, 0, " %d", NOT_IN_SUBSET},
    {"aotWarmSCCThreshold=", "R<nnn>\tNumber of methods found in shared cache at startup to declare SCC as warm",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_aotWarmSCCThreshold, 0, " %d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_aotWarmSCCThreshold, 0, " %d", NOT_IN_SUBSET },
    {"availableCPUPercentage=", "M<nnn>\tUse it when java process has a fraction of a CPU. Number 1..99 ",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_availableCPUPercentage, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_availableCPUPercentage, 0, "F%d", NOT_IN_SUBSET},
    {"bcLimit=",           "C<nnn>\tbytecode size limit",
         TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, bcSizeLimit), 0, "P%d"},
    {"bcountForBootstrapMethods=", "M<nnn>\tcount for loopy methods belonging to bootstrap classes. "
                                    "Used in no AOT cases",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_countForLoopyBootstrapMethods, 250, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_countForLoopyBootstrapMethods, 250, "F%d", NOT_IN_SUBSET },
    {"bigAppSampleThresholdAdjust=", "O\tadjust the hot and scorching threshold for certain 'big' apps",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_bigAppSampleThresholdAdjust, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_bigAppSampleThresholdAdjust, 0, " %d", NOT_IN_SUBSET},
    {"catchSamplingSizeThreshold=", "R<nnn>\tThe sample counter will not be decremented in a catch block "
                                    "if the number of nodes in the compiled method exceeds this threshold",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_catchSamplingSizeThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_catchSamplingSizeThreshold, 0, " %d", NOT_IN_SUBSET},
    {"classLoadPhaseInterval=", "O<nnn>\tnumber of sampling ticks before we run "
                                "again the code for a class loading phase detection",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_classLoadingPhaseInterval, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_classLoadingPhaseInterval, 0, "P%d", NOT_IN_SUBSET},
    {"classLoadPhaseQuiesceIntervals=",  "O<nnn>\tnumber of intervals we remain in classLoadPhase after it ended",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_numClassLoadPhaseQuiesceIntervals, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_numClassLoadPhaseQuiesceIntervals, 0, "F%d", NOT_IN_SUBSET},
    {"classLoadPhaseThreshold=", "O<nnn>\tnumber of classes loaded per sampling tick that "
                                 "needs to be attained to enter the class loading phase. "
                                 "Specify a very large value to disable this optimization",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_classLoadingPhaseThreshold, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_classLoadingPhaseThreshold, 0, "P%d", NOT_IN_SUBSET},
    {"classLoadPhaseVariance=", "O<nnn>\tHow much the classLoadPhaseThreshold can deviate from "
                                "its average value (as a percentage). Specify an integer 0-99",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_classLoadingPhaseVariance, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_classLoadingPhaseVariance, 0, "F%d", NOT_IN_SUBSET},
    {"classLoadRateAverage=",  "O<nnn>\tnumber of classes loaded per second on an average machine",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_classLoadingRateAverage, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_classLoadingRateAverage, 0, "F%d", NOT_IN_SUBSET},
    {"clinit",             "D\tforce compilation of <clinit> methods", SET_JITCONFIG_RUNTIME_FLAG(J9JIT_COMPILE_CLINIT) },
    {"code=",              "C<nnn>\tcode cache size, in KB",
         TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, codeCacheKB), 0, " %d (KB)"},
@@ -711,167 +707,167 @@ TR::OptionTable OMR::Options::_feOptions[] = {
         TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, codeCacheTotalKB), 0, " %d (KB)"},
    {"compilationBudget=",      "O<nnn>\tnumber of usec. Used to better interleave compilation"
                                "with computation. Use 80000 as a starting point",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_compilationBudget, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compilationBudget, 0, "P%d", NOT_IN_SUBSET},
    {"compilationDelayTime=", "M<nnn>\tnumber of seconds after which we allow compiling",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_compilationDelayTime, 0, " %d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compilationDelayTime, 0, " %d", NOT_IN_SUBSET },
    {"compilationExpirationTime=", "R<nnn>\tnumber of seconds after which point we will stop compiling",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_compilationExpirationTime, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compilationExpirationTime, 0, " %d", NOT_IN_SUBSET},
    {"compilationPriorityQSZThreshold=", "M<nnn>\tCompilation queue size threshold when priority of post-profiling"
                                "compilation requests is increased",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_compPriorityQSZThreshold , 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compPriorityQSZThreshold , 0, "F%d", NOT_IN_SUBSET},
    {"compilationThreadAffinityMask=", "M<nnn>\taffinity mask for compilation threads. Use hexa without 0x",
-        TR::Options::setStaticHexadecimal, (intptrj_t)&TR::Options::_compThreadAffinityMask, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticHexadecimal, (intptr_t)&TR::Options::_compThreadAffinityMask, 0, "F%d", NOT_IN_SUBSET},
    {"compilationYieldStatsHeartbeatPeriod=", "M<nnn>\tperiodically print stats about compilation yield points "
                                        "Period is in ms. Default is 0 which means don't do it. "
                                        "Values between 1 and 99 ms will be upgraded to 100 ms.",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_compYieldStatsHeartbeatPeriod, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compYieldStatsHeartbeatPeriod, 0, "F%d", NOT_IN_SUBSET},
    {"compilationYieldStatsThreshold=", "M<nnn>\tprint stats about compilation yield points if the "
                                        "threshold is exceeded. Default 1000 usec. ",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_compYieldStatsThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compYieldStatsThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"compThreadPriority=",    "M<nnn>\tThe priority of the compilation thread. "
                               "Use an integer between 0 and 4. Default is 4 (highest priority)",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_compilationThreadPriorityCode, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compilationThreadPriorityCode, 0, "F%d", NOT_IN_SUBSET},
    {"conservativeScorchingSampleThreshold=", "R<nnn>\tLower bound for scorchingSamplingThreshold when scaling based on numProc",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_conservativeScorchingSampleThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_conservativeScorchingSampleThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"countForBootstrapMethods=", "M<nnn>\tcount for loopless methods belonging to bootstrap classes. "
                                  "Used in no AOT cases",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_countForLooplessBootstrapMethods, 1000, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_countForLooplessBootstrapMethods, 1000, "F%d", NOT_IN_SUBSET },
    {"cpuCompTimeExpensiveThreshold=", "M<nnn>\tthreshold for when hot & very-hot compilations occupied enough cpu time to be considered expensive in millisecond",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_cpuCompTimeExpensiveThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_cpuCompTimeExpensiveThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"cpuEntitlementForConservativeScorching=", "M<nnn>\tPercentage. 200 means two full cpus",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_cpuEntitlementForConservativeScorching, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_cpuEntitlementForConservativeScorching, 0, "F%d", NOT_IN_SUBSET },
    {"cpuUtilThresholdForStarvation=", "M<nnn>\tThreshold for deciding that a comp thread is not starved",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_cpuUtilThresholdForStarvation , 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_cpuUtilThresholdForStarvation , 0, "F%d", NOT_IN_SUBSET},
    {"data=",                          "C<nnn>\tdata cache size, in KB",
         TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, dataCacheKB), 0, " %d (KB)"},
    {"dataCacheMinQuanta=",            "I<nnn>\tMinimum number of quantums per data cache allocation",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_dataCacheMinQuanta, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_dataCacheMinQuanta, 0, " %d", NOT_IN_SUBSET},
    {"dataCacheQuantumSize=",          "I<nnn>\tLargest guaranteed common byte multiple of data cache allocations.  This value will be rounded up for pointer alignment.",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_dataCacheQuantumSize, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_dataCacheQuantumSize, 0, " %d", NOT_IN_SUBSET},
    {"datatotal=",              "C<nnn>\ttotal data memory limit, in KB",
         TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, dataCacheTotalKB), 0, " %d (KB)"},
    {"disableIProfilerClassUnloadThreshold=",      "R<nnn>\tNumber of classes that can be unloaded before we disable the IProfiler",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_disableIProfilerClassUnloadThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_disableIProfilerClassUnloadThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"dltPostponeThreshold=",      "M<nnn>\tNumber of dlt attempts inv. count for a method is seen not advancing",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_dltPostponeThreshold, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_dltPostponeThreshold, 0, "F%d", NOT_IN_SUBSET },
    {"exclude=",           "D<xxx>\tdo not compile methods beginning with xxx", TR::Options::limitOption, 1, 0, "P%s"},
    {"expensiveCompWeight=", "M<nnn>\tweight of a comp request to be considered expensive",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_expensiveCompWeight, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_expensiveCompWeight, 0, "F%d", NOT_IN_SUBSET },
    {"experimentalClassLoadPhaseInterval=", "O<nnn>\tnumber of sampling ticks to stay in a class load phase",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_experimentalClassLoadPhaseInterval, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_experimentalClassLoadPhaseInterval, 0, "P%d", NOT_IN_SUBSET},
    {"gcNotify",           "L\tlog scavenge/ggc notifications to stdout",  SET_JITCONFIG_RUNTIME_FLAG(J9JIT_GC_NOTIFY) },
    {"gcOnResolve",        "D[=<nnn>]\tscavenge on every resolve, or every resolve after nnn",
         TR::Options::gcOnResolveOption, 0, 0, "F=%d"},
    {"GCRQueuedThresholdForCounting=", "M<nnn>\tDisable GCR counting if number of queued GCR requests exceeds this threshold",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_GCRQueuedThresholdForCounting , 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_GCRQueuedThresholdForCounting , 0, "F%d", NOT_IN_SUBSET},
 #ifdef DEBUG
    {"gcTrace=",           "D<nnn>\ttrace gc stack walks after gc number nnn",
         TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, gcTraceThreshold), 0, "F%d"},
 #endif
    {"HWProfilerAOTWarmOptLevelThreshold=", "O<nnn>\tAOT Warm Opt Level Threshold",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerAOTWarmOptLevelThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerAOTWarmOptLevelThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerBufferMaxPercentageToDiscard=", "O<nnn>\tpercentage of HW profiling buffers "
                                           "that JIT is allowed to discard instead of processing",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwProfilerBufferMaxPercentageToDiscard, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwProfilerBufferMaxPercentageToDiscard, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerDisableAOT",           "O<nnn>\tDisable RI AOT",
         SET_OPTION_BIT(TR_HWProfilerDisableAOT), "F", NOT_IN_SUBSET},
    {"HWProfilerDisableRIOverPrivageLinkage","O<nnn>\tDisable RI over private linkage",
         SET_OPTION_BIT(TR_HWProfilerDisableRIOverPrivateLinkage), "F", NOT_IN_SUBSET},
    {"HWProfilerExpirationTime=", "R<nnn>\t",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwProfilerExpirationTime, 0, " %d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwProfilerExpirationTime, 0, " %d", NOT_IN_SUBSET },
    {"HWProfilerHotOptLevelThreshold=", "O<nnn>\tHot Opt Level Threshold",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerHotOptLevelThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerHotOptLevelThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerLastOptLevel=",        "O<nnn>\tLast Opt level",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerLastOptLevel, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerLastOptLevel, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerNumDowngradesToTurnRION=", "R<nnn>\t",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_numDowngradesToTurnRION, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_numDowngradesToTurnRION, 0, "F%d", NOT_IN_SUBSET },
    {"HWProfilerNumOutstandingBuffers=", "O<nnn>\tnumber of outstanding hardware profiling buffers "
                                        "allowed in the system. Specify 0 to disable this optimization",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerNumOutstandingBuffers, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerNumOutstandingBuffers, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerPRISamplingRate=",     "O<nnn>\tP RI Scaling Factor",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerPRISamplingRate, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerPRISamplingRate, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerQSZMaxThresholdToRIDowngrade=", "R<nnn>\t",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_qszMaxThresholdToRIDowngrade, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_qszMaxThresholdToRIDowngrade, 0, "F%d", NOT_IN_SUBSET },
    {"HWProfilerQSZMinThresholdToRIDowngrade=", "R<nnn>\t",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_qszMinThresholdToRIDowngrade, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_qszMinThresholdToRIDowngrade, 0, "F%d", NOT_IN_SUBSET },
    {"HWProfilerQSZToTurnRION=", "R<nnn>\t",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_qszThresholdToTurnRION, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_qszThresholdToTurnRION, 0, "F%d", NOT_IN_SUBSET },
    {"HWProfilerRecompilationDecisionWindow=", "R<nnn>\tNumber of decisions to wait for before looking at stats decision outcome",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwProfilerRecompDecisionWindow, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwProfilerRecompDecisionWindow, 0, "F%d", NOT_IN_SUBSET },
    {"HWProfilerRecompilationFrequencyThreshold=", "R<nnn>\tLess than 1 in N decisions to recompile, turns RI off",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwProfilerRecompFrequencyThreshold, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwProfilerRecompFrequencyThreshold, 0, "F%d", NOT_IN_SUBSET },
    {"HWProfilerRecompilationInterval=", "O<nnn>\tRecompilation Interval",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerRecompilationInterval, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerRecompilationInterval, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerReducedWarmOptLevelThreshold=", "O<nnn>\tReduced Warm Opt Level Threshold",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerReducedWarmOptLevelThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerReducedWarmOptLevelThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerRIBufferPoolSize=",   "O<nnn>\tRI Buffer Pool Size",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerRIBufferPoolSize, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerRIBufferPoolSize, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerRIBufferProcessingFrequency=",   "O<nnn>\tRI Buffer Processing Frequency",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwProfilerRIBufferProcessingFrequency, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwProfilerRIBufferProcessingFrequency, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerRIBufferThreshold=",  "O<nnn>\tRI Buffer Threshold",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerRIBufferThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerRIBufferThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerScorchingOptLevelThreshold=", "O<nnn>\tScorching Opt Level Threshold",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerScorchingOptLevelThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerScorchingOptLevelThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerWarmOptLevelThreshold=", "O<nnn>\tWarm Opt Level Threshold",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerWarmOptLevelThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerWarmOptLevelThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerZRIBufferSize=",       "O<nnn>\tZ RI Buffer Size",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerZRIBufferSize, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerZRIBufferSize, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerZRIMode=",             "O<nnn>\tZ RI Mode",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerZRIMode, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerZRIMode, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerZRIRGS=",              "O<nnn>\tZ RI Reporting Group Size",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerZRIRGS, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerZRIRGS, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerZRISF=",               "O<nnn>\tZ RI Scaling Factor",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_hwprofilerZRISF, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerZRISF, 0, "F%d", NOT_IN_SUBSET},
    {"inlinefile=",        "D<filename>\tinline filter defined in filename.  "
                           "Use inlinefile=filename", TR::Options::inlinefileOption, 0, 0, "F%s"},
    {"interpreterSamplingDivisor=",    "R<nnn>\tThe divisor used to decrease the invocation count when an interpreted method is sampled",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_interpreterSamplingDivisor, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_interpreterSamplingDivisor, 0, " %d", NOT_IN_SUBSET},
    {"interpreterSamplingThreshold=",    "R<nnn>\tThe maximum invocation count at which a sampling hit will result in the count being divided by the value of interpreterSamplingDivisor",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_interpreterSamplingThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_interpreterSamplingThreshold, 0, " %d", NOT_IN_SUBSET},
    {"interpreterSamplingThresholdInJSR292=",    "R<nnn>\tThe maximum invocation count at which a sampling hit will result in the count being divided by the value of interpreterSamplingDivisor on a MethodHandle-oriented workload",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_interpreterSamplingThresholdInJSR292, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_interpreterSamplingThresholdInJSR292, 0, " %d", NOT_IN_SUBSET},
    {"interpreterSamplingThresholdInStartupMode=",    "R<nnn>\tThe maximum invocation count at which a sampling hit will result in the count being divided by the value of interpreterSamplingDivisor",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_interpreterSamplingThresholdInStartupMode, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_interpreterSamplingThresholdInStartupMode, 0, " %d", NOT_IN_SUBSET},
    {"invocationThresholdToTriggerLowPriComp=",    "M<nnn>\tNumber of times a loopy method must be invoked to be eligible for LPQ",
-       TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_invocationThresholdToTriggerLowPriComp, 0, "F%d", NOT_IN_SUBSET },
+       TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_invocationThresholdToTriggerLowPriComp, 0, "F%d", NOT_IN_SUBSET },
    {"iprofilerBufferInterarrivalTimeToExitDeepIdle=", "M<nnn>\tIn ms. If 4 IP buffers arrive back-to-back more frequently than this value, JIT exits DEEP_IDLE",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_iProfilerBufferInterarrivalTimeToExitDeepIdle, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_iProfilerBufferInterarrivalTimeToExitDeepIdle, 0, "F%d", NOT_IN_SUBSET },
    {"iprofilerBufferMaxPercentageToDiscard=", "O<nnn>\tpercentage of interpreter profiling buffers "
                                        "that JIT is allowed to discard instead of processing",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_iprofilerBufferMaxPercentageToDiscard, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_iprofilerBufferMaxPercentageToDiscard, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerBufferSize=", "I<nnn>\t set the size of each iprofiler buffer",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_iprofilerBufferSize, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_iprofilerBufferSize, 0, " %d", NOT_IN_SUBSET},
    {"iprofilerFailHistorySize=", "I<nnn>\tNumber of entries for the failure history buffer maintained by Iprofiler",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_iprofilerFailHistorySize, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_iprofilerFailHistorySize, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerFailRateThreshold=", "I<nnn>\tReactivate Iprofiler if fail rate exceeds this threshold. 1-100",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_iprofilerFailRateThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_iprofilerFailRateThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerIntToTotalSampleRatio=", "O<nnn>\tRatio of Interpreter samples to Total samples",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_iprofilerIntToTotalSampleRatio, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_iprofilerIntToTotalSampleRatio, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerMaxCount=", "O<nnn>\tmax invocation count for IProfiler to be active",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_maxIprofilingCount, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_maxIprofilingCount, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerMaxCountInStartupMode=", "O<nnn>\tmax invocation count for IProfiler to be active in STARTUP phase",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_maxIprofilingCountInStartupMode, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_maxIprofilingCountInStartupMode, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerMemoryConsumptionLimit=",    "O<nnn>\tlimit on memory consumption for interpreter profiling data",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_iProfilerMemoryConsumptionLimit, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_iProfilerMemoryConsumptionLimit, 0, "P%d", NOT_IN_SUBSET},
    {"iprofilerNumOutstandingBuffers=", "O<nnn>\tnumber of outstanding interpreter profiling buffers "
                                        "allowed in the system. Specify 0 to disable this optimization",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_iprofilerNumOutstandingBuffers, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_iprofilerNumOutstandingBuffers, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerOffDivisionFactor=", "O<nnn>\tCounts Division factor when IProfiler is Off",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_IprofilerOffDivisionFactor, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_IprofilerOffDivisionFactor, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerOffSubtractionFactor=", "O<nnn>\tCounts Subtraction factor when IProfiler is Off",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_IprofilerOffSubtractionFactor, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_IprofilerOffSubtractionFactor, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerSamplesBeforeTurningOff=", "O<nnn>\tnumber of interpreter profiling samples "
                                 "needs to be taken after the profiling starts going off to completely turn it off. "
                                 "Specify a very large value to disable this optimization",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_iprofilerSamplesBeforeTurningOff, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_iprofilerSamplesBeforeTurningOff, 0, "P%d", NOT_IN_SUBSET},
    {"itFileNamePrefix=",  "L<filename>\tprefix for itrace filename",
         TR::Options::setStringForPrivateBase, offsetof(TR_JitPrivateConfig,itraceFileNamePrefix), 0, "P%s"},
    {"jProfilingEnablementSampleThreshold=", "M<nnn>\tNumber of global samples to allow generation of JProfiling bodies",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_jProfilingEnablementSampleThreshold, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_jProfilingEnablementSampleThreshold, 0, "F%d", NOT_IN_SUBSET },
    {"kcaoffsets",         "I\tGenerate a header file with offset data for use with KCA", TR::Options::kcaOffsets, 0, 0, "F" },
    {"largeTranslationTime=", "D<nnn>\tprint IL trees for methods that take more than this value (usec)"
                              "to compile. Need to have a log file defined on command line",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_largeTranslationTime, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_largeTranslationTime, 0, "F%d", NOT_IN_SUBSET},
    {"limit=",             "D<xxx>\tonly compile methods beginning with xxx", TR::Options::limitOption, 0, 0, "P%s"},
    {"limitfile=",         "D<filename>\tfilter method compilation as defined in filename.  "
                           "Use limitfile=(filename,firstLine,lastLine) to limit lines considered from firstLine to lastLine",
@@ -882,114 +878,114 @@ TR::OptionTable OMR::Options::_feOptions[] = {
                           "Use loadLimitfile=(filename,firstLine,lastLine) to limit lines considered from firstLine to lastLine",
         TR::Options::loadLimitfileOption, 0, 0, "P%s"},
    {"localCSEFrequencyThreshold=", "O<nnn>\tBlocks with frequency lower than the threshold will not be considered by localCSE",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_localCSEFrequencyThreshold, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_localCSEFrequencyThreshold, 0, "F%d", NOT_IN_SUBSET },
    {"loopyMethodDivisionFactor=", "O<nnn>\tCounts Division factor for Loopy methods",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_LoopyMethodDivisionFactor, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_LoopyMethodDivisionFactor, 0, "F%d", NOT_IN_SUBSET},
    {"loopyMethodSubtractionFactor=", "O<nnn>\tCounts Subtraction factor for Loopy methods",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_LoopyMethodSubtractionFactor, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_LoopyMethodSubtractionFactor, 0, "F%d", NOT_IN_SUBSET},
    {"lowerBoundNumProcForScaling=", "M<nnn>\tLower than this numProc we'll use the default scorchingSampleThreshold",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_lowerBoundNumProcForScaling, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_lowerBoundNumProcForScaling, 0, "F%d", NOT_IN_SUBSET},
    {"lowVirtualMemoryMBThreshold=","M<nnn>\tThreshold when we declare we are running low on virtual memory. Use 0 to disable the feature",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_lowVirtualMemoryMBThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_lowVirtualMemoryMBThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"maxCheckcastProfiledClassTests=", "R<nnn>\tnumber inlined profiled classes for profiledclass test in checkcast/instanceof",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_maxCheckcastProfiledClassTests, 0, "%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_maxCheckcastProfiledClassTests, 0, "%d", NOT_IN_SUBSET},
    {"maxOnsiteCacheSlotForInstanceOf=", "R<nnn>\tnumber of onsite cache slots for instanceOf",
-      TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_maxOnsiteCacheSlotForInstanceOf, 0, "%d", NOT_IN_SUBSET},
+      TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_maxOnsiteCacheSlotForInstanceOf, 0, "%d", NOT_IN_SUBSET},
    {"minSamplingPeriod=", "R<nnn>\tminimum number of milliseconds between samples for hotness",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_minSamplingPeriod, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_minSamplingPeriod, 0, "P%d", NOT_IN_SUBSET},
    {"minSuperclassArraySize=", "I<nnn>\t set the size of the minimum superclass array size",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_minimumSuperclassArraySize, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_minimumSuperclassArraySize, 0, " %d", NOT_IN_SUBSET},
    {"noregmap",           0, RESET_JITCONFIG_RUNTIME_FLAG(J9JIT_CG_REGISTER_MAPS) },
    {"numCodeCachesOnStartup=",   "R<nnn>\tnumber of code caches to create at startup",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_numCodeCachesToCreateAtStartup, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_numCodeCachesToCreateAtStartup, 0, "F%d", NOT_IN_SUBSET},
     {"numDLTBufferMatchesToEagerlyIssueCompReq=", "R<nnn>\t",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_numDLTBufferMatchesToEagerlyIssueCompReq, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_numDLTBufferMatchesToEagerlyIssueCompReq, 0, "F%d", NOT_IN_SUBSET},
    {"numInterpCompReqToExitIdleMode=", "M<nnn>\tNumber of first time comp. req. that takes the JIT out of idle mode",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_numFirstTimeCompilationsToExitIdleMode, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_numFirstTimeCompilationsToExitIdleMode, 0, "F%d", NOT_IN_SUBSET },
    {"profileAllTheTime=",    "R<nnn>\tInterpreter profiling will be on all the time",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_profileAllTheTime, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_profileAllTheTime, 0, " %d", NOT_IN_SUBSET},
    {"queuedInvReqThresholdToDowngradeOptLevel=", "M<nnn>\tDowngrade opt level if too many inv req",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_numQueuedInvReqToDowngradeOptLevel , 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_numQueuedInvReqToDowngradeOptLevel , 0, "F%d", NOT_IN_SUBSET},
    {"queueSizeThresholdToDowngradeDuringCLP=", "M<nnn>\tCompilation queue size threshold (interpreted methods) when opt level is downgraded during class load phase",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_qsziThresholdToDowngradeDuringCLP, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_qsziThresholdToDowngradeDuringCLP, 0, "F%d", NOT_IN_SUBSET },
    {"queueSizeThresholdToDowngradeOptLevel=", "M<nnn>\tCompilation queue size threshold when opt level is downgraded",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_qszThresholdToDowngradeOptLevel , 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_qszThresholdToDowngradeOptLevel , 0, "F%d", NOT_IN_SUBSET},
    {"queueSizeThresholdToDowngradeOptLevelDuringStartup=", "M<nnn>\tCompilation queue size threshold when opt level is downgraded during startup phase",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_qszThresholdToDowngradeOptLevelDuringStartup , 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_qszThresholdToDowngradeOptLevelDuringStartup , 0, "F%d", NOT_IN_SUBSET },
    {"regmap",             0, SET_JITCONFIG_RUNTIME_FLAG(J9JIT_CG_REGISTER_MAPS) },
    {"relaxedCompilationLimitsSampleThreshold=", "R<nnn>\tGlobal samples below this threshold means we can use higher compilation limits",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_relaxedCompilationLimitsSampleThreshold, 0, " %d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_relaxedCompilationLimitsSampleThreshold, 0, " %d", NOT_IN_SUBSET },
    {"resetCountThreshold=", "R<nnn>\tThe number of global samples which if exceed during a method's sampling interval will cause the method's sampling counter to be incremented by the number of samples in a sampling interval",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_resetCountThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_resetCountThreshold, 0, " %d", NOT_IN_SUBSET},
    {"rtlog=",             "L<filename>\twrite verbose run-time output to filename",
         TR::Options::setStringForPrivateBase,  offsetof(TR_JitPrivateConfig,rtLogFileName), 0, "P%s"},
    {"rtResolve",          "D\ttreat all data references as unresolved", SET_JITCONFIG_RUNTIME_FLAG(J9JIT_RUNTIME_RESOLVE) },
    {"safeReservePhysicalMemoryValue=",    "C<nnn>\tsafe buffer value before we risk running out of physical memory, in KB",
-        TR::Options::setStaticNumericKBAdjusted, (intptrj_t)&TR::Options::_safeReservePhysicalMemoryValue, 0, " %d (KB)"},
+        TR::Options::setStaticNumericKBAdjusted, (intptr_t)&TR::Options::_safeReservePhysicalMemoryValue, 0, " %d (KB)"},
    {"sampleDontSwitchToProfilingThreshold=", "R<nnn>\tThe maximum number of global samples taken during a sample interval for which the method is denied swithing to profiling",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_sampleDontSwitchToProfilingThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_sampleDontSwitchToProfilingThreshold, 0, " %d", NOT_IN_SUBSET},
    {"sampleThresholdVariationAllowance=",  "R<nnn>\tThe percentage that we add or subtract from"
                                            " the original threshold to adjust for method code size."
                                            " Must be 0--100. Make it 0 to disable this optimization.",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_sampleThresholdVariationAllowance, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_sampleThresholdVariationAllowance, 0, "P%d", NOT_IN_SUBSET},
    {"samplingFrequencyInDeepIdleMode=", "R<nnn>\tnumber of milliseconds between samples for hotness - in deep idle mode",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_samplingFrequencyInDeepIdleMode, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_samplingFrequencyInDeepIdleMode, 0, "F%d", NOT_IN_SUBSET},
    {"samplingFrequencyInIdleMode=", "R<nnn>\tnumber of milliseconds between samples for hotness - in idle mode",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_samplingFrequencyInIdleMode, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_samplingFrequencyInIdleMode, 0, "F%d", NOT_IN_SUBSET},
    {"samplingHeartbeatInterval=", "R<nnn>\tnumber of 100ms periods before sampling heartbeat",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_sampleHeartbeatInterval, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_sampleHeartbeatInterval, 0, "F%d", NOT_IN_SUBSET},
    {"samplingThreadExpirationTime=", "R<nnn>\tnumber of seconds after which point we will stop the sampling thread",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_samplingThreadExpirationTime, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_samplingThreadExpirationTime, 0, " %d", NOT_IN_SUBSET},
    {"scorchingSampleThreshold=", "R<nnn>\tThe maximum number of global samples taken during a sample interval for which the method will be recompiled as scorching",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_scorchingSampleThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_scorchingSampleThreshold, 0, " %d", NOT_IN_SUBSET},
    {"scratchSpaceFactorWhenJSR292Workload=","M<nnn>\tMultiplier for scratch space limit when MethodHandles are in use",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_scratchSpaceFactorWhenJSR292Workload, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_scratchSpaceFactorWhenJSR292Workload, 0, "F%d", NOT_IN_SUBSET},
    {"scratchSpaceLimitKBWhenLowVirtualMemory=","M<nnn>\tLimit for memory used by JIT when running on low virtual memory",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_scratchSpaceLimitKBWhenLowVirtualMemory, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_scratchSpaceLimitKBWhenLowVirtualMemory, 0, "F%d", NOT_IN_SUBSET},
    {"secondaryClassLoadPhaseThreshold=", "O<nnn>\tWhen class load rate just dropped under the CLP threshold  "
                                          "we use this secondary threshold to determine class load phase",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_secondaryClassLoadingPhaseThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_secondaryClassLoadingPhaseThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"seriousCompFailureThreshold=",     "M<nnn>\tnumber of srious compilation failures after which we write a trace point in the snap file",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_seriousCompFailureThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_seriousCompFailureThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"singleCache", "C\tallow only one code cache and one data cache to be allocated", RESET_JITCONFIG_RUNTIME_FLAG(J9JIT_GROW_CACHES) },
    {"smallMethodBytecodeSizeThreshold=", "O<nnn> Threshold for determining small methods\t "
                                          "(measured in number of bytecodes)",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_smallMethodBytecodeSizeThreshold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_smallMethodBytecodeSizeThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"smallMethodBytecodeSizeThresholdForCold=", "O<nnn> Threshold for determining small methods at cold\t "
                                          "(measured in number of bytecodes)",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_smallMethodBytecodeSizeThresholdForCold, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_smallMethodBytecodeSizeThresholdForCold, 0, "F%d", NOT_IN_SUBSET},
    {"stack=",             "C<nnn>\tcompilation thread stack size in KB",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_stackSize, 0, " %d", NOT_IN_SUBSET},
-#if defined(JITSERVER_SUPPORT)
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_stackSize, 0, " %d", NOT_IN_SUBSET},
+#if defined(J9VM_OPT_JITSERVER)
    {"statisticsFrequency=", "R<nnn>\tnumber of milliseconds between statistics print",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_statisticsFrequency, 0, "F%d", NOT_IN_SUBSET},
-#endif /* defined(JITSERVER_SUPPORT) */
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_statisticsFrequency, 0, "F%d", NOT_IN_SUBSET},
+#endif /* defined(J9VM_OPT_JITSERVER) */
    {"testMode",           "D\tcompile but do not run the compiled code",  SET_JITCONFIG_RUNTIME_FLAG(J9JIT_TESTMODE) },
 #if defined(TR_HOST_X86) || defined(TR_HOST_POWER)
    {"tlhPrefetchBoundaryLineCount=",    "O<nnn>\tallocation prefetch boundary line for allocation prefetch",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_TLHPrefetchBoundaryLineCount, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_TLHPrefetchBoundaryLineCount, 0, "P%d", NOT_IN_SUBSET},
    {"tlhPrefetchLineCount=",    "O<nnn>\tallocation prefetch line count for allocation prefetch",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_TLHPrefetchLineCount, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_TLHPrefetchLineCount, 0, "P%d", NOT_IN_SUBSET},
    {"tlhPrefetchLineSize=",    "O<nnn>\tallocation prefetch line size for allocation prefetch",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_TLHPrefetchLineSize, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_TLHPrefetchLineSize, 0, "P%d", NOT_IN_SUBSET},
    {"tlhPrefetchSize=",    "O<nnn>\tallocation prefetch size for allocation prefetch",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_TLHPrefetchSize, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_TLHPrefetchSize, 0, "P%d", NOT_IN_SUBSET},
    {"tlhPrefetchStaggeredLineCount=",    "O<nnn>\tallocation prefetch staggered line for allocation prefetch",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_TLHPrefetchStaggeredLineCount, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_TLHPrefetchStaggeredLineCount, 0, "P%d", NOT_IN_SUBSET},
    {"tlhPrefetchTLHEndLineCount=",    "O<nnn>\tallocation prefetch line count for end of TLH check",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_TLHPrefetchTLHEndLineCount, 0, "P%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_TLHPrefetchTLHEndLineCount, 0, "P%d", NOT_IN_SUBSET},
 #endif
    {"tossCode",           "D\tthrow code and data away after compiling",  SET_JITCONFIG_RUNTIME_FLAG(J9JIT_TOSS_CODE) },
    {"tprof",              "D\tgenerate time profiles with SWTRACE (requires -Xrunjprof12x:jita2n)",
         TR::Options::tprofOption, 0, 0, "F"},
    {"updateFreeMemoryMinPeriod=", "R<nnn>\tnumber of milliseconds after which point we will update the free physical memory available",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_updateFreeMemoryMinPeriod, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_updateFreeMemoryMinPeriod, 0, " %d", NOT_IN_SUBSET},
    {"upperBoundNumProcForScaling=", "M<nnn>\tHigher than this numProc we'll use the conservativeScorchingSampleThreshold",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_upperBoundNumProcForScaling, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_upperBoundNumProcForScaling, 0, "F%d", NOT_IN_SUBSET},
    { "userClassLoadPhaseThreshold=", "O<nnn>\tnumber of user classes loaded per sampling tick that "
            "needs to be attained to enter the class loading phase. "
            "Specify a very large value to disable this optimization",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_userClassLoadingPhaseThreshold, 0, "P%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_userClassLoadingPhaseThreshold, 0, "P%d", NOT_IN_SUBSET },
    {"verbose",            "L\twrite compiled method names to vlog file or stdout in limitfile format",
         TR::Options::setVerboseBitsInJitPrivateConfig, offsetof(J9JITConfig, privateConfig), 5, "F=1"},
    {"verbose=",           "L{regex}\tlist of verbose output to write to vlog or stdout",
@@ -997,25 +993,25 @@ TR::OptionTable OMR::Options::_feOptions[] = {
    {"version",            "L\tdisplay the jit build version",
         TR::Options::versionOption, 0, 0, "F"},
    {"veryHotSampleThreshold=",          "R<nnn>\tThe maximum number of global samples taken during a sample interval for which the method will be recompiled at hot with normal priority",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_veryHotSampleThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_veryHotSampleThreshold, 0, " %d", NOT_IN_SUBSET},
    {"vlog=",              "L<filename>\twrite verbose output to filename",
         TR::Options::setString,  offsetof(J9JITConfig,vLogFileName), 0, "F%s"},
    {"vmState=",           "L<vmState>\tdecode a given vmState",
         TR::Options::vmStateOption, 0, 0, "F"},
    {"waitTimeToEnterDeepIdleMode=",  "M<nnn>\tTime spent in idle mode (ms) after which we enter deep idle mode sampling",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_waitTimeToEnterDeepIdleMode, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_waitTimeToEnterDeepIdleMode, 0, "F%d", NOT_IN_SUBSET},
    {"waitTimeToEnterIdleMode=",      "M<nnn>\tIdle time (ms) after which we enter idle mode sampling",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_waitTimeToEnterIdleMode, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_waitTimeToEnterIdleMode, 0, "F%d", NOT_IN_SUBSET},
    {"waitTimeToExitStartupMode=",     "M<nnn>\tTime (ms) spent outside startup needed to declare NON_STARTUP mode",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_waitTimeToExitStartupMode, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_waitTimeToExitStartupMode, 0, "F%d", NOT_IN_SUBSET},
    {"waitTimeToGCR=",                 "M<nnn>\tTime (ms) spent outside startup needed to start guarded counting recompilations",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_waitTimeToGCR, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_waitTimeToGCR, 0, "F%d", NOT_IN_SUBSET},
    {"waitTimeToStartIProfiler=",                 "M<nnn>\tTime (ms) spent outside startup needed to start IProfiler if it was off",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_waitTimeToStartIProfiler, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_waitTimeToStartIProfiler, 0, "F%d", NOT_IN_SUBSET},
    {"weightOfAOTLoad=",              "M<nnn>\tWeight of an AOT load. 0 by default",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_weightOfAOTLoad, 0, "F%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_weightOfAOTLoad, 0, "F%d", NOT_IN_SUBSET},
    {"weightOfJSR292=", "M<nnn>\tWeight of an JSR292 compilation. Number between 0 and 255",
-        TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_weightOfJSR292, 0, "F%d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_weightOfJSR292, 0, "F%d", NOT_IN_SUBSET },
    {0}
 };
 
@@ -1046,7 +1042,7 @@ bool J9::Options::showPID()
    return false;
    }
 
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
 static std::string readFileToString(char *fileName)
    {
    I_32 fileId = j9jit_fopen_existing(fileName);
@@ -1127,7 +1123,7 @@ static void JITServerParseCommonOptions(J9JavaVM *vm, TR::CompilationInfo *compI
          compInfo->setJITServerSslRootCerts(cert);
       }
    }
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 bool
 J9::Options::fePreProcess(void * base)
@@ -1311,7 +1307,8 @@ J9::Options::fePreProcess(void * base)
       if (_aggressivenessLevel == -1) // not yet set
          {
          char *aggressiveOption = "-XaggressivenessLevel";
-         if ((argIndex=FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, aggressiveOption, 0)) >= 0)
+         argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, aggressiveOption, 0);
+         if (argIndex >= 0)
             {
             UDATA aggressivenessValue = 0;
             IDATA ret = GET_INTEGER_VALUE(argIndex, aggressiveOption, aggressivenessValue);
@@ -1333,28 +1330,9 @@ J9::Options::fePreProcess(void * base)
          }
       }
 
-
-   // The -Xlp option may have a numeric argument but we don't care what
-   // it is because it applies to large data pages.
-   //
-   if (FIND_ARG_IN_VMARGS(EXACT_MATCH, "-Xlp", 0) >= 0)
-      {
-      self()->setOption(TR_EnableLargePages);
-      self()->setOption(TR_EnableLargeCodePages);
-      }
-
-   int32_t lpArgIndex;
-   UDATA lpSize = 0;
-   char *lpOption = "-Xlp";
-   if ((lpArgIndex=FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, lpOption, 0)) >= 0)
-      {
-      GET_MEMORY_VALUE(lpArgIndex, lpOption, lpSize);
-      self()->setOption(TR_EnableLargePages);
-      self()->setOption(TR_EnableLargeCodePages);
-      }
-
    char *ccOption = "-Xcodecache";
-   if ((argIndex=FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, ccOption, 0)) >= 0)
+   argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, ccOption, 0);
+   if (argIndex >= 0)
       {
       UDATA ccSize;
       GET_MEMORY_VALUE(argIndex, ccOption, ccSize);
@@ -1364,26 +1342,30 @@ J9::Options::fePreProcess(void * base)
 
    static bool doneWithJniAcc = false;
    char *jniAccOption = "-XjniAcc:";
-   if (!doneWithJniAcc && (argIndex=FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, jniAccOption, 0)) >= 0)
+   if (!doneWithJniAcc)
       {
-      char *optValue;
-      doneWithJniAcc = true;
-      GET_OPTION_VALUE(argIndex, ':', &optValue);
-      if (*optValue == '{')
+      argIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, jniAccOption, 0);
+      if (argIndex >= 0)
          {
-         if (!_debug)
-            TR::Options::createDebug();
-         if (_debug)
+         char *optValue;
+         doneWithJniAcc = true;
+         GET_OPTION_VALUE(argIndex, ':', &optValue);
+         if (*optValue == '{')
             {
-            TR::SimpleRegex *mRegex;
-            mRegex = TR::SimpleRegex::create(optValue);
-            if (!mRegex || *optValue != 0)
+            if (!_debug)
+               TR::Options::createDebug();
+            if (_debug)
                {
-               TR_VerboseLog::write("<JNI: Bad regular expression at --> '%s'>\n", optValue);
-               }
-            else
-               {
-               TR::Options::setJniAccelerator(mRegex);
+               TR::SimpleRegex *mRegex;
+               mRegex = TR::SimpleRegex::create(optValue);
+               if (!mRegex || *optValue != 0)
+                  {
+                  TR_VerboseLog::write("<JNI: Bad regular expression at --> '%s'>\n", optValue);
+                  }
+               else
+                  {
+                  TR::Options::setJniAccelerator(mRegex);
+                  }
                }
             }
          }
@@ -1450,10 +1432,19 @@ J9::Options::fePreProcess(void * base)
          }
       }
 
+   // -XX:+PrintCodeCache will be parsed twice into both AOT and JIT options here.
+   const char *xxPrintCodeCacheOption = "-XX:+PrintCodeCache";
+   const char *xxDisablePrintCodeCacheOption = "-XX:-PrintCodeCache";
+   int32_t xxPrintCodeCacheArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxPrintCodeCacheOption, 0);
+   int32_t xxDisablePrintCodeCacheArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxDisablePrintCodeCacheOption, 0);
+
+   if (xxPrintCodeCacheArgIndex > xxDisablePrintCodeCacheArgIndex)
+      {
+      self()->setOption(TR_PrintCodeCacheUsage);
+      }
+
    // Enable on X and Z, also on P.
    // PPC supports -Xlp:codecache option.. since it's set via environment variables.  JVM should always request 4k pages.
-   int32_t lpccIndex;
-
    // fePreProcess is called twice - for AOT and JIT options parsing, which is redundant in terms of
    // processing the -Xlp:codecache options.
    // We should parse the -Xlp:codecache options only once though to avoid duplicate NLS messages.
@@ -1463,14 +1454,16 @@ J9::Options::fePreProcess(void * base)
       {
       parsedXlpCodeCacheOptions = true;
 
-      // Found -Xlp:codecache: option, parse the rest.
-      if ((lpccIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, "-Xlp:codecache:", NULL)) >= 0)
+      UDATA requestedLargeCodePageSize = 0;
+      UDATA requestedLargeCodePageFlags = J9PORT_VMEM_PAGE_FLAG_NOT_USED;
+      UDATA largePageSize = 0;
+      UDATA largePageFlags = 0;
+      int32_t xlpCodeCacheIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, "-Xlp:codecache:", NULL);
+      int32_t xlpIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, "-Xlp", NULL);
+
+      // Parse -Xlp:codecache:pagesize=<size> as the right most option
+      if (xlpCodeCacheIndex > xlpIndex)
          {
-
-         UDATA requestedLargeCodePageSize = 0;
-         UDATA requestedLargeCodePageFlags = J9PORT_VMEM_PAGE_FLAG_NOT_USED;
-
-         /* start parsing with option */
          TR_XlpCodeCacheOptions parsingState = XLPCC_PARSING_FIRST_OPTION;
          UDATA optionNumber = 1;
          bool extraCommaWarning = false;
@@ -1486,44 +1479,41 @@ J9::Options::fePreProcess(void * base)
 
          char *optionsString = NULL;
 
-         /* Get Pointer to entire -Xlp:codecache: options string */
-         GET_OPTION_OPTION(lpccIndex, ':', ':', &optionsString);
+         // Get Pointer to entire "-Xlp:codecache:" options string
+         GET_OPTION_OPTION(xlpCodeCacheIndex, ':', ':', &optionsString);
 
-         /* optionsString can not be NULL here, though it may point to null ('\0') character */
+         // optionsString can not be NULL here, though it may point to null ('\0') character
          char *scanLimit = optionsString + strlen(optionsString);
 
-         /* Parse -Xlp:codecache:pagesize=<size> option.
-          * The proper formed -Xlp:codecache: options include
-          *      For X and zLinux platforms:
-          *              -Xlp:codecache:pagesize=<size> or
-          *              -Xlp:codecache:pagesize=<size>,pageable or
-          *              -Xlp:codecache:pagesize=<size>,nonpageable
-          *
-          *      For zOS platforms
-          *              -Xlp:codecache:pagesize=<size>,pageable or
-          *              -Xlp:codecache:pagesize=<size>,nonpageable
-          */
+         // Parse -Xlp:codecache:pagesize=<size> option.
+         // The proper formed -Xlp:codecache: options include
+         //      For X and zLinux platforms:
+         //              -Xlp:codecache:pagesize=<size> or
+         //              -Xlp:codecache:pagesize=<size>,pageable or
+         //              -Xlp:codecache:pagesize=<size>,nonpageable
+         //      For zOS platforms
+         //              -Xlp:codecache:pagesize=<size>,pageable or
+         //              -Xlp:codecache:pagesize=<size>,nonpageable
          while (optionsString < scanLimit)
             {
-
             if (try_scan(&optionsString, ","))
                {
-               /* Comma separator is discovered */
+               // Comma separator is discovered
                switch (parsingState)
                   {
                   case XLPCC_PARSING_FIRST_OPTION:
-                     /* leading comma - ignored but warning required */
+                     // leading comma - ignored but warning required
                      extraCommaWarning = true;
                      parsingState = XLPCC_PARSING_OPTION;
                      break;
                   case XLPCC_PARSING_OPTION:
-                     /* more then one comma - ignored but warning required */
+                     // more then one comma - ignored but warning required
                      extraCommaWarning = true;
                      break;
                   case XLPCC_PARSING_COMMA:
-                     /* expecting for comma here, next should be an option*/
+                     // expecting for comma here, next should be an option
                      parsingState = XLPCC_PARSING_OPTION;
-                     /* next option number */
+                     // next option number
                      optionNumber += 1;
                      break;
                   case XLPCC_PARSING_ERROR:
@@ -1533,26 +1523,26 @@ J9::Options::fePreProcess(void * base)
                }
             else
                {
-               /* Comma separator has not been found. so */
+               // Comma separator has not been found. so
                switch (parsingState)
                   {
                   case XLPCC_PARSING_FIRST_OPTION:
-                     /* still looking for parsing of first option - nothing to do */
+                     // still looking for parsing of first option - nothing to do
                      parsingState = XLPCC_PARSING_OPTION;
                      break;
                   case XLPCC_PARSING_OPTION:
-                     /* Can not recognize an option case */
+                     // Can not recognize an option case
                      errorString = optionsString;
                      parsingState = XLPCC_PARSING_ERROR;
                      break;
                   case XLPCC_PARSING_COMMA:
-                     /* can not find comma after option - so this is something unrecognizable at the end of known option */
+                     // can not find comma after option - so this is something unrecognizable at the end of known option
                      errorString = previousOption;
                      parsingState = XLPCC_PARSING_ERROR;
                      break;
                   case XLPCC_PARSING_ERROR:
                   default:
-                     /* must be unreachable states */
+                     // must be unreachable states
                      return false;
                   }
                }
@@ -1562,17 +1552,17 @@ J9::Options::fePreProcess(void * base)
                char *xlpOptionErrorString = errorString;
                int32_t xlpOptionErrorStringSize = 0;
 
-               /* try to find comma to isolate unrecognized option */
+               // try to find comma to isolate unrecognized option
                char *commaLocation = strchr(errorString,',');
 
                if (NULL != commaLocation)
                   {
-                  /* Comma found */
+                  // Comma found
                   xlpOptionErrorStringSize = (size_t)(commaLocation - errorString);
                   }
                else
                   {
-                  /* comma not found - print to end of string */
+                  // comma not found - print to end of string
                   xlpOptionErrorStringSize = strlen(errorString);
                   }
                j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_JIT_OPTIONS_XLP_UNRECOGNIZED_OPTION, xlpOptionErrorStringSize, xlpOptionErrorString);
@@ -1583,8 +1573,8 @@ J9::Options::fePreProcess(void * base)
 
             if (try_scan(&optionsString, "pagesize="))
                {
-                /* try to get memory value */
-               // Given substring, we cannot use GET_MEMORY_VALUE.
+               // Try to get memory value.
+               // Given substring, we can't use GET_MEMORY_VALUE.
                // Scan for UDATA and M/m,G/g,K/k manually.
                UDATA scanResult = scan_udata(&optionsString, &requestedLargeCodePageSize);
 
@@ -1644,46 +1634,37 @@ J9::Options::fePreProcess(void * base)
                }
             }
 
-         /*
-          * post-parse check for trailing comma(s)
-          */
+         // post-parse check for trailing comma(s)
          switch (parsingState)
             {
-            /* if loop ended in one of these two states extra comma warning required */
+            // if loop ended in one of these two states extra comma warning required
             case XLPCC_PARSING_FIRST_OPTION:
             case XLPCC_PARSING_OPTION:
-               /* trailing comma(s) or comma(s) alone */
+               // trailing comma(s) or comma(s) alone
                extraCommaWarning = true;
                break;
             case XLPCC_PARSING_COMMA:
-               /* loop ended at comma search state - do nothing */
+               // loop ended at comma search state - do nothing
                break;
             case XLPCC_PARSING_ERROR:
             default:
-               /* must be unreachable states */
+               // must be unreachable states
                return false;
             }
 
-         /* --- analyze correctness of entered options --- */
-
-         /* pagesize = <size>
-          *  - this options must be specified for all platforms
-          */
+          // Verify "pagesize=<size>" option. 
+          // This option must be specified for all platforms.
          if (0 == pageSizeHowMany)
             {
-            /* error: pagesize= must be specified */
             j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_JIT_OPTIONS_XLP_INCOMPLETE_OPTION, "-Xlp:codecache:", "pagesize=");
             return false;
             }
 
-#if defined(J9ZOS390)
-         /*
-          *  [non]pageable
-          *  - this option must be specified for Z platforms
-          */
+         #if defined(J9ZOS390)
+         //  [non]pageable option must be specified for Z platforms
          if ((0 == pageableHowMany) && (0 == nonPageableHowMany))
             {
-            /* error: [non]pageable not found */
+            // [non]pageable not found 
             char *xlpOptionErrorString = "-Xlp:codecache:";
             char *xlpMissingOptionString = "[non]pageable";
 
@@ -1691,28 +1672,37 @@ J9::Options::fePreProcess(void * base)
             return false;
             }
 
-         /* Check for the right most option is most right */
+         // Check for the right most option is most right
          if (pageableOptionNumber > nonPageableOptionNumber)
             requestedLargeCodePageFlags = J9PORT_VMEM_PAGE_FLAG_PAGEABLE;
          else
             requestedLargeCodePageFlags = J9PORT_VMEM_PAGE_FLAG_FIXED;
 
-#endif /* defined(J9ZOS390) */
+         #endif // defined(J9ZOS390)
 
-         /* print extra comma ignored warning */
+         // print extra comma ignored warning
          if (extraCommaWarning)
             j9nls_printf(PORTLIB, J9NLS_INFO, J9NLS_JIT_OPTIONS_XLP_EXTRA_COMMA);
-
+         }
+      // Parse Size -Xlp<size>
+      else if (xlpIndex >= 0)
+         {
+         // GET_MEMORY_VALUE macro casts it's second parameter to (char**)&, so a pointer to the option string is passed rather than the string literal.
+         char *lpOption = "-Xlp";
+         GET_MEMORY_VALUE(xlpIndex, lpOption, requestedLargeCodePageSize);
+         }
+      
+      if (requestedLargeCodePageSize != 0)
+         {
          // Check to see if requested size is valid
-         UDATA largeCodePageSize = requestedLargeCodePageSize;
-         UDATA largeCodePageFlags = requestedLargeCodePageFlags;
          BOOLEAN isRequestedSizeSupported = FALSE;
+         largePageSize = requestedLargeCodePageSize;
+         largePageFlags = requestedLargeCodePageFlags;
 
-         /*
-          * j9vmem_find_valid_page_size happened to be changed to always return 0
-          * However formally the function type still be IDATA so assert if it returns anything else
-          */
-         j9vmem_find_valid_page_size(J9PORT_VMEM_MEMORY_MODE_EXECUTE, &largeCodePageSize, &largeCodePageFlags, &isRequestedSizeSupported);
+         
+         // j9vmem_find_valid_page_size happened to be changed to always return 0
+         // However formally the function type still be IDATA so assert if it returns anything else
+         j9vmem_find_valid_page_size(J9PORT_VMEM_MEMORY_MODE_EXECUTE, &largePageSize, &largePageFlags, &isRequestedSizeSupported);
 
          if (!isRequestedSizeSupported)
             {
@@ -1721,7 +1711,7 @@ J9::Options::fePreProcess(void * base)
             char *oldPageType = NULL;
             char *newPageType = NULL;
             UDATA oldSize = requestedLargeCodePageSize;
-            UDATA newSize = largeCodePageSize;
+            UDATA newSize = largePageSize;
 
             // Convert size to K,M,G qualifiers.
             qualifiedSize(&oldSize, &oldQualifier);
@@ -1730,8 +1720,8 @@ J9::Options::fePreProcess(void * base)
             if (0 == (J9PORT_VMEM_PAGE_FLAG_NOT_USED & requestedLargeCodePageFlags))
             oldPageType = getLargePageTypeString(requestedLargeCodePageFlags);
 
-            if (0 == (J9PORT_VMEM_PAGE_FLAG_NOT_USED & largeCodePageFlags))
-            newPageType = getLargePageTypeString(largeCodePageFlags);
+            if (0 == (J9PORT_VMEM_PAGE_FLAG_NOT_USED & largePageFlags))
+            newPageType = getLargePageTypeString(largePageFlags);
 
             if (NULL == oldPageType)
                {
@@ -1748,109 +1738,53 @@ J9::Options::fePreProcess(void * base)
                   j9nls_printf(PORTLIB, J9NLS_INFO, J9NLS_JIT_OPTIONS_LARGE_PAGE_SIZE_NOT_SUPPORTED_WITH_PAGETYPE, oldSize, oldQualifier, oldPageType, newSize, newQualifier, newPageType);
                }
             }
-
-         if (largeCodePageSize > 0)
-            {
-            jitConfig->largeCodePageSize = largeCodePageSize;
-            jitConfig->largeCodePageFlags = largeCodePageFlags;
-            }
          }
+      // When no -Xlp arguments are passed, we should use preferred page sizes
       else
          {
-            UDATA largePageSize = 0;
-            UDATA largePageFlags = 0;
-            // -Xlp<size>, attempt to use specified page size
-            if (lpSize > 0)
+         UDATA *pageSizes = j9vmem_supported_page_sizes();
+         UDATA *pageFlags = j9vmem_supported_page_flags();
+         largePageSize = pageSizes[0]; // Default page size is always the first element
+         largePageFlags = pageFlags[0];
+
+         UDATA preferredPageSize = 0;
+         UDATA hugePreferredPageSize = 0;
+         #if defined(TR_TARGET_POWER)
+         preferredPageSize = 65536;
+         #elif (defined(LINUX) && defined(TR_TARGET_X86))
+         preferredPageSize = 2097152;
+         hugePreferredPageSize = 0x40000000;
+         #elif (defined(TR_TARGET_S390))
+         preferredPageSize = 1048576;
+         #endif
+         if (0 != preferredPageSize)
+            {
+            for (UDATA pageIndex = 0; 0 != pageSizes[pageIndex]; ++pageIndex)
                {
-               BOOLEAN isSizeSupported;  /* not used */
-               largePageSize = (uintptrj_t)lpSize;
-               UDATA requestedLargeCodePageFlags = J9PORT_VMEM_PAGE_FLAG_NOT_USED;
-               largePageFlags = requestedLargeCodePageFlags;
-               j9vmem_find_valid_page_size(J9PORT_VMEM_MEMORY_MODE_EXECUTE, &largePageSize, &largePageFlags, &isSizeSupported);
-
-               // specified page size is not used and a different page size will be used
-               if (!isSizeSupported)
+               if ( (preferredPageSize == pageSizes[pageIndex] || hugePreferredPageSize == pageSizes[pageIndex])
+               #if defined(J9ZOS390)
+                     /* zOS doesn't support non-pageable large pages for JIT code cache. */
+                     && (0 != (J9PORT_VMEM_PAGE_FLAG_PAGEABLE & pageFlags[pageIndex]))
+               #endif
+               )
                   {
-                  // Generate warning message for user that requested page sizes / type is not supported.
-                  char *oldQualifier, *newQualifier;
-                  char *oldPageType = NULL;
-                  char *newPageType = NULL;
-                  UDATA oldSize = lpSize;
-                  UDATA newSize = largePageSize;
-
-                  // Convert size to K,M,G qualifiers.
-                  qualifiedSize(&oldSize, &oldQualifier);
-                  qualifiedSize(&newSize, &newQualifier);
-
-                  if (0 == (J9PORT_VMEM_PAGE_FLAG_NOT_USED & requestedLargeCodePageFlags))
-                  oldPageType = getLargePageTypeString(requestedLargeCodePageFlags);
-
-                  if (0 == (J9PORT_VMEM_PAGE_FLAG_NOT_USED & largePageFlags))
-                  newPageType = getLargePageTypeString(largePageFlags);
-
-                  if (NULL == oldPageType)
-                     {
-                     if (NULL == newPageType)
-                        j9nls_printf(PORTLIB, J9NLS_INFO, J9NLS_JIT_OPTIONS_LARGE_PAGE_SIZE_NOT_SUPPORTED, oldSize, oldQualifier, newSize, newQualifier);
-                     else
-                        j9nls_printf(PORTLIB, J9NLS_INFO, J9NLS_JIT_OPTIONS_LARGE_PAGE_SIZE_NOT_SUPPORTED_WITH_NEW_PAGETYPE, oldSize, oldQualifier, newSize, newQualifier, newPageType);
-                     }
-                  else
-                     {
-                     if (NULL == newPageType)
-                        j9nls_printf(PORTLIB, J9NLS_INFO, J9NLS_JIT_OPTIONS_LARGE_PAGE_SIZE_NOT_SUPPORTED_WITH_REQUESTED_PAGETYPE, oldSize, oldQualifier, oldPageType, newSize, newQualifier);
-                     else
-                        j9nls_printf(PORTLIB, J9NLS_INFO, J9NLS_JIT_OPTIONS_LARGE_PAGE_SIZE_NOT_SUPPORTED_WITH_PAGETYPE, oldSize, oldQualifier, oldPageType, newSize, newQualifier, newPageType);
-                     }
+                  largePageSize = pageSizes[pageIndex];
+                  largePageFlags = pageFlags[pageIndex];
                   }
                }
-            // No <size> for -Xlp or -Xlp:codecache, default (and -Xlp) behavior is to use preferred page size
-            else
-               {
-               UDATA *pageSizes = j9vmem_supported_page_sizes();
-               UDATA *pageFlags = j9vmem_supported_page_flags();
-               largePageSize = pageSizes[0]; /* Default page size is always the first element */
-               largePageFlags = pageFlags[0];
+            }
+         }
 
-               UDATA preferredPageSize = 0;
-               UDATA hugePreferredPageSize = 0;
-   #if defined(TR_TARGET_POWER)
-               preferredPageSize = 65536;
-   #elif (defined(LINUX) && defined(TR_TARGET_X86))
-               preferredPageSize = 2097152;
-               hugePreferredPageSize = 0x40000000;
-   #elif (defined(TR_TARGET_S390))
-               preferredPageSize = 1048576;
-   #endif
-               if (0 != preferredPageSize)
-                  {
-                  for (UDATA pageIndex = 0; 0 != pageSizes[pageIndex]; ++pageIndex)
-                     {
-                     if ( (preferredPageSize == pageSizes[pageIndex] || hugePreferredPageSize == pageSizes[pageIndex])
-#if defined(J9ZOS390)
-                          // zOS doesn't support non-pageable large pages for JIT code cache.
-                          && (0 != (J9PORT_VMEM_PAGE_FLAG_PAGEABLE & pageFlags[pageIndex]))
-#endif
-                     )
-                        {
-                        largePageSize = pageSizes[pageIndex];
-                        largePageFlags = pageFlags[pageIndex];
-                        }
-                     }
-                  }
-               }
-
-
-            if (largePageSize > (0) && isNonNegativePowerOf2((int32_t)largePageSize))
-               {
-               jitConfig->largeCodePageSize = (int32_t)largePageSize;
-               jitConfig->largeCodePageFlags = (int32_t)largePageFlags;
-               }
+      if (largePageSize > (0) && isNonNegativePowerOf2((int32_t)largePageSize))
+         {
+         jitConfig->largeCodePageSize = (int32_t)largePageSize;
+         jitConfig->largeCodePageFlags = (int32_t)largePageFlags;
          }
       }
 
    char *samplingOption = "-XsamplingExpirationTime";
-   if ((argIndex=FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, samplingOption, 0)) >= 0)
+   argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, samplingOption, 0);
+   if (argIndex >= 0)
       {
       UDATA expirationTime;
       IDATA ret = GET_INTEGER_VALUE(argIndex, samplingOption, expirationTime);
@@ -1859,21 +1793,17 @@ J9::Options::fePreProcess(void * base)
       }
 
    char *compThreadsOption = "-XcompilationThreads";
-   if ((argIndex=FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, compThreadsOption, 0)) >= 0)
+   argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, compThreadsOption, 0);
+   if (argIndex >= 0)
       {
       UDATA numCompThreads;
       IDATA ret = GET_INTEGER_VALUE(argIndex, compThreadsOption, numCompThreads);
 
-#if defined(JITSERVER_SUPPORT) && defined(JITSERVER_TODO)
-      if (ret == OPTION_OK)
+      if (ret == OPTION_OK && numCompThreads > 0)
          {
          _numUsableCompilationThreads = numCompThreads;
          compInfo->updateNumUsableCompThreads(_numUsableCompilationThreads);
          }
-#else
-      if (ret == OPTION_OK && numCompThreads <= MAX_USABLE_COMP_THREADS)
-         _numUsableCompilationThreads = numCompThreads;
-#endif /* defined(JITSERVER_SUPPORT) && defined(JITSERVER_TODO) */
       }
 
 #if defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390)
@@ -1883,7 +1813,7 @@ J9::Options::fePreProcess(void * base)
    preferTLHPrefetch = proc >= TR_PPCp6 && proc <= TR_PPCp7;
 #elif defined(TR_HOST_S390)
    preferTLHPrefetch = TR::Compiler->target.cpu.getSupportsArch(TR::CPU::z10);
-#else /* TR_HOST_X86 */
+#else // TR_HOST_X86
    preferTLHPrefetch = true;
    // Disable TM on x86 because we cannot tell whether a Haswell chip supports TM or not, plus it's killing the performance on dayTrader3
    self()->setOption(TR_DisableTM);
@@ -2018,7 +1948,8 @@ J9::Options::fePreProcess(void * base)
       {
       char *deterministicOption = "-XX:deterministic=";
       const UDATA MAX_DETERMINISTIC_MODE = 9; // only levels 0-9 are allowed
-      if ((argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, deterministicOption, 0)) >= 0)
+      argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, deterministicOption, 0);
+      if (argIndex >= 0)
          {
          UDATA deterministicMode;
          IDATA ret = GET_INTEGER_VALUE(argIndex, deterministicOption, deterministicMode);
@@ -2031,28 +1962,32 @@ J9::Options::fePreProcess(void * base)
    if (!TR::Compiler->target.cpu.isZ())
       self()->setOption(TR_DisableAOTBytesCompression);
 
-#if defined(JITSERVER_SUPPORT)
-   // Check option -XX:+UseJITServer and/or -XX:StartAsJITServer
-   // -XX:-UseJITServer disables JITServer at the client
+#if defined(J9VM_OPT_JITSERVER)
    static bool JITServerAlreadyParsed = false;
    if (!JITServerAlreadyParsed) // Avoid processing twice for AOT and JIT and produce duplicate messages
       {
       JITServerAlreadyParsed = true;
-
-      const char *xxUseJITServerOption = "-XX:+UseJITServer";
-      const char *xxDisableUseJITServerOption = "-XX:-UseJITServer";
-      const char *xxStartAsJITServerOption = "-XX:StartAsJITServer";
-
-      int32_t xxUseJITServerArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxUseJITServerOption, 0);
-      int32_t xxDisableUseJITServerArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxDisableUseJITServerOption, 0);
-      int32_t xxStartAsJITServerArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxStartAsJITServerOption, 0);
-
-      // Check if option is at all specified
-      if ((xxUseJITServerArgIndex > xxDisableUseJITServerArgIndex) ||
-          (xxStartAsJITServerArgIndex >= 0))
+      if (vm->internalVMFunctions->isJITServerEnabled(vm))
          {
-         if (xxUseJITServerArgIndex > xxStartAsJITServerArgIndex) // Client mode
+         compInfo->getPersistentInfo()->setRemoteCompilationMode(JITServer::SERVER);
+         // Increase the default timeout value for JITServer.
+         // It can be overridden with -XX:JITServerTimeout= option in JITServerParseCommonOptions().
+         compInfo->getPersistentInfo()->setSocketTimeout(30000);
+         }
+      else
+         {
+         // Check option -XX:+UseJITServer
+         // -XX:-UseJITServer disables JITServer at the client
+         const char *xxUseJITServerOption = "-XX:+UseJITServer";
+         const char *xxDisableUseJITServerOption = "-XX:-UseJITServer";
+
+         int32_t xxUseJITServerArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxUseJITServerOption, 0);
+         int32_t xxDisableUseJITServerArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxDisableUseJITServerOption, 0);
+
+         // Check if option is at all specified
+         if (xxUseJITServerArgIndex > xxDisableUseJITServerArgIndex)
             {
+            j9tty_printf(PORTLIB, "JITServer is currently a technology preview. Its use is not yet supported\n");
             compInfo->getPersistentInfo()->setRemoteCompilationMode(JITServer::CLIENT);
 
             const char *xxJITServerAddressOption = "-XX:JITServerAddress=";
@@ -2065,13 +2000,8 @@ J9::Options::fePreProcess(void * base)
                compInfo->getPersistentInfo()->setJITServerAddress(address);
                }
             }
-         else // Server mode
-            {
-            compInfo->getPersistentInfo()->setRemoteCompilationMode(JITServer::SERVER);
-            }
-
-         JITServerParseCommonOptions(vm, compInfo);
          }
+      JITServerParseCommonOptions(vm, compInfo);
       if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::CLIENT)
          {
          // Generate a random identifier for this JITServer instance.
@@ -2080,16 +2010,25 @@ J9::Options::fePreProcess(void * base)
          std::random_device rd;
          std::mt19937_64 rng(rd());
          std::uniform_int_distribution<uint64_t> dist;
-         compInfo->getPersistentInfo()->setClientUID(dist(rng));
+         // clientUID != 0 when running in client mode
+         uint64_t clientUID = dist(rng);
+         while (0 == clientUID)
+            clientUID = dist(rng);
+         compInfo->getPersistentInfo()->setClientUID(clientUID);
+         jitConfig->clientUID = clientUID;
+
+         // _safeReservePhysicalMemoryValue is set as 0 for the JITClient because compilations
+         // are done remotely. The user can still override it with a command line option
+         J9::Options::_safeReservePhysicalMemoryValue = 0;
+         }
+      else
+         {
+         // clientUID == 0 when running in server mode / regular JVM
+         compInfo->getPersistentInfo()->setClientUID(0);
+         jitConfig->clientUID = 0;
          }
       }
-   // _safeReservePhysicalMemoryValue is set as 0 for the JITServer client because compilations
-   // are done remotely. The user can still override it with a command line option
-   if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::CLIENT)
-      {
-      J9::Options::_safeReservePhysicalMemoryValue = 0;
-      }
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 #if (defined(TR_HOST_X86) || defined(TR_HOST_S390) || defined(TR_HOST_POWER)) && defined(TR_TARGET_64BIT)
    self()->setOption(TR_EnableSymbolValidationManager);
@@ -2128,7 +2067,7 @@ J9::Options::openLogFiles(J9JITConfig *jitConfig)
       ((TR_JitPrivateConfig*)jitConfig->privateConfig)->rtLogFile = fileOpen(self(), jitConfig, rtLogFileName, "wb", true, false);
    }
 
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
 void
 J9::Options::setupJITServerOptions()
    {
@@ -2141,7 +2080,6 @@ J9::Options::setupJITServerOptions()
       self()->setIsVariableHeapBaseForBarrierRange0(true);
       self()->setOption(TR_DisableProfiling); // JITServer limitation, JIT profiling data is not available to remote compiles yet
       self()->setOption(TR_DisableEDO); // JITServer limitation, EDO counters are not relocatable yet
-      self()->setOption(TR_DisableKnownObjectTable);
       self()->setOption(TR_DisableMethodIsCold); // Shady heuristic; better to disable to reduce client/server traffic
       self()->setOption(TR_DisableDecimalFormatPeephole);// JITServer decimalFormatPeephole,
 
@@ -2154,27 +2092,34 @@ J9::Options::setupJITServerOptions()
          // IProfiler thread is not needed at JITServer because
          // no IProfiler info is collected at the server itself
          self()->setOption(TR_DisableIProfilerThread);
+         J9::Compilation::setOutOfProcessCompilation();
          }
 
       // In the JITServer world, expensive compilations are performed remotely so there is no risk of blowing the footprint limit on the JVM
       // Setting _expensiveCompWeight to a large value so that JSR292/hot/scorching compilation are allowed to be executed concurrently
       TR::Options::_expensiveCompWeight = TR::CompilationInfo::MAX_WEIGHT;
-
       }
 
    if (TR::Options::getVerboseOption(TR_VerboseJITServer))
       {
       TR::PersistentInfo *persistentInfo = compInfo->getPersistentInfo();
       if (persistentInfo->getRemoteCompilationMode() == JITServer::SERVER)
+         {
          TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "JITServer Server Mode. Port: %d. Connection Timeout %ums",
                persistentInfo->getJITServerPort(), persistentInfo->getSocketTimeout());
+         }
       else if (persistentInfo->getRemoteCompilationMode() == JITServer::CLIENT)
+         {
          TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "JITServer Client Mode. Server address: %s port: %d. Connection Timeout %ums",
                persistentInfo->getJITServerAddress().c_str(), persistentInfo->getJITServerPort(),
                persistentInfo->getSocketTimeout());
+         TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Identifier for current client JVM: %" OMR_PRIu64 "\n",
+               compInfo->getPersistentInfo()->getClientUID());
+         }
       }
+
    }
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 bool
 J9::Options::fePostProcessJIT(void * base)
@@ -2186,9 +2131,7 @@ J9::Options::fePostProcessJIT(void * base)
    J9JavaVM * javaVM = jitConfig->javaVM;
    PORT_ACCESS_FROM_JAVAVM(javaVM);
 
-#if defined(JITSERVER_SUPPORT) && defined(JITSERVER_TODO)
    TR::CompilationInfo * compInfo = getCompilationInfo(jitConfig);
-#endif /* defined(JITSERVER_SUPPORT) && defined(JITSERVER_TODO) */
    // If user has not specified a value for compilation threads, do it now.
    // This code does not have to stay in the fePostProcessAOT because in an AOT only
    // scenario we don't need more than one compilation thread to load code.
@@ -2204,11 +2147,7 @@ J9::Options::fePostProcessJIT(void * base)
          if (!TR::Options::getCmdLineOptions()->getOption(TR_DisableRampupImprovements) &&
             !TR::Options::getAOTCmdLineOptions()->getOption(TR_DisableRampupImprovements))
             {
-#if defined(JITSERVER_SUPPORT) && defined(JITSERVER_TODO)
             compInfo->updateNumUsableCompThreads(_numUsableCompilationThreads);
-#else
-            _numUsableCompilationThreads = MAX_USABLE_COMP_THREADS;
-#endif /* defined(JITSERVER_SUPPORT) && defined(JITSERVER_TODO) */
             }
          }
       if (_numUsableCompilationThreads <= 0)
@@ -2217,12 +2156,8 @@ J9::Options::fePostProcessJIT(void * base)
          // Do not create more than numProc-1 compilation threads, but at least one
          //
          uint32_t numOnlineCPUs = j9sysinfo_get_number_CPUs_by_type(J9PORT_CPU_ONLINE);
-#if defined(JITSERVER_SUPPORT) && defined(JITSERVER_TODO)
          compInfo->updateNumUsableCompThreads(_numUsableCompilationThreads);
          _numUsableCompilationThreads = numOnlineCPUs > 1 ? std::min((numOnlineCPUs - 1), static_cast<uint32_t>(_numUsableCompilationThreads)) : 1;
-#else
-         _numUsableCompilationThreads = numOnlineCPUs > 1 ? std::min((numOnlineCPUs - 1), static_cast<uint32_t>(MAX_USABLE_COMP_THREADS)) : 1;
-#endif /* defined(JITSERVER_SUPPORT) && defined(JITSERVER_TODO) */
          }
       }
 
@@ -2278,9 +2213,9 @@ J9::Options::fePostProcessJIT(void * base)
          }
       }
 
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
    self()->setupJITServerOptions();
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
    return true;
    }
@@ -2303,9 +2238,9 @@ J9::Options::fePostProcessAOT(void * base)
          }
       }
 
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
    self()->setupJITServerOptions();
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
    return true;
    }
@@ -2724,7 +2659,7 @@ J9::Options::printPID()
    ((TR_J9VMBase *)_fe)->printPID();
    }
 
-#if defined(JITSERVER_SUPPORT)
+#if defined(J9VM_OPT_JITSERVER)
 void getTRPID(char *buf);
 
 static void
@@ -2747,7 +2682,7 @@ unpackRegex(TR::SimpleRegex *&regexPtr)
    {
    if (!regexPtr)
       return;
-   char *str = (char*)((uintptrj_t)&regexPtr + (uintptrj_t)regexPtr);
+   char *str = (char*)((uintptr_t)&regexPtr + (uintptr_t)regexPtr);
    regexPtr = TR::SimpleRegex::create(str);
    }
 
@@ -2911,14 +2846,10 @@ J9::Options::unpackOptions(char *clientOptions, size_t clientOptionsSize, TR::Co
 
    // Receive rtResolve: J9JIT_RUNTIME_RESOLVE
    // NOTE: This relies on rtResolve being the last option in clientOptions
-   // the J9JIT_RUNTIME_RESOLVE flag from JITServer client
+   // the J9JIT_RUNTIME_RESOLVE flag from JITClient
    // On JITServer, we store this value for each client in ClientSessionData
    bool rtResolve = (bool) *((uint8_t *) options + clientOptionsSize - sizeof(bool));
-   // JITSERVER_TODO guards the code that relies on other JITServer unmerged files.
-#if defined(JITSERVER_TODO)
    compInfoPT->getClientData()->setRtResolve(rtResolve);
-   _reportByteCodeInfoAtCatchBlock = fe->getReportByteCodeInfoAtCatchBlock();
-#endif /* defined(JITSERVER_TODO) */
    unpackRegex(options->_traceForCodeMining);
    unpackRegex(options->_disabledOptTransformations);
    unpackRegex(options->_disabledInlineSites);
@@ -3027,7 +2958,7 @@ J9::Options::setLogFileForClientOptions(int suffixNumber)
          self()->openLogFile(_compilationSequenceNumber);
          }
 
-      if (!_logFile)
+      if (_logFile)
          {
          J9JITConfig *jitConfig = (J9JITConfig*)_feBase;
          if (!jitConfig->tracingHook)
@@ -3050,7 +2981,7 @@ J9::Options::closeLogFileForClientOptions()
       _logFile = NULL;
       }
    }
-#endif /* defined(JITSERVER_SUPPORT) */
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 #if 0
 char*

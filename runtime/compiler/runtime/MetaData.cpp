@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -48,16 +48,16 @@
 #include "env/CompilerEnv.hpp"
 #include "exceptions/DataCacheError.hpp"
 #include "il/DataTypes.hpp"
+#include "il/LabelSymbol.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/RegisterMappedSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/LabelSymbol.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/RegisterMappedSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "runtime/ArtifactManager.hpp"
 #include "runtime/CodeCache.hpp"
 #include "runtime/MethodMetaData.h"
@@ -176,10 +176,14 @@ createExceptionTable(
          *(uint32_t *)cursor = e->_instructionEndPC, cursor += 4;
          *(uint32_t *)cursor = e->_instructionHandlerPC, cursor += 4;
          *(uint32_t *)cursor = e->_catchType, cursor += 4;
-         if (comp->fej9()->isAOT_DEPRECATED_DO_NOT_USE())
-            *(uintptrj_t *)cursor = (uintptrj_t)e->_byteCodeInfo.getCallerIndex(), cursor += sizeof(uintptrj_t);
+         if (comp->fej9()->isAOT_DEPRECATED_DO_NOT_USE()
+#if defined(J9VM_OPT_JITSERVER)
+            || comp->isOutOfProcessCompilation()
+#endif
+            )
+            *(uintptr_t *)cursor = (uintptr_t)e->_byteCodeInfo.getCallerIndex(), cursor += sizeof(uintptr_t);
          else
-            *(uintptrj_t *)cursor = (uintptrj_t)e->_method->resolvedMethodAddress(), cursor += sizeof(uintptrj_t);
+            *(uintptr_t *)cursor = (uintptr_t)e->_method->resolvedMethodAddress(), cursor += sizeof(uintptr_t);
          }
       else
          {
@@ -317,7 +321,7 @@ createInternalPtrStackMapInJ9Format(
    //printf("JIT Address %x\n", location);
    //*((int32_t *) location) = (int16_t) trStackAtlas->getNumberOfInternalPtrs();
    //printf("Number of internal pointers = %d\n", (*((int16_t *) location)));
-   location += sizeof(intptrj_t);
+   location += sizeof(intptr_t);
 
    // Fill in the data now.
    //
@@ -478,7 +482,7 @@ createStackMap(
    else
       map->resetRegistersBits((1<<cg->getInternalPtrMapBit()));
 
-   uintptrj_t startLocation = (uintptrj_t) location;
+   uintptr_t startLocation = (uintptr_t) location;
 
    if (fourByteOffsets)
       {
@@ -920,7 +924,7 @@ createStackAtlas(
    if (trStackAtlas->getStackAllocMap())
       {
       vmAtlas->stackAllocMap = cursor;
-      cursor += sizeof(uintptrj_t);
+      cursor += sizeof(uintptr_t);
       int32_t mapSizeInBytes = trStackAtlas->getStackAllocMap()->getMapSizeInBytes();
       memcpy(cursor, trStackAtlas->getStackAllocMap()->getMapBits(), mapSizeInBytes);
       cursor += numberOfMapBytes;
@@ -930,7 +934,7 @@ createStackAtlas(
 
    if (trStackAtlas->getStackAllocMap())
       {
-      cursor -= (numberOfMapBytes + sizeof(uintptrj_t));
+      cursor -= (numberOfMapBytes + sizeof(uintptr_t));
       }
 
    TR::ResolvedMethodSymbol * methodSymbol = comp->getJittedMethodSymbol();
@@ -979,9 +983,9 @@ createStackAtlas(
          createStackMap(mapCursor, cg, cursor, fourByteOffsets, trStackAtlas, numberOfMapBytes, comp);
 
          if (vmAtlas->internalPointerMap && mapCursor == trStackAtlas->getParameterMap())
-            *((uintptrj_t *) vmAtlas->internalPointerMap) = (uintptrj_t) cursor;
+            *((uintptr_t *) vmAtlas->internalPointerMap) = (uintptr_t) cursor;
          if (vmAtlas->stackAllocMap && mapCursor == trStackAtlas->getParameterMap())
-            *((uintptrj_t *) vmAtlas->stackAllocMap) = (uintptrj_t) cursor;
+            *((uintptr_t *) vmAtlas->stackAllocMap) = (uintptr_t) cursor;
          }
       previousLowestCodeOffset = mapCursor->getLowestCodeOffset();
       mapCursor = nextMapCursor;
@@ -1077,7 +1081,11 @@ populateBodyInfo(
    //
    if (recompInfo)
       {
-      if (vm->isAOT_DEPRECATED_DO_NOT_USE())
+      if (vm->isAOT_DEPRECATED_DO_NOT_USE()
+#if defined(J9VM_OPT_JITSERVER)
+         || comp->isOutOfProcessCompilation()
+#endif
+         )
          {
          // The allocation for the Persistent Method Info and the Persistent Jitted Body Info used to be allocated with the exception table.
          // Exception tables are now being reaped on method recompilation.  As these need to be persistent, we need to allocate them separately.
@@ -1112,6 +1120,7 @@ populateBodyInfo(
          TR_PersistentJittedBodyInfo *bodyInfoSrc = recompInfo->getJittedBodyInfo();
          TR_PersistentMethodInfo *methodInfoSrc = recompInfo->getMethodInfo();
          methodInfoSrc->setIsInDataCache(true);
+         bodyInfoSrc->setIsRemoteCompileBody(true);
          data->bodyInfo = locationPersistentJittedBodyInfo;
          TR_PersistentJittedBodyInfo *newBodyInfo = (TR_PersistentJittedBodyInfo *)locationPersistentJittedBodyInfo;
 
@@ -1138,7 +1147,11 @@ populateBodyInfo(
       }
    else
       {
-      if (vm->isAOT_DEPRECATED_DO_NOT_USE())
+      if (vm->isAOT_DEPRECATED_DO_NOT_USE()
+#if defined(J9VM_OPT_JITSERVER)
+         || comp->isOutOfProcessCompilation()
+#endif
+         )
          {
          J9JITDataCacheHeader *aotMethodHeader = (J9JITDataCacheHeader *)comp->getAotMethodDataStart();
          TR_AOTMethodHeader *aotMethodHeaderEntry =  (TR_AOTMethodHeader *)(aotMethodHeader + 1);
@@ -1212,15 +1225,18 @@ static void populateInlineCalls(
          inlinedCallSite->_methodInfo = (TR_OpaqueMethodBlock*)-1;
          }
       memcpy(callSiteCursor, inlinedCallSite, sizeof(TR_InlinedCallSite) );
-      if (comp->getOption(TR_AOT) && (comp->getOption(TR_TraceRelocatableDataCG) || comp->getOption(TR_TraceRelocatableDataDetailsCG) || comp->getOption(TR_TraceReloCG)))
-      	 {
-      	 traceMsg(comp, "inlineIdx %d, callSiteCursor %p, inlinedCallSite->methodInfo = %p\n", i, callSiteCursor, inlinedCallSite->_methodInfo);
-      	 }
-
-      if (!vm->isAOT_DEPRECATED_DO_NOT_USE()) // For AOT, we should only have returned resolved info about a method if the method came from same class loaders.
+      if (comp->getOption(TR_TraceRelocatableDataCG) || comp->getOption(TR_TraceRelocatableDataDetailsCG) || comp->getOption(TR_TraceReloCG))
          {
-         J9Class *j9clazz = (J9Class *) J9_CLASS_FROM_CP(((J9RAMConstantPoolItem *) J9_CP_FROM_METHOD(((J9Method *) inlinedCallSite->_methodInfo))));
-         TR_OpaqueClassBlock *clazzOfInlinedMethod = ((TR_J9VMBase*) comp->fej9())->convertClassPtrToClassOffset(j9clazz);
+         traceMsg(comp, "inlineIdx %d, callSiteCursor %p, inlinedCallSite->methodInfo = %p\n", i, callSiteCursor, inlinedCallSite->_methodInfo);
+         }
+
+      if (!vm->isAOT_DEPRECATED_DO_NOT_USE()
+#if defined(J9VM_OPT_JITSERVER)
+         && !comp->isOutOfProcessCompilation()
+#endif
+         ) // For AOT, we should only have returned resolved info about a method if the method came from same class loaders.
+         {
+         TR_OpaqueClassBlock *clazzOfInlinedMethod = vm->getClassFromMethodBlock(inlinedCallSite->_methodInfo);
          if (comp->fej9()->isUnloadAssumptionRequired(clazzOfInlinedMethod, comp->getCurrentMethod()))
             {
             if (comp->getOption(TR_AOT) && comp->getOption(TR_TraceRelocatableDataDetailsCG))
@@ -1234,9 +1250,9 @@ static void populateInlineCalls(
                        callSiteCursor);
                }
 #if (defined(TR_HOST_64BIT) && defined(TR_HOST_POWER))
-            createClassUnloadPicSite((void*) j9clazz, (void*) (callSiteCursor+(TR::Compiler->target.cpu.isBigEndian()?4:0)), 4, comp->getMetadataAssumptionList());
+            createClassUnloadPicSite((void*) clazzOfInlinedMethod, (void*) (callSiteCursor+(comp->target().cpu.isBigEndian()?4:0)), 4, comp->getMetadataAssumptionList());
 #else
-            createClassUnloadPicSite((void*) j9clazz, (void*) callSiteCursor, sizeof(uintptrj_t), comp->getMetadataAssumptionList());
+            createClassUnloadPicSite((void*) clazzOfInlinedMethod, (void*) callSiteCursor, sizeof(uintptr_t), comp->getMetadataAssumptionList());
 #endif
             }
          }
@@ -1283,7 +1299,7 @@ createMethodMetaData(
    // Find unmergeable GC maps
    //
    GCStackMapSet nonmergeableBCI(std::less<TR_GCStackMap*>(), cg->trMemory()->heapMemoryRegion());
-   if (comp->getOptions()->getReportByteCodeInfoAtCatchBlock())
+   if (comp->fej9vm()->getReportByteCodeInfoAtCatchBlock())
       {
       for (TR::TreeTop* treetop = comp->getStartTree(); treetop; treetop = treetop->getNextTreeTop())
          {
@@ -1360,7 +1376,7 @@ createMethodMetaData(
    TR_GCStackAllocMap * stackAllocMap = trStackAtlas->getStackAllocMap();
    if (stackAllocMap)
       {
-      tableSize += numberOfMapBytes + sizeof(uintptrj_t);
+      tableSize += numberOfMapBytes + sizeof(uintptr_t);
       }
 
    int32_t osrInfoOffset = -1;
@@ -1472,12 +1488,19 @@ createMethodMetaData(
    data->registerSaveDescription = comp->cg()->getRegisterSaveDescription();
 
 #if defined(J9VM_INTERP_AOT_COMPILE_SUPPORT)
-   if (vm->isAOT_DEPRECATED_DO_NOT_USE())
+   if (vm->isAOT_DEPRECATED_DO_NOT_USE()
+#if defined(J9VM_OPT_JITSERVER)
+      || comp->isOutOfProcessCompilation()
+#endif
+      )
       {
       TR::CodeCache * codeCache = comp->cg()->getCodeCache(); // MCT
 
-      /* Align code caches */
-      codeCache->alignWarmCodeAlloc(3);
+#if defined(J9VM_OPT_JITSERVER)
+      if (!comp->isOutOfProcessCompilation())
+#endif
+         /* Align code caches */
+         codeCache->alignWarmCodeAlloc(4);
 
       J9JITDataCacheHeader *aotMethodHeader = (J9JITDataCacheHeader *)comp->getAotMethodDataStart();
       TR_AOTMethodHeader *aotMethodHeaderEntry =  (TR_AOTMethodHeader *)(aotMethodHeader + 1);
@@ -1555,7 +1578,11 @@ createMethodMetaData(
 
    populateInlineCalls(comp, vm, data, callSiteCursor, numberOfMapBytes);
 
-   if (!(vm->_jitConfig->runtimeFlags & J9JIT_TOSS_CODE) && !vm->isAOT_DEPRECATED_DO_NOT_USE())
+   if (!(vm->_jitConfig->runtimeFlags & J9JIT_TOSS_CODE) && !vm->isAOT_DEPRECATED_DO_NOT_USE()
+#if defined(J9VM_OPT_JITSERVER)
+      && !comp->isOutOfProcessCompilation()
+#endif
+      )
       {
       TR_TranslationArtifactManager *artifactManager = TR_TranslationArtifactManager::getGlobalArtifactManager();
       TR_TranslationArtifactManager::CriticalSection updateMetaData;

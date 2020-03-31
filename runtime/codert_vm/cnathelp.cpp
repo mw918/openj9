@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -358,6 +358,17 @@ setCurrentExceptionFromJIT(J9VMThread *currentThread, UDATA exceptionNumber, j9o
 	return J9_JITHELPER_ACTION_THROW;
 }
 
+static void*
+setCurrentExceptionNLSWithArgsFromJIT(J9VMThread *currentThread, U_32 moduleName, U_32 messageNumber, UDATA exceptionNumber, ...)
+{
+	va_list args;
+	TIDY_BEFORE_THROW();
+	va_start(args, exceptionNumber);
+	currentThread->javaVM->internalVMFunctions->setCurrentExceptionNLSWithArgs(currentThread, moduleName, messageNumber, exceptionNumber, args);
+	va_end(args);
+	return J9_JITHELPER_ACTION_THROW;
+}
+
 static VMINLINE void*
 setCurrentExceptionNLSFromJIT(J9VMThread *currentThread, UDATA exceptionNumber, U_32 moduleName, U_32 messageNumber)
 {
@@ -466,6 +477,37 @@ slow:
 	goto done;
 }
 
+static VMINLINE bool
+fast_jitNewValueImpl(J9VMThread *currentThread, J9Class *objectClass, bool checkClassInit, bool nonZeroTLH)
+{
+	bool slowPathRequired = false;
+	if (checkClassInit) {
+		if (J9_UNEXPECTED(VM_VMHelpers::classRequiresInitialization(currentThread, objectClass))) {
+			goto slow;
+		}
+	}
+	if (J9_UNEXPECTED(!J9_IS_J9CLASS_VALUETYPE(objectClass))) {
+		goto slow;
+	}
+	{
+		UDATA allocationFlags = J9_GC_ALLOCATE_OBJECT_INSTRUMENTABLE;
+		if (nonZeroTLH) {
+			allocationFlags |= J9_GC_ALLOCATE_OBJECT_NON_ZERO_TLH;
+		}
+		j9object_t obj = currentThread->javaVM->memoryManagerFunctions->J9AllocateObjectNoGC(currentThread, objectClass, allocationFlags);
+		if (J9_UNEXPECTED(NULL == obj)) {
+			goto slow;
+		}
+		JIT_RETURN_UDATA(obj);
+	}
+done:
+	return slowPathRequired;
+slow:
+	currentThread->floatTemp1 = (void*)objectClass;
+	slowPathRequired = true;
+	goto done;
+}
+
 static VMINLINE void*
 slow_jitNewObjectImpl(J9VMThread *currentThread, bool checkClassInit, bool nonZeroTLH)
 {
@@ -509,6 +551,51 @@ done:
 	SLOW_JIT_HELPER_EPILOGUE();
 	return addr;
 }
+
+static VMINLINE void*
+slow_jitNewValueImpl(J9VMThread *currentThread, bool checkClassInit, bool nonZeroTLH)
+{
+	SLOW_JIT_HELPER_PROLOGUE();
+	J9Class *objectClass = (J9Class*)currentThread->floatTemp1;
+	j9object_t obj = NULL;
+	void *oldPC = currentThread->jitReturnAddress;
+	void *addr = NULL;
+	UDATA allocationFlags = J9_GC_ALLOCATE_OBJECT_INSTRUMENTABLE;
+	if (nonZeroTLH) {
+		allocationFlags |= J9_GC_ALLOCATE_OBJECT_NON_ZERO_TLH;
+	}
+	if (!J9_IS_J9CLASS_VALUETYPE(objectClass)) {
+		buildJITResolveFrameForRuntimeHelper(currentThread, parmCount);
+		addr = setCurrentExceptionFromJIT(currentThread, J9VMCONSTANTPOOL_JAVALANGINSTANTIATIONERROR | J9_EX_CTOR_CLASS, J9VM_J9CLASS_TO_HEAPCLASS(objectClass));
+		goto done;
+	}
+	if (checkClassInit) {
+		if (VM_VMHelpers::classRequiresInitialization(currentThread, objectClass)) {
+			buildJITResolveFrameForRuntimeHelper(currentThread, parmCount);
+			currentThread->javaVM->internalVMFunctions->initializeClass(currentThread, objectClass);
+			addr = restoreJITResolveFrame(currentThread, oldPC);
+			if (NULL != addr) {
+				goto done;
+			}
+		}
+	}
+	buildJITResolveFrameWithPC(currentThread, J9_STACK_FLAGS_JIT_ALLOCATION_RESOLVE | J9_SSF_JIT_RESOLVE, parmCount, true, 0, oldPC);
+	obj = currentThread->javaVM->memoryManagerFunctions->J9AllocateObject(currentThread, objectClass, allocationFlags);
+	if (NULL == obj) {
+		addr = setHeapOutOfMemoryErrorFromJIT(currentThread);
+		goto done;
+	}
+	currentThread->floatTemp1 = (void*)obj; // in case of decompile
+	addr = restoreJITResolveFrame(currentThread, oldPC, false, false);
+	if (NULL != addr) {
+		goto done;
+	}
+	JIT_RETURN_UDATA(obj);
+done:
+	SLOW_JIT_HELPER_EPILOGUE();
+	return addr;
+}
+
 
 void* J9FASTCALL
 old_slow_jitNewObject(J9VMThread *currentThread)
@@ -1114,12 +1201,10 @@ static VMINLINE bool
 fast_jitMonitorEnterImpl(J9VMThread *currentThread, j9object_t syncObject, bool forMethod)
 {
 	bool slowPathRequired = false;
-	IDATA monstatus = currentThread->javaVM->internalVMFunctions->objectMonitorEnterNonBlocking(currentThread, syncObject);
-	switch(monstatus) {
-	case 0:
-	case 1:
+	UDATA monstatus = currentThread->javaVM->internalVMFunctions->objectMonitorEnterNonBlocking(currentThread, syncObject);
+	if (monstatus <= J9_OBJECT_MONITOR_BLOCKING) {
 		slowPathRequired = true;
-		currentThread->floatTemp1 = (void*)(UDATA)monstatus;
+		currentThread->floatTemp1 = (void*)monstatus;
 	}
 	return slowPathRequired;
 }
@@ -1132,7 +1217,7 @@ slow_jitMonitorEnterImpl(J9VMThread *currentThread, bool forMethod)
 	UDATA flags = J9_STACK_FLAGS_JIT_RESOLVE_FRAME | (forMethod ? J9_STACK_FLAGS_JIT_METHOD_MONITOR_ENTER_RESOLVE : J9_STACK_FLAGS_JIT_MONITOR_ENTER_RESOLVE);
 	IDATA monstatus = (IDATA)(UDATA)currentThread->floatTemp1;
 	void *oldPC = buildJITResolveFrame(currentThread, flags, parmCount);
-	if (0 == monstatus) {
+	if (monstatus < J9_OBJECT_MONITOR_BLOCKING) {
 		if (forMethod) {
 			/* Only mark the outer frame for failed method monitor enter - inline frames have correct maps */
 			void * stackMap = NULL;
@@ -1147,7 +1232,16 @@ slow_jitMonitorEnterImpl(J9VMThread *currentThread, bool forMethod)
 				resolveFrame->specialFrameFlags = (resolveFrame->specialFrameFlags & ~J9_STACK_FLAGS_JIT_FRAME_SUB_TYPE_MASK) | J9_STACK_FLAGS_JIT_FAILED_METHOD_MONITOR_ENTER_RESOLVE;
 			}
 		}
-		addr = setNativeOutOfMemoryErrorFromJIT(currentThread, J9NLS_VM_FAILED_TO_ALLOCATE_MONITOR);
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+		if (J9_OBJECT_MONITOR_VALUE_TYPE_IMSE == monstatus) {
+			addr = setCurrentExceptionNLSWithArgsFromJIT(currentThread, J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_TYPE, J9VMCONSTANTPOOL_JAVALANGILLEGALMONITORSTATEEXCEPTION);
+			goto done;
+		}
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+		if (J9_OBJECT_MONITOR_OOM == monstatus) {
+			addr = setNativeOutOfMemoryErrorFromJIT(currentThread, J9NLS_VM_FAILED_TO_ALLOCATE_MONITOR);
+			goto done;
+		}
 	} else {
 		currentThread->javaVM->internalVMFunctions->objectMonitorEnterBlocking(currentThread);
 		/* Do not check asyncs for synchronized block (non-method) entry, since we now have the monitor,
@@ -1155,6 +1249,7 @@ slow_jitMonitorEnterImpl(J9VMThread *currentThread, bool forMethod)
 		 */
 		addr = restoreJITResolveFrame(currentThread, oldPC, forMethod, false);
 	}
+done:
 	SLOW_JIT_HELPER_EPILOGUE();
 	return addr;
 }
@@ -1716,13 +1811,11 @@ retry:
 		}
 		goto retry;
 	}
-#if defined(J9VM_OPT_VALHALLA_NESTMATES)
 	if (J9VTABLE_INVOKE_PRIVATE_OFFSET == vTableOffset) {
 		UDATA method = ((UDATA)ramMethodRef->method) | J9_VTABLE_INDEX_DIRECT_METHOD_FLAG;
 		JIT_RETURN_UDATA(method);
 		goto done;
 	}
-#endif /* J9VM_OPT_VALHALLA_NESTMATES */
 	JIT_RETURN_UDATA(sizeof(J9Class) - vTableOffset);
 done:
 	SLOW_JIT_HELPER_EPILOGUE();
@@ -2174,6 +2267,16 @@ old_fast_jitTypeCheckArrayStoreWithNullCheck(J9VMThread *currentThread)
 		slowPath = (void*)old_slow_jitTypeCheckArrayStoreWithNullCheck;
 	}
 	return slowPath;
+}
+
+void J9FASTCALL
+old_fast_jitAcmpHelper(J9VMThread *currentThread)
+{
+	OLD_JIT_HELPER_PROLOGUE(2);
+	DECLARE_JIT_PARM(j9object_t, lhs, 1);
+	DECLARE_JIT_PARM(j9object_t, rhs, 2);
+
+	JIT_RETURN_UDATA(currentThread->javaVM->internalVMFunctions->valueTypeCapableAcmp(currentThread, lhs, rhs));
 }
 
 void* J9FASTCALL
@@ -2761,6 +2864,32 @@ fast_jitObjectHashCode(J9VMThread *currentThread, j9object_t object)
 }
 
 void* J9FASTCALL
+fast_jitNewValue(J9VMThread *currentThread, J9Class *objectClass)
+{
+//	extern void* slow_jitNewObject(J9VMThread *currentThread);
+	JIT_HELPER_PROLOGUE();
+	void *slowPath = NULL;
+	if (J9_UNEXPECTED(fast_jitNewValueImpl(currentThread, objectClass, true, false))) {
+		SET_PARM_COUNT(0);
+		slowPath = (void*) slow_jitNewValueImpl;
+	}
+	return slowPath;
+}
+
+void* J9FASTCALL
+fast_jitNewValueNoZeroInit(J9VMThread *currentThread, J9Class *objectClass)
+{
+//	extern void* slow_jitNewObjectNoZeroInit(J9VMThread *currentThread);
+	JIT_HELPER_PROLOGUE();
+	void *slowPath = NULL;
+	if (J9_UNEXPECTED(fast_jitNewValueImpl(currentThread, objectClass, true, true))) {
+		SET_PARM_COUNT(0);
+		slowPath = (void*)slow_jitNewValueImpl;
+	}
+	return slowPath;
+}
+
+void* J9FASTCALL
 fast_jitNewObject(J9VMThread *currentThread, J9Class *objectClass)
 {
 //	extern void* slow_jitNewObject(J9VMThread *currentThread);
@@ -3000,6 +3129,19 @@ fast_jitTypeCheckArrayStoreWithNullCheck(J9VMThread *currentThread, j9object_t d
 		slowPath = (void*)old_slow_jitTypeCheckArrayStoreWithNullCheck;
 	}
 	return slowPath;
+}
+
+BOOLEAN J9FASTCALL
+#if defined(J9VM_ARCH_X86) || defined(J9VM_ARCH_S390)
+/* TODO Will be cleaned once all platforms adopt the correct parameter order */
+fast_jitAcmpHelper(J9VMThread *currentThread, j9object_t lhs, j9object_t rhs)
+#else /* J9VM_ARCH_X86 || J9VM_ARCH_S390*/
+fast_jitAcmpHelper(J9VMThread *currentThread, j9object_t rhs, j9object_t lhs)
+#endif /* J9VM_ARCH_X86 || J9VM_ARCH_S390*/
+{
+	JIT_HELPER_PROLOGUE();
+
+	return currentThread->javaVM->internalVMFunctions->valueTypeCapableAcmp(currentThread, lhs, rhs);
 }
 
 void* J9FASTCALL
@@ -3257,6 +3399,9 @@ initPureCFunctionTable(J9JavaVM *vm)
 	jitConfig->old_slow_jitNewInstanceImplAccessCheck = (void*)old_slow_jitNewInstanceImplAccessCheck;
 	jitConfig->old_slow_jitTranslateNewInstanceMethod = (void*)old_slow_jitTranslateNewInstanceMethod;
 	jitConfig->old_slow_jitReportFinalFieldModified = (void*)old_slow_jitReportFinalFieldModified;
+	jitConfig->old_fast_jitAcmpHelper = (void*)old_fast_jitAcmpHelper;
+	jitConfig->fast_jitNewValue = (void*)fast_jitNewValue;
+	jitConfig->fast_jitNewValueNoZeroInit = (void*)fast_jitNewValueNoZeroInit;
 	jitConfig->fast_jitNewObject = (void*)fast_jitNewObject;
 	jitConfig->fast_jitNewObjectNoZeroInit = (void*)fast_jitNewObjectNoZeroInit;
 	jitConfig->fast_jitANewArray = (void*)fast_jitANewArray;

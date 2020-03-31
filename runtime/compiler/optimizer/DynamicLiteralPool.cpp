@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -30,7 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "codegen/CodeGenerator.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/Method.hpp"
 #include "compile/SymbolReferenceTable.hpp"
@@ -50,12 +50,12 @@
 #include "il/Node.hpp"
 #include "il/NodePool.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/MethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "infra/Assert.hpp"
 #include "infra/Cfg.hpp"
 #include "infra/ILWalk.hpp"
@@ -285,11 +285,7 @@ bool TR_DynamicLiteralPool::transformLitPoolConst(TR::Node *grandParent, TR::Nod
       case TR::iconst:
       case TR::lconst:
       case TR::bconst:
-      case TR::cconst:
       case TR::sconst:
-      case TR::iuconst:
-      case TR::luconst:
-      case TR::buconst:
          if (transformNeeded(grandParent, parent, child))
             {
             if (performTransformation(comp(), "%s Large non-float Constant\n", optDetailString()))
@@ -367,27 +363,11 @@ bool TR_DynamicLiteralPool::transformNeeded(TR::Node *grandParent, TR::Node *par
    if (parentOpCode.isAdd() || parentOpCode.isSub() ||
        (parentOpCode.isBooleanCompare() && !parent->isTheVirtualGuardForAGuardedInlinedCall()))
       {
-      if (child->getOpCode().isLong() && (TR::Compiler->target.is32Bit()))
+      if (child->getOpCode().isLong() && (comp()->target().is32Bit()))
          return false; //avasilev: to be handled better
       else
          {
          TR::ILOpCodes oldOpCode = child->getOpCodeValue();
-         if (oldOpCode == TR::iuconst &&
-             (parentOpCode.isAdd() || parentOpCode.isSub()))
-            {
-            TR::Node::recreate(child, TR::iconst);
-            }
-         else if (oldOpCode == TR::luconst &&
-             (parentOpCode.isAdd() || parentOpCode.isSub()))
-            {
-            TR::Node::recreate(child, TR::lconst);
-            }
-         else if (oldOpCode == TR::cconst &&
-             (parentOpCode.isAdd() || parentOpCode.isSub()))
-            {
-            TR::Node::recreate(child, TR::sconst);
-            }
-
          bool needs = (cg()->arithmeticNeedsLiteralFromPool(child));
          TR::Node::recreate(child, oldOpCode);
          return needs;
@@ -395,7 +375,7 @@ bool TR_DynamicLiteralPool::transformNeeded(TR::Node *grandParent, TR::Node *par
       }
    if (parentOpCode.isAnd() || parentOpCode.isOr() || parentOpCode.isXor() || parentOpCode.isNeg())
       {
-      if (child->getOpCode().isLong() && (TR::Compiler->target.is32Bit()))
+      if (child->getOpCode().isLong() && (comp()->target().is32Bit()))
          return false; // to be handled better
       else
          return (cg()->bitwiseOpNeedsLiteralFromPool(parent,child));
@@ -434,7 +414,7 @@ bool TR_DynamicLiteralPool::transformConstToIndirectLoad(TR::Node *parent, TR::N
    addrNode = getAloadFromCurrentBlock(parent);
 
    constCopy =TR::Node::copy(child);
-   shadow = getSymRefTab()->findOrCreateImmutableGenericIntShadowSymbolReference((intptrj_t)constCopy);
+   shadow = getSymRefTab()->findOrCreateImmutableGenericIntShadowSymbolReference((intptr_t)constCopy);
    shadow->setLiteralPoolAddress();
 
    if (child->getReferenceCount() > 1)  // rematerialize the const by creating new indirect load node
@@ -465,7 +445,7 @@ bool TR_DynamicLiteralPool::transformStaticSymRefToIndirectLoad(TR::TreeTop * tt
    //childSymRef->setFromLiteralPool();
    TR::ILOpCode childOpcode=child->getOpCode();
    TR::ILOpCodes childOpcodeValue=child->getOpCodeValue();
-   
+
    if (childOpcodeValue==TR::loadaddr)
       {
       return false;
@@ -473,7 +453,7 @@ bool TR_DynamicLiteralPool::transformStaticSymRefToIndirectLoad(TR::TreeTop * tt
    else
       {
       TR::SymbolReference *intChildShadow = NULL;
-      
+
       if (childSymRef->isUnresolved())
          {
          if (cg()->supportsDirectIntegralLoadStoresFromLiteralPool())
@@ -482,7 +462,7 @@ bool TR_DynamicLiteralPool::transformStaticSymRefToIndirectLoad(TR::TreeTop * tt
             }
 
          childSymRef->setFromLiteralPool();
-         
+
          if (performTransformation(comp(), "%s unresolved static ref for node %p (%s)\n", optDetailString(), child, child->getOpCode().getName()))
             {
             _changed = true;

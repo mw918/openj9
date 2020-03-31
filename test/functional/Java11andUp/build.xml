@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 
 <!--
-  Copyright (c) 2018, 2019 IBM Corp. and others
+  Copyright (c) 2018, 2020 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -56,7 +56,7 @@
 			<include name="**/condy/BootstrapMethods.java" />
 			<include name="**/condy/CondyGenerator.java" />
 			<classpath>
-				<pathelement location="${TEST_ROOT}/TestConfig/lib/asm-7.0.jar" />
+				<pathelement location="${LIB_DIR}/asm-7.3.jar" />
 			</classpath>
 		</javac>
 	</target>
@@ -67,7 +67,7 @@
 		<java classname="org.openj9.test.condy.CondyGenerator" fork="true" failonerror="true" logError="true" jvm="${javaexecutable.java}">
 			<jvmarg value="-Xverify:none" />
 			<classpath>
-				<pathelement location="${TEST_ROOT}/TestConfig/lib/asm-7.0.jar" />
+				<pathelement location="${LIB_DIR}/asm-7.3.jar" />
 				<pathelement location="${build}" />
 			</classpath>
 		</java>
@@ -90,11 +90,11 @@
 		<javac srcdir="${src}" destdir="${build}" debug="true" fork="true" executable="${compiler.javac}" includeAntRuntime="false" encoding="ISO-8859-1">
 			<src path="${src}"/>
 			<src path="${transformerListener}" />
-			<compilerarg line="--add-exports java.base/jdk.internal.reflect=ALL-UNNAMED --add-exports java.base/com.ibm.tools.attach.target=ALL-UNNAMED" />
+			<compilerarg line="--add-exports java.base/jdk.internal.reflect=ALL-UNNAMED --add-exports java.base/openj9.internal.tools.attach.target=ALL-UNNAMED" />
 			<classpath>
-				<pathelement location="${TEST_ROOT}/TestConfig/lib/testng.jar"/>
-				<pathelement location="${TEST_ROOT}/TestConfig/lib/jcommander.jar"/>
-				<pathelement location="${TEST_ROOT}/TestConfig/lib/asm-7.0.jar" />
+				<pathelement location="${LIB_DIR}/testng.jar"/>
+				<pathelement location="${LIB_DIR}/jcommander.jar"/>
+				<pathelement location="${LIB_DIR}/asm-7.3.jar" />
 				<pathelement location="${build}" />
 			</classpath>
 		</javac>

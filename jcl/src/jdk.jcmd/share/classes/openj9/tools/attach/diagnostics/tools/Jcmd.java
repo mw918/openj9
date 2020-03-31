@@ -30,8 +30,8 @@ import java.util.List;
 import com.sun.tools.attach.VirtualMachineDescriptor;
 import com.sun.tools.attach.spi.AttachProvider;
 
+import openj9.internal.tools.attach.target.DiagnosticUtils;
 import openj9.tools.attach.diagnostics.attacher.AttacherDiagnosticsProvider;
-import openj9.tools.attach.diagnostics.base.DiagnosticUtils;
 
 /**
  * Jcmd A tool for running diagnostic commands on another Java process
@@ -55,7 +55,7 @@ public class Jcmd {
 			+ "%n"
 			+ "list JVM processes on the local machine. Default behavior when no options are specified.%n"
 			+ "%n"
-			+ "NOTE: this utility may significantly affect the performance of the target JVM.%n"
+			+ "NOTE: this utility might significantly affect the performance of the target JVM.%n"
 			+ "    The available diagnostic commands are determined by%n"
 			+ "    the target VM and may vary between VMs.%n";
 	@SuppressWarnings("nls")

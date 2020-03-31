@@ -1,5 +1,5 @@
 <#--
-Copyright (c) 1998, 2019 IBM Corp. and others
+Copyright (c) 1998, 2020 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,16 +26,18 @@ $(UMA_LIBTARGET) : $(UMA_OBJECTS)
 </#assign>
 
 <#assign dll_target_rule>
-$(UMA_DLLTARGET): $(UMA_OBJECTS) $(UMA_TARGET_LIBRARIES)
+$(UMA_DLLTARGET) : $(UMA_OBJECTS) $(UMA_TARGET_LIBRARIES)
 	$(UMA_DLL_LD) $(UMA_DLL_LINK_FLAGS) \
-		$(VMLINK) $(UMA_LINK_PATH) -o $(UMA_DLLTARGET)\
+		$(VMLINK) $(UMA_LINK_PATH) -o $@ \
 		$(UMA_OBJECTS) \
 		$(UMA_DLL_LINK_POSTFLAGS)
-	dsymutil -f $(UMA_DLLTARGET) -o $(UMA_DLLTARGET).dbg
+ifdef j9vm_uma_gnuDebugSymbols
+	dsymutil -o $@.dSYM $@
+endif
 </#assign>
 
 <#assign exe_target_rule>
-$(UMA_EXETARGET): $(UMA_OBJECTS) $(UMA_TARGET_LIBRARIES)
+$(UMA_EXETARGET) : $(UMA_OBJECTS) $(UMA_TARGET_LIBRARIES)
 	$(UMA_EXE_LD) $(UMA_EXE_PREFIX_FLAGS) $(UMA_LINK_PATH) $(VMLINK) \
 		$(UMA_OBJECTS) \
 		$(UMA_BEGIN_DASH_L) \
@@ -43,6 +45,9 @@ $(UMA_EXETARGET): $(UMA_OBJECTS) $(UMA_TARGET_LIBRARIES)
 		$(UMA_END_DASH_L) \
 		$(UMA_LINK_SHARED_LIBRARIES) \
 		-o $@ $(UMA_EXE_POSTFIX_FLAGS)
+ifdef j9vm_uma_gnuDebugSymbols
+	dsymutil -o $@.dSYM $@
+endif
 </#assign>
 
 UMA_BEGIN_DASH_L =
@@ -103,7 +108,7 @@ endif
 
 CFLAGS += -DOSX -D_REENTRANT -D_FILE_OFFSET_BITS=64 -fstack-protector
 CXXFLAGS += -DOSX -D_REENTRANT -D_FILE_OFFSET_BITS=64 -fstack-protector
-CPPFLAGS += -DOSX -D_REENTRANT -fstack-protector
+CPPFLAGS += -DOSX -D_REENTRANT
 
 <#-- Add Position Independent compile flag -->
 CFLAGS += -fPIC

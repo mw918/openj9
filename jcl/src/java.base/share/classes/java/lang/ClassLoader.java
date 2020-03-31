@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar16]*/
+/*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -46,6 +46,7 @@ import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.*;
 import java.security.cert.Certificate;
+import sun.security.util.SecurityConstants;
 
 /*[IF Sidecar19-SE]
 import java.lang.reflect.Modifier;
@@ -281,7 +282,9 @@ public abstract class ClassLoader {
 				System.setSecurityManager(new SecurityManager());
 			} else {
 				try {
-					System.setSecurityManager((SecurityManager)Class.forName(javaSecurityManager, true, applicationClassLoader).getDeclaredConstructor().newInstance());
+					Constructor<?> constructor = Class.forName(javaSecurityManager, true, applicationClassLoader).getConstructor();
+					constructor.setAccessible(true);
+					System.setSecurityManager((SecurityManager)constructor.newInstance());
 				} catch (Throwable e) {
 					/*[MSG "K0631", "JVM can't set custom SecurityManager due to {0}"]*/
 					throw new Error(com.ibm.oti.util.Msg.getString("K0631", e.toString()), e); //$NON-NLS-1$
@@ -812,7 +815,7 @@ public final ClassLoader getParent() {
 		ClassLoader callersClassLoader = callerClassLoader();
 		/*[PR JAZZ103 76960] permission check is needed against the parent instead of this classloader */
 		if (needsClassLoaderPermissionCheck(callersClassLoader, parent)) {
-			security.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionGetClassLoader);
+			security.checkPermission(SecurityConstants.GET_CLASSLOADER_PERMISSION);
 		}
 	}
 	return parent;
@@ -1036,7 +1039,7 @@ public static ClassLoader getPlatformClassLoader() {
 	if (security != null) {
 		ClassLoader callersClassLoader = callerClassLoader();
 		if (needsClassLoaderPermissionCheck(callersClassLoader, platformClassLoader)) {
-			security.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionGetClassLoader);
+			security.checkPermission(SecurityConstants.GET_CLASSLOADER_PERMISSION);
 		}
 	}
 	return platformClassLoader;
@@ -1115,7 +1118,7 @@ public static ClassLoader getSystemClassLoader () {
 	if (security != null) {	
 		ClassLoader callersClassLoader = callerClassLoader();
 		if (needsClassLoaderPermissionCheck(callersClassLoader, sysLoader)) {
-			security.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionGetClassLoader);
+			security.checkPermission(SecurityConstants.GET_CLASSLOADER_PERMISSION);
 		}
 	}
 
@@ -1869,7 +1872,7 @@ static ClassLoader callerClassLoader() {
  * @exception	SecurityException
  *							if the library was not allowed to be loaded
  */
-static synchronized void loadLibraryWithClassLoader(String libName, ClassLoader loader) {
+static void loadLibraryWithClassLoader(String libName, ClassLoader loader) {
 	SecurityManager smngr = System.getSecurityManager();
 	if (smngr != null)
 		smngr.checkLink(libName);
@@ -1945,7 +1948,7 @@ static void loadLibraryWithPath(String libName, ClassLoader loader, String libra
 	}
 }
 
-private static native byte[] loadLibraryWithPath(byte[] libName, ClassLoader loader, byte[] libraryPath);
+private static synchronized native byte[] loadLibraryWithPath(byte[] libName, ClassLoader loader, byte[] libraryPath);
 
 static void loadLibrary(Class<?> caller, String name, boolean fullPath) {
 	if (fullPath)
@@ -1953,6 +1956,15 @@ static void loadLibrary(Class<?> caller, String name, boolean fullPath) {
 	else
 		loadLibraryWithClassLoader(name, caller.getClassLoaderImpl());
 }
+
+/*[IF Java15]*/
+static void loadLibrary(Class<?> caller, File file) {
+	loadLibraryWithPath(file.getAbsolutePath(), caller.getClassLoaderImpl(), null);
+}
+static void loadLibrary(Class<?> caller, String libName) {
+	loadLibraryWithClassLoader(libName, caller.getClassLoaderImpl());
+}
+/*[ENDIF] Java15 */
 
 /**
  * Sets the assertion status of a class.

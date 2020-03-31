@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2019 IBM Corp. and others
+ * Copyright (c) 2017, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,6 +20,8 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 import groovy.json.JsonSlurper;
+import groovy.json.JsonOutput;
+pipelineFunctions = load 'buildenv/jenkins/common/pipeline-functions.groovy'
 
 def get_source() {
     stage('Get Source') {
@@ -256,7 +258,7 @@ def checkoutRef (REF) {
 def build() {
     stage('Compile') {
         // 'all' target dependencies broken for zos, use 'images test-image-openj9'
-        def make_target = SPEC.contains('zos') ? 'images test-image-openj9' : 'all'
+        def make_target = SPEC.contains('zos') ? 'images test-image-openj9 debug-image' : 'all'
         OPENJDK_CLONE_DIR = "${env.WORKSPACE}/${OPENJDK_CLONE_DIR}"
         withEnv(BUILD_ENV_VARS_LIST) {
             dir(OPENJDK_CLONE_DIR) {
@@ -271,7 +273,7 @@ def build() {
     }
     stage('Java Version') {
         dir(OPENJDK_CLONE_DIR) {
-            sh "build/$RELEASE/images/$JDK_FOLDER/bin/java -version"
+            sh "build/$RELEASE/images/$JDK_FOLDER/bin/java -Xjit -version"
         }
     }
 }
@@ -279,7 +281,8 @@ def build() {
 def archive_sdk() {
     stage('Archive') {
         def buildDir = "build/${RELEASE}/images/"
-        def testDir = "test/openj9"
+        def debugImageDir = "${buildDir}debug-image/"
+        def testDir = "test"
 
         dir(OPENJDK_CLONE_DIR) {
             sh "tar -C ${buildDir} -zcvf ${SDK_FILENAME} ${JDK_FOLDER}"
@@ -287,57 +290,163 @@ def archive_sdk() {
             if (fileExists("${buildDir}${testDir}")) {
                 if (SPEC.contains('zos')) {
                     // Note: to preserve the files ACLs set _OS390_USTAR=Y env variable (see variable files)
-                    sh "pax  -wvz -s#${buildDir}${testDir}#native-test-libs#g -f ${TEST_FILENAME} ${buildDir}${testDir}"
+                    sh "pax -wvz '-s#${buildDir}${testDir}#test-images#' -f ${TEST_FILENAME} ${buildDir}${testDir}"
                 } else {
-                    sh "tar -C ${buildDir} -zcvf ${TEST_FILENAME} ${testDir} --transform 's,${testDir},native-test-libs,'"
+                    sh "tar -C ${buildDir} -zcvf ${TEST_FILENAME} ${testDir} --transform 's,${testDir},test-images,'"
                 }
             }
-            if (ARTIFACTORY_SERVER) {
-                def uploadSpec = """{
-                        "files":[
-                            {
-                                "pattern": "${OPENJDK_CLONE_DIR}/${SDK_FILENAME}",
-                                "target": "${ARTIFACTORY_UPLOAD_DIR}",
-                                "props": "build.buildIdentifier=${BUILD_IDENTIFIER}"
-                            },
-                            {
-                                "pattern": "${OPENJDK_CLONE_DIR}/${TEST_FILENAME}",
-                                "target": "${ARTIFACTORY_UPLOAD_DIR}",
-                                "props": "build.buildIdentifier=${BUILD_IDENTIFIER}"
-                            }
-                        ]
-                    }"""
+            // test if the debug-image directory is present
+            if (fileExists("${debugImageDir}")) {
+                if (SPEC.contains('aix')) {
+                    // On AIX, .debuginfo files are simple copies of the shared libraries.
+                    // Change all suffixes from .debuginfo to .so; then remove the .so suffix
+                    // from names in the bin directory. This will result in an archive that
+                    // can be extracted overtop of a jdk yielding one that is debuggable.
+                    sh "tar -C ${debugImageDir} -zcvf ${DEBUG_IMAGE_FILENAME} . --transform 's#\\.debuginfo\$#.so#' --transform 's#\\(bin/.*\\)\\.so\$#\\1#' --show-stored-names"
+                } else if (SPEC.contains('zos')) {
+                    // Note: to preserve the files ACLs set _OS390_USTAR=Y env variable (see variable files)
+                    sh "pax -wvz '-s#${debugImageDir}##' -f ${DEBUG_IMAGE_FILENAME} ${debugImageDir}"
+                } else {
+                    sh "tar -C ${debugImageDir} -zcvf ${DEBUG_IMAGE_FILENAME} ."
+                }
+            }
+            if (params.ARCHIVE_JAVADOC) {
+                def javadocDir = "docs"
+                def extractDir = "build/${RELEASE}/images/"
+                if (SDK_VERSION == "8") {
+                    extractDir = "build/${RELEASE}/"
+                }
+                if (fileExists("${extractDir}${javadocDir}")) {
+                    if (SPEC.contains('zos')) {
+                        // Note: to preserve the files ACLs set _OS390_USTAR=Y env variable (see variable files)
+                        sh "pax -wvzf ${JAVADOC_FILENAME} ${extractDir}${javadocDir}"
+                    } else {
+                        sh "tar -C ${extractDir} -zcvf ${JAVADOC_FILENAME} ${javadocDir}"
+                    }
+                }
+            }
+            if (ARTIFACTORY_CONFIG) {
+                def specs = []
+                def sdkSpec = ["pattern": "${OPENJDK_CLONE_DIR}/${SDK_FILENAME}",
+                               "target": "${ARTIFACTORY_CONFIG['uploadDir']}",
+                               "props": "build.buildIdentifier=${BUILD_IDENTIFIER}"]
+                specs.add(sdkSpec)
+                def testSpec = ["pattern": "${OPENJDK_CLONE_DIR}/${TEST_FILENAME}",
+                                "target": "${ARTIFACTORY_CONFIG['uploadDir']}",
+                                "props": "build.buildIdentifier=${BUILD_IDENTIFIER}"]
+                specs.add(testSpec)
+                def debugImageSpec = ["pattern": "${OPENJDK_CLONE_DIR}/${DEBUG_IMAGE_FILENAME}",
+                                "target": "${ARTIFACTORY_CONFIG['uploadDir']}",
+                                "props": "build.buildIdentifier=${BUILD_IDENTIFIER}"]
+                specs.add(debugImageSpec)
+                if (params.ARCHIVE_JAVADOC) {
+                    def javadocSpec = ["pattern": "${OPENJDK_CLONE_DIR}/${JAVADOC_FILENAME}",
+                                       "target": "${ARTIFACTORY_CONFIG['uploadDir']}",
+                                       "props": "build.buildIdentifier=${BUILD_IDENTIFIER}"]
+                    specs.add(javadocSpec)
+                }
+                def uploadFiles = [files : specs]
+                def uploadSpec = JsonOutput.toJson(uploadFiles)
                 upload_artifactory(uploadSpec)
-                env.CUSTOMIZED_SDK_URL = "${ARTIFACTORY_URL}/${ARTIFACTORY_UPLOAD_DIR}${SDK_FILENAME}"
+
+                // Always use the default server link for the description and for test.
+                env.CUSTOMIZED_SDK_URL = "${ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['url']}/${ARTIFACTORY_CONFIG['uploadDir']}${SDK_FILENAME}"
                 currentBuild.description += "<br><a href=${CUSTOMIZED_SDK_URL}>${SDK_FILENAME}</a>"
+
                 if (fileExists("${TEST_FILENAME}")) {
-                    TEST_LIB_URL = "${ARTIFACTORY_URL}/${ARTIFACTORY_UPLOAD_DIR}${TEST_FILENAME}"
-                    env.CUSTOMIZED_SDK_URL += " " + TEST_LIB_URL
+                    TEST_LIB_URL = "${ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['url']}/${ARTIFACTORY_CONFIG['uploadDir']}${TEST_FILENAME}"
                     currentBuild.description += "<br><a href=${TEST_LIB_URL}>${TEST_FILENAME}</a>"
+                    env.CUSTOMIZED_SDK_URL += " " + TEST_LIB_URL
+                }
+                if (fileExists("${DEBUG_IMAGE_FILENAME}")) {
+                    DEBUG_IMAGE_LIB_URL = "${ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['url']}/${ARTIFACTORY_CONFIG['uploadDir']}/${DEBUG_IMAGE_FILENAME}"
+                    currentBuild.description += "<br><a href=${DEBUG_IMAGE_LIB_URL}>${DEBUG_IMAGE_FILENAME}</a>"
+                }
+                if (params.ARCHIVE_JAVADOC) {
+                    if (fileExists("${JAVADOC_FILENAME}")) {
+                        JAVADOC_LIB_URL = "${ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['url']}/${ARTIFACTORY_CONFIG['uploadDir']}${JAVADOC_FILENAME}"
+                        currentBuild.description += "<br><a href=${JAVADOC_LIB_URL}>${JAVADOC_FILENAME}</a>"
+                        echo "Javadoc:'${JAVADOC_LIB_URL}"
+                    }
                 }
                 echo "CUSTOMIZED_SDK_URL:'${CUSTOMIZED_SDK_URL}'"
             } else {
                 echo "ARTIFACTORY server is not set saving artifacts on jenkins."
-                archiveArtifacts artifacts: "**/${SDK_FILENAME},**/${TEST_FILENAME}", fingerprint: false, onlyIfSuccessful: true
+                def ARTIFACTS_FILES = "**/${SDK_FILENAME},**/${TEST_FILENAME},**/${DEBUG_IMAGE_FILENAME}"
+                if (params.ARCHIVE_JAVADOC) {
+                    ARTIFACTS_FILES += ",**/${JAVADOC_FILENAME}"
+                }
+                archiveArtifacts artifacts: ARTIFACTS_FILES, fingerprint: false, onlyIfSuccessful: true
             }
         }
     }
 }
 
+/*
+* When crash occurs in java, there will be an output in the log: IEATDUMP success for DSN='JENKINS.JVM.JENKIN*.*.*.X&DS'.
+* The X&DS is a macro that is passed to the IEATDUMP service on z/OS.
+* The dump is split into multiple files by the macro if the address space is large.
+* Each dataset is named in a similar way but there is a distinct suffix to specify the order.
+* For example, JVM.*.*.*.001, JVM.*.*.*.002, and JVM.*.*.*.003.
+* The function fetchFile moves each dataset into the current directory of the machine, and appends the data to the core.xxx.dmp at the same time.
+* The file core.xxx.dmp is uploaded to artifactory for triage.
+*/
+def fetchFile(src, dest) {
+    // remove the user name from the dataset name
+    def offset = USER.length() + 1
+    def fileToMove = src.substring(src.indexOf("${USER}.") + offset)
+    // append the dataset to core.xxx.dmp file
+    sh "cat '//${fileToMove}' >> ${dest}"
+    // remove the dataset
+    sh "tso DELETE ${fileToMove}"
+}
+
 def archive_diagnostics() {
-    sh "find . -name 'core.*.dmp' -o -name 'javacore.*.txt' -o -name 'Snap.*.trc' -o -name 'jitdump.*.dmp' | tar -zcvf ${DIAGNOSTICS_FILENAME} -T -"
-    if (ARTIFACTORY_SERVER) {
+    if (SPEC.contains('zos')) {
+        def logContent = currentBuild.rawBuild.getLog()
+        // search for each occurrence of IEATDUMP success for DSN=
+        def matches = logContent =~ /IEATDUMP success for DSN=.*/
+        for (match in matches) {
+            // extract the naming convention of datasets
+            def beginIndex = match.indexOf('\'') + 1
+            def endIndex = match.lastIndexOf('.')
+            def filename = match.substring(beginIndex, endIndex)
+            // count how many datasets created by the macro
+            def num = sh returnStdout: true, script: "tso listcat | grep ${filename} | wc -l"
+            def numFiles = num.trim().toInteger()
+            for (i = 1; i <= numFiles; i++) {
+                switch (i) {
+                    case 1..9:
+                        src = filename + '.' + 'X00' + i;
+                        break;
+                    case 10..99:
+                        src = filename + '.' + 'X0' + i;
+                        break;
+                    case 100..999:
+                        src = filename + '.' + 'X' + i;
+                        break;
+                }
+                dest = 'core' + '.' + filename + '.' + 'dmp'
+                fetchFile(src,dest)
+            }
+        }
+        // Note: to preserve the files ACLs set _OS390_USTAR=Y env variable (see variable files)
+        sh "find . -name 'core.*.dmp' -o -name 'javacore.*.txt' -o -name 'Snap.*.trc' -o -name 'jitdump.*.dmp' | sed 's#^./##' | pax -wzf ${DIAGNOSTICS_FILENAME}"
+    } else {
+        sh "find . -name 'core.*.dmp' -o -name 'javacore.*.txt' -o -name 'Snap.*.trc' -o -name 'jitdump.*.dmp' | sed 's#^./##' | tar -zcvf ${DIAGNOSTICS_FILENAME} -T -"
+    }
+    if (ARTIFACTORY_CONFIG) {
         def uploadSpec = """{
             "files":[
                 {
                     "pattern": "${DIAGNOSTICS_FILENAME}",
-                    "target": "${ARTIFACTORY_UPLOAD_DIR}",
+                    "target": "${ARTIFACTORY_CONFIG['uploadDir']}",
                     "props": "build.buildIdentifier=${BUILD_IDENTIFIER}"
                 }
             ]
         }"""
-        upload_artifactory(uploadSpec)
-        DIAGNOSTICS_FILE_URL = "${ARTIFACTORY_URL}/${ARTIFACTORY_UPLOAD_DIR}${DIAGNOSTICS_FILENAME}"
+        upload_artifactory_core(ARTIFACTORY_CONFIG['defaultGeo'], uploadSpec)
+        DIAGNOSTICS_FILE_URL = "${ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['url']}/${ARTIFACTORY_CONFIG['uploadDir']}${DIAGNOSTICS_FILENAME}"
         currentBuild.description += "<br><a href=${DIAGNOSTICS_FILE_URL}>${DIAGNOSTICS_FILENAME}</a>"
     } else {
         archiveArtifacts artifacts: "${DIAGNOSTICS_FILENAME}", fingerprint: false
@@ -345,20 +454,73 @@ def archive_diagnostics() {
 }
 
 def upload_artifactory(uploadSpec) {
-    def server = Artifactory.server ARTIFACTORY_SERVER
+    // Loop all the servers and upload if we've determined we should do so
+    for (geo in ARTIFACTORY_CONFIG['geos']) {
+        if (ARTIFACTORY_CONFIG[geo]['uploadBool']) {
+            /*
+            * If the server is behind a vpn and we aren't on a node behind the vpn,
+            * save the sdk and upload it later on a machine behind the vpn
+            */
+            if (ARTIFACTORY_CONFIG[geo]['vpn'] == 'true' && !NODE_LABELS.contains("ci.geo.${geo}")) {
+                if (!ARTIFACTORY_CONFIG['stashed']) {
+                    // Stash only what test needs (CUSTOMIZED_SDK_URL)
+                    stash includes: "**/${SDK_FILENAME},**/${TEST_FILENAME}", name: 'sdk'
+                    ARTIFACTORY_CONFIG['stashed'] = true
+                    ARTIFACTORY_CONFIG['uploadSpec'] = uploadSpec
+                }
+                ARTIFACTORY_CONFIG[geo]['uploaded'] = false
+            } else {
+                upload_artifactory_core(geo, uploadSpec)
+                ARTIFACTORY_CONFIG[geo]['uploaded'] = true
+            }
+        }
+    }
+}
+
+def upload_artifactory_core(geo, uploadSpec) {
+    echo "Uploading to '${geo}'..."
+    def server = Artifactory.server ARTIFACTORY_CONFIG[geo]['server']
     // set connection timeout to 10 mins to avoid timeout on slow platforms
     server.connection.timeout = 600
 
     def buildInfo = Artifactory.newBuildInfo()
-    buildInfo.retention maxBuilds: ARTIFACTORY_NUM_ARTIFACTS, deleteBuildArtifacts: true
+    buildInfo.retention maxBuilds: ARTIFACTORY_CONFIG[geo]['numArtifacts'], maxDays: ARTIFACTORY_CONFIG[geo]['daysToKeepArtifacts'], deleteBuildArtifacts: true
     // Add BUILD_IDENTIFIER to the buildInfo. The UploadSpec adds it to the Artifact info
     buildInfo.env.filter.addInclude("BUILD_IDENTIFIER")
     buildInfo.env.capture = true
-    server.upload spec: uploadSpec, buildInfo: buildInfo
-    server.publishBuildInfo buildInfo
-    // Write URL to env so that we can pull it from the upstream pipeline job
-    env.ARTIFACTORY_URL = server.getUrl()
-    env.ARTIFACTORY_CREDS = server.getCredentialsId()
+
+    //Retry uploading to Artifactory if errors occur
+    pipelineFunctions.retry_and_delay({
+        server.upload spec: uploadSpec, buildInfo: buildInfo;
+        if (!ARTIFACTORY_CONFIG[geo]['vpn']){server.publishBuildInfo buildInfo}},
+        3, 300)
+
+    ARTIFACTORY_CONFIG[geo]['url'] = server.getUrl()
+    ARTIFACTORY_CONFIG[geo]['creds'] = server.getCredentialsId()
+    // If this is the default server, save the creds to pass to test
+    if (geo == ARTIFACTORY_CONFIG['defaultGeo']) {
+        env.ARTIFACTORY_CREDS = ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']].creds
+    }
+}
+
+def upload_artifactory_post() {
+    // Determine if we didn't do any Artifactory uploads because of vpn.
+    // At the time of writing this code, we would only hit this case if we compiled at OSU on plinux and needed to upload to UNB.
+    if (ARTIFACTORY_CONFIG && ARTIFACTORY_CONFIG['stashed']) {
+        for (geo in ARTIFACTORY_CONFIG['geos']) {
+            if (ARTIFACTORY_CONFIG[geo]['uploadBool'] && !ARTIFACTORY_CONFIG[geo]['uploaded']) {
+                // Grab a node with the same geo as the server so we can upload
+                node("ci.geo.${geo}") {
+                    try {
+                        unstash 'sdk'
+                        upload_artifactory_core(geo, ARTIFACTORY_CONFIG['uploadSpec'])
+                    } finally {
+                        cleanWs()
+                    }
+                }
+            }
+        }
+    }
 }
 
 def add_node_to_description() {
@@ -367,17 +529,26 @@ def add_node_to_description() {
 }
 
 def build_all() {
-    timeout(time: 6, unit: 'HOURS') {
-        try {
-            // Cleanup in case an old build left anything behind
-            cleanWs()
-            add_node_to_description()
-            get_source()
-            build()
-            archive_sdk()
-        } finally {
-            // disableDeferredWipeout also requires deleteDirs. See https://issues.jenkins-ci.org/browse/JENKINS-54225
-            cleanWs notFailBuild: true, disableDeferredWipeout: true, deleteDirs: true
+    stage ('Queue') {
+        timeout(time: 10, unit: 'HOURS') {
+            node("${NODE}") {
+                timeout(time: 5, unit: 'HOURS') {
+                    try {
+                        // Cleanup in case an old build left anything behind
+                        cleanWs()
+                        add_node_to_description()
+                        // Setup Artifactory now that we are on a node. This determines which server(s) we push to.
+                        variableFile.set_artifactory_config()
+                        get_source()
+                        build()
+                        archive_sdk()
+                    } finally {
+                        // disableDeferredWipeout also requires deleteDirs. See https://issues.jenkins-ci.org/browse/JENKINS-54225
+                        cleanWs notFailBuild: true, disableDeferredWipeout: true, deleteDirs: true
+                    }
+                }
+            }
+            upload_artifactory_post()
         }
     }
 }

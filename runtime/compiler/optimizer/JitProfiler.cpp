@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,7 +25,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "codegen/CodeGenerator.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "codegen/LinkageConventionsEnum.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/SymbolReferenceTable.hpp"
@@ -41,14 +41,14 @@
 #include "il/DataTypes.hpp"
 #include "il/ILOps.hpp"
 #include "il/ILOpCodes.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/RegisterMappedSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/RegisterMappedSymbol.hpp"
 #include "infra/Cfg.hpp"
 #include "optimizer/Optimization.hpp"
 #include "optimizer/Optimization_inlines.hpp"
@@ -168,7 +168,7 @@ int32_t TR_JitProfiler::performOnNode(TR::Node *node, TR::TreeTop *tt)
    _checklist->add(node);
 
    // Walk its children
-   for (intptrj_t i = 0; i < node->getNumChildren(); ++i)
+   for (intptr_t i = 0; i < node->getNumChildren(); ++i)
       {
       TR::Node *child = node->getChild(i);
       changesPerformed += performOnNode(child, tt);
@@ -326,8 +326,8 @@ void TR_JitProfiler::addBranchProfiling(TR::Node *branchNode, TR::TreeTop* tt, T
    // Adding to profiling block:
 
    // Record bytecode address
-   TR::Node *bpcNode = TR::Compiler->target.is64Bit() ? TR::Node::lconst(branchNode, (uintptrj_t) byteCode) :
-                                                       TR::Node::iconst(branchNode, (uintptrj_t) byteCode);
+   TR::Node *bpcNode = comp()->target().is64Bit() ? TR::Node::lconst(branchNode, (uintptr_t) byteCode) :
+                                                       TR::Node::iconst(branchNode, (uintptr_t) byteCode);
    blockCreator.addProfilingTree(TR::lstorei, bpcNode, TR::Compiler->om.sizeofReferenceAddress());
 
    // Re-create branch
@@ -395,8 +395,8 @@ void TR_JitProfiler::addInstanceProfiling(TR::Node *instanceNode, TR::TreeTop* t
    // Adding to profiling block:
 
    // Record bytecode address
-   TR::Node *bpcNode = TR::Compiler->target.is64Bit() ? TR::Node::lconst(instanceNode, (uintptrj_t) byteCode) :
-                                                       TR::Node::iconst(instanceNode, (uintptrj_t) byteCode);
+   TR::Node *bpcNode = comp()->target().is64Bit() ? TR::Node::lconst(instanceNode, (uintptr_t) byteCode) :
+                                                       TR::Node::iconst(instanceNode, (uintptr_t) byteCode);
    blockCreator.addProfilingTree(TR::lstorei, bpcNode, TR::Compiler->om.sizeofReferenceAddress());
 
    // Check object is non-null
@@ -467,8 +467,8 @@ void TR_JitProfiler::addCallProfiling(TR::Node *callNode, TR::TreeTop* tt, TR::B
    // Adding to profiling block:
 
    // Record bytecode address
-   TR::Node *bpcNode = TR::Compiler->target.is64Bit() ? TR::Node::lconst(callNode, (uintptrj_t) byteCode) :
-                                                       TR::Node::iconst(callNode, (uintptrj_t) byteCode);
+   TR::Node *bpcNode = comp()->target().is64Bit() ? TR::Node::lconst(callNode, (uintptr_t) byteCode) :
+                                                       TR::Node::iconst(callNode, (uintptr_t) byteCode);
    blockCreator.addProfilingTree(TR::lstorei, bpcNode, TR::Compiler->om.sizeofReferenceAddress());
 
    if ( isInvokeVirtualOrInterface(*byteCode) )
@@ -476,11 +476,11 @@ void TR_JitProfiler::addCallProfiling(TR::Node *callNode, TR::TreeTop* tt, TR::B
       // Record class pointer
       TR::Node *vftNode  = callNode->getFirstChild()->duplicateTree();//TODO: CAST!
       TR::Node *maskNode = TR::Node::create(callNode, TR::iconst, 0, CLASS_POINTER_MASK);
-      TR::Node *orNode   = TR::Node::create(TR::Compiler->target.is64Bit() ? TR::lor : TR::ior, 2, vftNode, maskNode);
+      TR::Node *orNode   = TR::Node::create(comp()->target().is64Bit() ? TR::lor : TR::ior, 2, vftNode, maskNode);
       blockCreator.addProfilingTree(TR::astorei, orNode, TR::Compiler->om.sizeofReferenceAddress());
 
       // Record caller
-      TR::Node * callerNode = TR::Node::aconst(callNode, (uintptrj_t)callNode->getOwningMethod());
+      TR::Node * callerNode = TR::Node::aconst(callNode, (uintptr_t)callNode->getOwningMethod());
       callerNode->setIsMethodPointerConstant(true);
       blockCreator.addProfilingTree(TR::astorei, callerNode, TR::Compiler->om.sizeofReferenceAddress());
 
@@ -491,7 +491,7 @@ void TR_JitProfiler::addCallProfiling(TR::Node *callNode, TR::TreeTop* tt, TR::B
    else // invokeStatic
       {
       // Record caller
-      TR::Node * callerNode = TR::Node::aconst(callNode, (uintptrj_t)callNode->getOwningMethod());
+      TR::Node * callerNode = TR::Node::aconst(callNode, (uintptr_t)callNode->getOwningMethod());
       callerNode->setIsMethodPointerConstant(true);
       blockCreator.addProfilingTree(TR::astorei, callerNode, TR::Compiler->om.sizeofReferenceAddress());
       }

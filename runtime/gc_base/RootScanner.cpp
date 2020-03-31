@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -46,6 +46,9 @@
 #include "HeapRegionDescriptor.hpp"
 #include "HeapRegionIterator.hpp"
 #include "HeapRegionManager.hpp"
+#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
+#include "HeapRegionIteratorVLHGC.hpp"
+#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
 #include "MemoryPool.hpp"
 #include "MemorySubSpace.hpp"
 #include "MemorySpace.hpp"
@@ -184,16 +187,8 @@ MM_RootScanner::scanMonitorReferencesComplete(MM_EnvironmentBase *env)
 void
 MM_RootScanner::doMonitorLookupCacheSlot(j9objectmonitor_t* slotPtr)
 {
-	// TODO: Local version of compressObjectReferences() ?
-	// TODO: Add new lockword macros (pass boolean)
-	if (_env->compressObjectReferences()) {
-		if (0 != *(U_32*)slotPtr) {
-			*(U_32*)slotPtr = 0;
-		}
-	} else {
-		if (0 != *(UDATA*)slotPtr) {
-			*(UDATA*)slotPtr = 0;
-		}
+	if(0 != *slotPtr) {
+		*slotPtr = 0;
 	}
 }
 
@@ -226,6 +221,14 @@ MM_RootScanner::doStringTableSlot(J9Object **slotPtr, GC_StringTableIterator *st
 {
 	doSlot(slotPtr);
 }
+
+#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
+void
+MM_RootScanner::doDoubleMappedObjectSlot(J9Object *objectPtr, struct J9PortVmemIdentifier *identifier)
+{
+	/* No need to call doSlot() here since there's nothing to update */
+}
+#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
 
 /**
  * @Perform operation on the given string cache table slot.
@@ -713,7 +716,7 @@ MM_RootScanner::scanOwnableSynchronizerObjects(MM_EnvironmentBase *env)
 	reportScanningStarted(RootScannerEntity_OwnableSynchronizerObjects);
 
 	MM_ObjectAccessBarrier *barrier = _extensions->accessBarrier;
-	MM_OwnableSynchronizerObjectList *ownableSynchronizerObjectList = _extensions->ownableSynchronizerObjectLists;
+	MM_OwnableSynchronizerObjectList *ownableSynchronizerObjectList = _extensions->getOwnableSynchronizerObjectLists();
 	while(NULL != ownableSynchronizerObjectList) {
 		if (_singleThread || J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 			J9Object *objectPtr = ownableSynchronizerObjectList->getHeadOfList();
@@ -856,6 +859,29 @@ MM_RootScanner::scanJVMTIObjectTagTables(MM_EnvironmentBase *env)
 }
 #endif /* J9VM_OPT_JVMTI */
 
+#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
+void 
+MM_RootScanner::scanDoubleMappedObjects(MM_EnvironmentBase *env)
+{
+	if (_singleThread || J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+		GC_HeapRegionIteratorVLHGC regionIterator(_extensions->heap->getHeapRegionManager());
+		MM_HeapRegionDescriptorVLHGC *region = NULL;
+		reportScanningStarted(RootScannerEntity_DoubleMappedObjects);
+		while (NULL != (region = regionIterator.nextRegion())) {
+			if (region->isArrayletLeaf()) {
+				J9Object *spineObject = (J9Object *)region->_allocateData.getSpine();
+				Assert_MM_true(NULL != spineObject);
+				J9PortVmemIdentifier *arrayletDoublemapID = &region->_arrayletDoublemapID;
+				if (NULL != arrayletDoublemapID->address) {
+					doDoubleMappedObjectSlot(spineObject, arrayletDoublemapID);
+				}
+			}
+		}
+		reportScanningEnded(RootScannerEntity_DoubleMappedObjects);
+	}
+}
+#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
+
 /**
  * Scan all root set references from the VM into the heap.
  * For all slots that are hard root references into the heap, the appropriate slot handler will be called.
@@ -980,6 +1006,12 @@ MM_RootScanner::scanClearable(MM_EnvironmentBase *env)
 		scanJVMTIObjectTagTables(env);
 	}
 #endif /* J9VM_OPT_JVMTI */
+
+#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
+	if (_includeDoubleMap) {
+		scanDoubleMappedObjects(env);
+	}
+#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
 }
 
 /**
@@ -1028,6 +1060,12 @@ MM_RootScanner::scanAllSlots(MM_EnvironmentBase *env)
 		scanJVMTIObjectTagTables(env);
 	}
 #endif /* J9VM_OPT_JVMTI */
+
+#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
+        if (_includeDoubleMap) {
+                scanDoubleMappedObjects(env);
+        }
+#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
 
 	scanOwnableSynchronizerObjects(env);
 }

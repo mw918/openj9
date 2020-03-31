@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -27,25 +27,25 @@
 #include "codegen/Relocation.hpp"
 #include "codegen/SnippetGCMap.hpp"
 #include "env/jittypes.h"
+#include "il/LabelSymbol.hpp"
+#include "il/MethodSymbol.hpp"
+#include "il/RegisterMappedSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
-#include "il/symbol/LabelSymbol.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/RegisterMappedSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "runtime/CodeCacheManager.hpp"
 
 uint8_t *TR::ARMHelperCallSnippet::emitSnippetBody()
    {
    uint8_t   *buffer = cg()->getBinaryBufferCursor();
-   intptrj_t distance = (intptrj_t)getDestination()->getSymbol()->castToMethodSymbol()->getMethodAddress() - (intptrj_t)buffer - 8;
+   intptr_t distance = (intptr_t)getDestination()->getSymbol()->castToMethodSymbol()->getMethodAddress() - (intptr_t)buffer - 8;
 
    getSnippetLabel()->setCodeLocation(buffer);
 
    if (!(distance>=BRANCH_BACKWARD_LIMIT && distance<=BRANCH_FORWARD_LIMIT))
       {
-      distance = TR::CodeCacheManager::instance()->findHelperTrampoline(getDestination()->getReferenceNumber(), (void *)buffer) - (intptrj_t)buffer - 8;
+      distance = TR::CodeCacheManager::instance()->findHelperTrampoline(getDestination()->getReferenceNumber(), (void *)buffer) - (intptr_t)buffer - 8;
       TR_ASSERT(distance>=BRANCH_BACKWARD_LIMIT && distance<=BRANCH_FORWARD_LIMIT,
              "CodeCache is more than 32MB.\n");
       }

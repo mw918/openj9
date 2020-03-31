@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -349,8 +349,15 @@ mapStack(UDATA *scratch, UDATA totalStack, U_8 * map, J9ROMClass * romClass, J9R
 					index = PARAM_16(bcIndex, 1);
 				}
 
-				if (pool[index].slot2) {
-					PUSH(OBJ);
+				if (0 != pool[index].slot2) {
+					/* Check for primitive values resolved from ConstantDynamic */
+					if ((J9DescriptionCpTypeConstantDynamic == (pool[index].slot2 & J9DescriptionCpTypeMask))
+					&& (0 != (pool[index].slot2 >> J9DescriptionReturnTypeShift))
+					) {
+						PUSH(INT);
+					} else {
+						PUSH(OBJ);
+					}
 				} else {
 					PUSH(INT);
 				}
@@ -436,7 +443,7 @@ mapStack(UDATA *scratch, UDATA totalStack, U_8 * map, J9ROMClass * romClass, J9R
 					J9ROMNAMEANDSIGNATURE_SIGNATURE(J9ROMFIELDREF_NAMEANDSIGNATURE
 													((J9ROMFieldRef *) (&(pool[index]))));
 				signature = (U_8) J9UTF8_DATA(utf8Signature)[0];
-				if ((signature == 'L') || (signature == '[')) {
+				if ((signature == 'L') || (signature == 'Q') || (signature == '[')) {
 					PUSH(OBJ);
 				} else {
 					PUSH(INT);
@@ -447,6 +454,7 @@ mapStack(UDATA *scratch, UDATA totalStack, U_8 * map, J9ROMClass * romClass, J9R
 				
 				break;
 
+			case JBwithfield:
 			case JBputfield:
 				POP();			/* fall through case !!! */
 
@@ -457,6 +465,10 @@ mapStack(UDATA *scratch, UDATA totalStack, U_8 * map, J9ROMClass * romClass, J9R
 													((J9ROMFieldRef *) (&(pool[index]))));
 				signature = (U_8) J9UTF8_DATA(utf8Signature)[0];
 				stackTop -= (UDATA) argCountCharConversion[signature - 'A'];
+				if (JBwithfield == bc) {
+					PUSH(OBJ);
+				}
+
 				break;
 
 			case JBinvokeinterface2:

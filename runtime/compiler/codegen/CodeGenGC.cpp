@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -47,12 +47,12 @@
 #include "env/CompilerEnv.hpp"
 #include "env/TRMemory.hpp"
 #include "env/jittypes.h"
+#include "il/AutomaticSymbol.hpp"
 #include "il/Node.hpp"
+#include "il/ParameterSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
-#include "il/symbol/AutomaticSymbol.hpp"
-#include "il/symbol/ParameterSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
 #include "infra/Assert.hpp"
 #include "infra/BitVector.hpp"
 #include "infra/IGNode.hpp"
@@ -84,7 +84,7 @@ J9::CodeGenerator::createStackAtlas()
    ListIterator<TR::ParameterSymbol> parameterIterator(&methodSymbol->getParameterList());
    TR::ParameterSymbol *parmCursor;
 
-   intptrj_t stackSlotSize = TR::Compiler->om.sizeofReferenceAddress();
+   intptr_t stackSlotSize = TR::Compiler->om.sizeofReferenceAddress();
    int32_t sizeOfParameterAreaInBytes = methodSymbol->getNumParameterSlots() * stackSlotSize;
    int32_t firstMappedParmOffsetInBytes;
    int32_t parmOffsetInBytes;
@@ -378,7 +378,7 @@ J9::CodeGenerator::createStackAtlas()
             localObjectsFound = true;
             int32_t localObjectAlignment = comp->fej9()->getLocalObjectAlignmentInBytes();
             if (localObjectAlignment > stackSlotSize &&
-                (TR::Compiler->target.cpu.isX86() || TR::Compiler->target.cpu.isPower() || TR::Compiler->target.cpu.isZ()))
+                (comp->target().cpu.isX86() || comp->target().cpu.isPower() || comp->target().cpu.isZ()))
                {
                // We only get here in compressedrefs mode
                int32_t gcMapIndexAlignment = localObjectAlignment / stackSlotSize;

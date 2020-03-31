@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -31,14 +31,14 @@
 #include "env/IO.hpp"
 #include "env/jittypes.h"
 #include "env/VMJ9.h"
+#include "il/LabelSymbol.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/RegisterMappedSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
-#include "il/symbol/LabelSymbol.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/RegisterMappedSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "runtime/CodeCacheManager.hpp"
 
 TR::X86RecompilationSnippet::X86RecompilationSnippet(TR::LabelSymbol    *lab,
@@ -46,7 +46,7 @@ TR::X86RecompilationSnippet::X86RecompilationSnippet(TR::LabelSymbol    *lab,
                                                          TR::CodeGenerator *cg)
    : TR::Snippet(cg, node, lab, true)
    {
-   setDestination(cg->symRefTab()->findOrCreateRuntimeHelper(TR::Compiler->target.is64Bit()? TR_AMD64countingRecompileMethod : TR_IA32countingRecompileMethod, false, false, false));
+   setDestination(cg->symRefTab()->findOrCreateRuntimeHelper(cg->comp()->target().is64Bit()? TR_AMD64countingRecompileMethod : TR_IA32countingRecompileMethod, false, false, false));
    }
 
 uint32_t TR::X86RecompilationSnippet::getLength(int32_t estimatedSnippetStart)
@@ -91,7 +91,7 @@ uint8_t *TR::X86RecompilationSnippet::emitSnippetBody()
    uint8_t *buffer = cg()->getBinaryBufferCursor();
    getSnippetLabel()->setCodeLocation(buffer);
 
-   intptrj_t helperAddress = (intptrj_t)_destination->getMethodAddress();
+   intptr_t helperAddress = (intptr_t)_destination->getMethodAddress();
    *buffer++ = 0xe8; // CallImm4
    if (NEEDS_TRAMPOLINE(helperAddress, buffer+4, cg()))
       {

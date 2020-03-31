@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -38,7 +38,7 @@
 #include "infra/Monitor.hpp"
 #include "control/Recompilation.hpp"
 #include "control/RecompilationInfo.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #ifdef CODECACHE_STATS
 #include "infra/Statistics.hpp"
 #endif
@@ -400,11 +400,16 @@ J9::CodeCache::addFreeBlock(void  *voidMetaData)
             // (IsAotedBody==false when addFreeBlock is called during compilation)
             if (!pmi || !pmi->isInDataCache())
                {
-               TR_Memory::jitPersistentFree(bi);
-               // If we free bodyInfo, we need to also free metaData->bodyInfo->mapTable by calling freeFastWalkCache()
-               J9VMThread *currentVMThread = _manager->javaVM()->internalVMFunctions->currentVMThread(_manager->javaVM());
-               freeFastWalkCache(currentVMThread, metaData);
-               metaData->bodyInfo = NULL;
+               // If compiled remotely, the body info is currently also in the DataCache so don't free it but still consider freeing
+               // the MethodInfo below since it is independent
+               if (!bi->getIsRemoteCompileBody())
+                  {
+                  TR_Memory::jitPersistentFree(bi);
+                  // If we free bodyInfo, we need to also free metaData->bodyInfo->mapTable by calling freeFastWalkCache()
+                  J9VMThread *currentVMThread = _manager->javaVM()->internalVMFunctions->currentVMThread(_manager->javaVM());
+                  freeFastWalkCache(currentVMThread, metaData);
+                  metaData->bodyInfo = NULL;
+                  }
                }
 
             // Attempt to free the persistentMethodInfo
@@ -678,7 +683,7 @@ J9::CodeCache::resetAllocationPointers()
    size_t warmSize = self()->getWarmCodeAlloc() - _warmCodeAllocBase;
    size_t coldSize = _coldCodeAllocBase - self()->getColdCodeAlloc();
    size_t freedSpace = warmSize + coldSize;
-   _manager->increaseFreeSpaceInCodeCacheRepository(freedSpace);
+   _manager->decreaseCurrTotalUsedInBytes(freedSpace);
    self()->setWarmCodeAlloc(_warmCodeAllocBase);
    self()->setColdCodeAlloc(_coldCodeAllocBase);
    }
@@ -714,7 +719,7 @@ extern "C"
 
    void mcc_lookupHelperTrampoline_unwrapper(void **argsPtr, void **resPtr)
       {
-      intptrj_t trampoline = TR::CodeCacheManager::instance()->findHelperTrampoline(static_cast<int32_t>((UDATA)argsPtr[1]), argsPtr[0]);
+      intptr_t trampoline = TR::CodeCacheManager::instance()->findHelperTrampoline(static_cast<int32_t>((UDATA)argsPtr[1]), argsPtr[0]);
       *resPtr = reinterpret_cast<void *>(trampoline);
       }
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -59,10 +59,8 @@ extern "C" {
 
 extern void init_codert_vm_fntbl(J9JavaVM * vm);
 
-#ifdef J9VM_ENV_DIRECT_FUNCTION_POINTERS
-   #ifndef J9SW_NEEDS_JIT_2_INTERP_THUNKS
-      extern void * jit2InterpreterSendTargetTable;
-   #endif
+#ifndef J9SW_NEEDS_JIT_2_INTERP_THUNKS
+   extern void * jit2InterpreterSendTargetTable;
 #endif
 
 
@@ -94,7 +92,7 @@ extern "C" UDATA jitAMD64Handler(J9VMThread* vmThread, U_32 sigType, void* sigIn
 #endif
 #endif
 
-#if (defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM))
+#if (defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM) || defined(TR_HOST_ARM64))
 extern "C" void jitClassesRedefined(J9VMThread * currentThread, UDATA classCount, J9JITRedefinedClass *classList);
 extern "C" void jitFlushCompilationQueue(J9VMThread * currentThread, J9JITFlushCompilationQueueReason reason);
 #endif
@@ -194,20 +192,12 @@ J9JITConfig * codert_onload(J9JavaVM * javaVM)
 
    TR_ASSERT(!javaVM->jitConfig, "jitConfig already initialized.");
 
-#if defined(J9VM_INTERP_AOT_COMPILE_SUPPORT)
-   javaVM->jitConfig = (J9JITConfig *) j9mem_allocate_memory(sizeof(J9AOTConfig), J9MEM_CATEGORY_JIT);
-#else
    javaVM->jitConfig = (J9JITConfig *) j9mem_allocate_memory(sizeof(J9JITConfig), J9MEM_CATEGORY_JIT);
-#endif
 
    if (!javaVM->jitConfig)
       goto _abort;
 
-#if defined(J9VM_INTERP_AOT_COMPILE_SUPPORT)
-   memset(javaVM->jitConfig, 0, sizeof(J9AOTConfig));
-#else
    memset(javaVM->jitConfig, 0, sizeof(J9JITConfig));
-#endif
    jitConfig = javaVM->jitConfig;
    jitConfig->sampleInterruptHandlerKey = -1;
 
@@ -302,11 +292,11 @@ void codert_freeJITConfig(J9JavaVM * javaVM)
          }
 
 #if defined(J9VM_INTERP_AOT_COMPILE_SUPPORT)
-      if (((J9AOTConfig*)jitConfig)->aotCompilationInfo)
+      if (jitConfig->aotCompilationInfo)
          {
-         TR_J9VMBase *fej9 = (TR_J9VMBase *)(((J9AOTConfig*)jitConfig)->aotCompilationInfo);
+         TR_J9VMBase *fej9 = (TR_J9VMBase *)(jitConfig->aotCompilationInfo);
          fej9->freeSharedCache();
-         ((J9AOTConfig*)jitConfig)->aotCompilationInfo = 0;
+         jitConfig->aotCompilationInfo = 0;
          }
 #endif
 
@@ -476,7 +466,7 @@ void codert_init_helpers_and_targets(J9JITConfig * jitConfig, char isSMP)
    jitConfig->getCurrentByteCodeIndexAndIsSameReceiver = getCurrentByteCodeIndexAndIsSameReceiver;
    jitConfig->getJitRegisterMap = getJitRegisterMap;
    jitConfig->jitReportDynamicCodeLoadEvents = jitReportDynamicCodeLoadEvents;
-#if (defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM))
+#if (defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM) || defined(TR_HOST_ARM64))
    jitConfig->jitClassesRedefined = jitClassesRedefined;
    jitConfig->jitFlushCompilationQueue = jitFlushCompilationQueue;
 #endif
@@ -487,11 +477,7 @@ void codert_init_helpers_and_targets(J9JITConfig * jitConfig, char isSMP)
    initializeCodertFunctionTable(javaVM);
 
    #ifndef J9SW_NEEDS_JIT_2_INTERP_THUNKS
-      #ifdef J9VM_ENV_DIRECT_FUNCTION_POINTERS
-         jitConfig->jitSendTargetTable = &jit2InterpreterSendTargetTable;
-      #else
-         jitConfig->jitSendTargetTable = jitConfig->javaVM->internalVMLabels->jit2InterpreterSendTargetTable;
-      #endif
+      jitConfig->jitSendTargetTable = &jit2InterpreterSendTargetTable;
    #endif
 
    #if defined(J9VM_PORT_SIGNAL_SUPPORT) && defined(J9VM_INTERP_NATIVE_SUPPORT)
@@ -529,11 +515,7 @@ UDATA lookupSendTargetForThunk(J9JavaVM * javaVM, int thunkNumber)
 #if defined(J9ZOS390)
    #define VIRTUAL_TARGET(x) TOC_UNWRAP_ADDRESS(x)
 #else
-#ifdef J9VM_ENV_DIRECT_FUNCTION_POINTERS
    #define VIRTUAL_TARGET(x) (x)
-#else
-   #define VIRTUAL_TARGET(x) javaVM->internalVMLabels->x
-#endif
 #endif
 
    /* Use the internal function table which knows how to reference the code part of an intermodule reference */

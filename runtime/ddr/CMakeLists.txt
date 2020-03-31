@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2019, 2019 IBM Corp. and others
+# Copyright (c) 2019, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -31,18 +31,35 @@ add_library(j9ddr_misc SHARED
 
 target_link_libraries(j9ddr_misc
 	PRIVATE
-	j9vm_interface
-	j9vm_gc_includes
+		j9vm_interface
+		j9vm_gc_includes
 )
 target_include_directories(j9ddr_misc
 	PRIVATE
-	${j9vm_SOURCE_DIR}/
-	${omr_SOURCE_DIR}/compiler
+		${j9vm_SOURCE_DIR}/
+		${j9vm_SOURCE_DIR}/bcutil
+		${j9vm_BINARY_DIR}/bcutil
+		${j9vm_SOURCE_DIR}/shared_common/include
+		${omr_SOURCE_DIR}/compiler
 )
 
-if(OMR_TOOLCONFIG STREQUAL "gnu")
-	target_compile_options(j9ddr_misc PRIVATE  -femit-class-debug-always)
+# remove all optimization options so needed debugging information is not suppressed
+omr_remove_flags(CMAKE_CXX_FLAGS -O -O1 -O2 -O3 /Ox)
+
+if((OMR_TOOLCONFIG STREQUAL "gnu") AND (NOT CMAKE_CXX_COMPILER_ID MATCHES Clang))
+	target_compile_options(j9ddr_misc PRIVATE -femit-class-debug-always)
 endif()
 
+
+if(OMR_OS_AIX)
+	target_link_libraries(j9ddr_misc
+		PRIVATE
+			-Wl,-bexpall
+	)
+endif()
 target_enable_ddr(j9ddr_misc)
 ddr_set_add_targets(j9ddr j9ddr_misc)
+
+# At least one symbol must be exported, but because this shared library
+# is only used by ddrgen it doesn't matter which name is exported.
+omr_add_exports(j9ddr_misc getAlgorithmVersionStructTable)

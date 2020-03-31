@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,7 +24,7 @@
 
 #include <stdint.h>
 #include <string.h>
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/Method.hpp"
 #include "compile/ResolvedMethod.hpp"
@@ -42,14 +42,14 @@
 #include "il/DataTypes.hpp"
 #include "il/ILOpCodes.hpp"
 #include "il/ILOps.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
 #include "infra/Link.hpp"
 #include "infra/List.hpp"
 #include "infra/Stack.hpp"
@@ -799,7 +799,7 @@ uint32_t TR::InterProceduralAnalyzer::hash(void * h, uint32_t size)
    {
    // 2654435761 is the golden ratio of 2^32.
    //
-   return (((uint32_t)(uintptrj_t)h >> 2) * 2654435761u) % size;
+   return (((uint32_t)(uintptr_t)h >> 2) * 2654435761u) % size;
    }
 
 

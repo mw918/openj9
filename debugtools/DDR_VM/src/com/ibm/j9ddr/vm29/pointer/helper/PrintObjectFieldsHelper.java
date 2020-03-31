@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -29,6 +29,7 @@ import static com.ibm.j9ddr.vm29.structure.J9ROMFieldOffsetWalkState.J9VM_FIELD_
 import java.io.PrintStream;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.regex.Pattern;
 
 import com.ibm.j9ddr.CorruptDataException;
 import com.ibm.j9ddr.vm29.j9.J9ObjectFieldOffset;
@@ -40,6 +41,7 @@ import com.ibm.j9ddr.vm29.pointer.U32Pointer;
 import com.ibm.j9ddr.vm29.pointer.U64Pointer;
 import com.ibm.j9ddr.vm29.pointer.U8Pointer;
 import com.ibm.j9ddr.vm29.pointer.UDATAPointer;
+import com.ibm.j9ddr.vm29.pointer.generated.J9ArrayClassPointer;
 import com.ibm.j9ddr.vm29.pointer.generated.J9BuildFlags;
 import com.ibm.j9ddr.vm29.pointer.generated.J9ClassPointer;
 import com.ibm.j9ddr.vm29.pointer.generated.J9ObjectPointer;
@@ -48,6 +50,7 @@ import com.ibm.j9ddr.vm29.pointer.generated.J9UTF8Pointer;
 import com.ibm.j9ddr.vm29.structure.J9Object;
 import com.ibm.j9ddr.vm29.types.U32;
 import com.ibm.j9ddr.vm29.types.UDATA;
+import com.ibm.j9ddr.vm29.pointer.helper.J9ObjectHelper;
 
 
 /**
@@ -103,18 +106,17 @@ public class PrintObjectFieldsHelper {
 		boolean lockwordPrinted = false;
 		UDATA nestedFieldOffset = new UDATA(0);
 		boolean flatObject = false;
-
 		J9ClassPointer nestedClassHierarchy[] = null;
+		boolean showObjectHeader = tabLevel <= 1; /* This is true when !flatobject is specified are currently printing a nested structure */
 
 		if ((null != nestingHierarchy) && (nestingHierarchy.length > 0)) {
 			flatObject = true;
 		}
 
-		/* This is true when !flatobject is specified are currently printing a nested structure */
-		boolean showObjectHeader = tabLevel <= 1;
-
+		/* Given we have a flatObject, conditionally increment ahead to the correct object index if we have a flattened array, 
+		 * and skip ahead to the specified field by its offset.
+		 */
 		if (flatObject) {
-			/* If it is a flatObject skip ahead to the nested field */
 			nestedClassHierarchy = valueTypeHelper.findNestedClassHierarchy(localClazz, nestingHierarchy);
 			J9ClassPointer clazz = null;
 
@@ -123,24 +125,31 @@ public class PrintObjectFieldsHelper {
 				clazz = nestedClassHierarchy[i];
 				depth = J9ClassHelper.classDepth(clazz).longValue();
 				boolean found = false;
-				for (superclassIndex = 0; (superclassIndex <= depth) && !found; superclassIndex++) {
-					J9ClassPointer superclass;
-					if (superclassIndex == depth) {
-						superclass = clazz;
-					} else {
-						superclass = J9ClassPointer.cast(clazz.superclasses().at(superclassIndex));
-					}
-					Iterator<J9ObjectFieldOffset> iterator = J9ObjectFieldOffsetIterator.J9ObjectFieldOffsetIteratorFor(superclass.romClass(), clazz, previousSuperclass, flags);
 
-					while (iterator.hasNext()) {
-						J9ObjectFieldOffset result = iterator.next();
-						if (result.getName().equals(nestingHierarchy[i])) {
-							nestedFieldOffset = nestedFieldOffset.add(result.getOffsetOrAddress());
-							found = true;
-							break;
+				if (J9ClassHelper.isArrayClass(clazz)) {
+					int index = Integer.parseInt(nestingHierarchy[0].substring(1, nestingHierarchy[0].length() - 1));
+					int stride = J9ArrayClassPointer.cast(clazz).flattenedElementSize().intValue();
+					dataStart = dataStart.add(index * stride);
+				} else {
+					for (superclassIndex = 0; (superclassIndex <= depth) && !found; superclassIndex++) {
+						J9ClassPointer superclass;
+						if (superclassIndex == depth) {
+							superclass = clazz;
+						} else {
+							superclass = J9ClassPointer.cast(clazz.superclasses().at(superclassIndex));
 						}
+						Iterator<J9ObjectFieldOffset> iterator = J9ObjectFieldOffsetIterator.J9ObjectFieldOffsetIteratorFor(superclass.romClass(), clazz, previousSuperclass, flags);
+
+						while (iterator.hasNext()) {
+							J9ObjectFieldOffset result = iterator.next();
+							if (result.getName().equals(nestingHierarchy[i])) {
+								nestedFieldOffset = nestedFieldOffset.add(result.getOffsetOrAddress());
+								found = true;
+								break;
+							}
+						}
+						previousSuperclass = superclass;
 					}
-					previousSuperclass = superclass;
 				}
 			}
 
@@ -178,7 +187,7 @@ public class PrintObjectFieldsHelper {
 				J9ObjectFieldOffset result = iterator.next();
 				boolean printField = true;
 				boolean isHiddenField = result.isHidden();
-				boolean isLockword = isHiddenField && result.getOffsetOrAddress().add(J9Object.SIZEOF).eq(superclass.lockOffset());
+				boolean isLockword = isHiddenField && result.getOffsetOrAddress().add(J9ObjectHelper.headerSize()).eq(superclass.lockOffset());
 
 				if (isLockword) {
 					/* Print the lockword field if it is indeed the lockword for this instanceClass and we haven't printed it yet. */
@@ -196,7 +205,8 @@ public class PrintObjectFieldsHelper {
 							/* if nestedClassHierarchy is null then this class is the container class */
 							containerClazz = localClazz;
 						} else {
-							containerClazz = nestedClassHierarchy[0];
+							int containerClassIndex = Pattern.matches("\\[\\d+\\]", nestingHierarchy[0]) ? 1 : 0;
+							containerClazz = nestedClassHierarchy[containerClassIndex];
 						}
 						printNestedObjectField(out, tabLevel, localClazz, dataStart, superclass, result, address, nestingHierarchy, containerClazz);
 					} else {
@@ -242,7 +252,7 @@ public class PrintObjectFieldsHelper {
 				hierarchy.append(fieldName);
 				out.format("!j9object 0x%x %s", object.getAddress(), hierarchy);
 			} else {
-				AbstractPointer ptr = J9BuildFlags.gc_compressedPointers ? U32Pointer.cast(valuePtr) : UDATAPointer.cast(valuePtr);
+				AbstractPointer ptr = J9ObjectHelper.compressObjectReferences ? U32Pointer.cast(valuePtr) : UDATAPointer.cast(valuePtr);
 				out.format("!fj9object 0x%x", ptr.at(0).longValue());
 			}
 		} else {
@@ -295,7 +305,7 @@ public class PrintObjectFieldsHelper {
 				printJ9ObjectFields(out, tabLevel + 1, containerClazz, dataStart, null, address, newNestingHierarchy, true);
 
 			} else {
-				AbstractPointer ptr = J9BuildFlags.gc_compressedPointers ? U32Pointer.cast(valuePtr) : UDATAPointer.cast(valuePtr);
+				AbstractPointer ptr = J9ObjectHelper.compressObjectReferences ? U32Pointer.cast(valuePtr) : UDATAPointer.cast(valuePtr);
 				out.format("!fj9object 0x%x%n", ptr.at(0).longValue());
 			}
 		} else {

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -41,6 +41,9 @@ namespace J9 { typedef J9::CodeGenerator CodeGeneratorConnector; }
 #include "infra/List.hpp"
 #include "infra/HashTab.hpp"
 #include "codegen/RecognizedMethods.hpp"
+#if defined(J9VM_OPT_JITSERVER)
+#include "control/CompilationRuntime.hpp"
+#endif /* defined(J9VM_OPT_JITSERVER) */
 #include "control/Recompilation.hpp"
 #include "control/RecompilationInfo.hpp"
 #include "optimizer/Dominators.hpp"
@@ -101,8 +104,6 @@ public:
 
    void insertEpilogueYieldPoints();
 
-   void splitWarmAndColdBlocks(); // J9 & Z
-
    void allocateLinkageRegisters();
 
    void fixUpProfiledInterfaceGuardTest();
@@ -128,6 +129,7 @@ public:
    bool enableAESInHardwareTransformations() {return false;}
 
    bool isMethodInAtomicLongGroup(TR::RecognizedMethod rm);
+   bool arithmeticNeedsLiteralFromPool(TR::Node *node) { return false; }
 
    // OSR
    //
@@ -137,6 +139,10 @@ public:
    // --------------------------------------
    // AOT Relocations
    //
+#if defined(J9VM_OPT_JITSERVER)
+   void addExternalRelocation(TR::Relocation *r, const char *generatingFileName, uintptr_t generatingLineNumber, TR::Node *node, TR::ExternalRelocationPositionRequest where = TR::ExternalRelocationAtBack);
+   void addExternalRelocation(TR::Relocation *r, TR::RelocationDebugInfo *info, TR::ExternalRelocationPositionRequest where = TR::ExternalRelocationAtBack);
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
    void processRelocations();
 
@@ -166,7 +172,14 @@ public:
                                           TR::Node *node);
 
    bool needClassAndMethodPointerRelocations();
+   bool needRelocationsForLookupEvaluationData();
    bool needRelocationsForStatics();
+   bool needRelocationsForHelpers();
+   bool needRelocationsForCurrentMethodPC();
+#if defined(J9VM_OPT_JITSERVER)
+   bool needRelocationsForBodyInfoData();
+   bool needRelocationsForPersistentInfoData();
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
    // ----------------------------------------
    TR::Node *createOrFindClonedNode(TR::Node *node, int32_t numChildren);
@@ -206,8 +219,8 @@ public:
    // GPU
    //
    static const int32_t GPUAlignment = 128;
-   uintptrj_t objectLengthOffset();
-   uintptrj_t objectHeaderInvariant();
+   uintptr_t objectLengthOffset();
+   uintptr_t objectHeaderInvariant();
 
   enum GPUScopeType
       {
@@ -284,6 +297,16 @@ public:
    TR_BitVector *getLiveMonitors() {return _liveMonitors;}
    TR_BitVector *setLiveMonitors(TR_BitVector *v) {return (_liveMonitors = v);}
 
+public:
+
+TR_OpaqueClassBlock* getMonClass(TR::Node* monNode);
+
+protected:
+
+TR_Array<void *> _monitorMapping;
+
+void addMonClass(TR::Node* monNode, TR_OpaqueClassBlock* clazz);
+
 private:
 
    TR_HashTabInt _uncommonedNodes;               // uncommoned nodes keyed by the original nodes
@@ -300,10 +323,14 @@ private:
                                        const void *location)
       {
       // If we have a class pointer to consider, it should look like one.
-      const uintptrj_t j9classEyecatcher = 0x99669966;
+      const uintptr_t j9classEyecatcher = 0x99669966;
+#if defined(J9VM_OPT_JITSERVER)
+      if (allegedClassPointer != NULL && !comp->isOutOfProcessCompilation())
+#else
       if (allegedClassPointer != NULL)
+#endif /* defined(J9VM_OPT_JITSERVER) */
          {
-         TR_ASSERT(*(const uintptrj_t*)allegedClassPointer == j9classEyecatcher,
+         TR_ASSERT(*(const uintptr_t*)allegedClassPointer == j9classEyecatcher,
                    "expected a J9Class* for omitted runtime assumption");
          }
 
@@ -394,7 +421,7 @@ public:
    bool hasFixedFrameC_CallingConvention() {return _j9Flags.testAny(HasFixedFrameC_CallingConvention);}
    void setHasFixedFrameC_CallingConvention() {_j9Flags.set(HasFixedFrameC_CallingConvention);}
 
-   bool supportsMethodEntryPadding();
+   bool supportsJitMethodEntryAlignment();
 
    /** \brief
     *     Determines whether the code generator supports inlining of java/lang/Class.isAssignableFrom
@@ -421,7 +448,7 @@ public:
    /** \brief
     *    The code generator supports inlining of java/lang/String.toUpperCase() and toLowerCase()
     */
-   void setSupportsInlineStringCaseConversion() { return _j9Flags.set(SupportsInlineStringCaseConversion);}
+   void setSupportsInlineStringCaseConversion() { _j9Flags.set(SupportsInlineStringCaseConversion);}
 
    /** \brief
     *    Determines whether the code generator supports inlining of java/lang/String.indexOf()
@@ -431,7 +458,7 @@ public:
    /** \brief
     *    The code generator supports inlining of java/lang/String.indexOf()
     */
-   void setSupportsInlineStringIndexOf() { return _j9Flags.set(SupportsInlineStringIndexOf);}
+   void setSupportsInlineStringIndexOf() { _j9Flags.set(SupportsInlineStringIndexOf);}
 
    /** \brief
    *    Determines whether the code generator supports inlining of java/lang/String.hashCode()
@@ -441,7 +468,7 @@ public:
    /** \brief
    *    The code generator supports inlining of java/lang/String.hashCode()
    */
-   void setSupportsInlineStringHashCode() { return _j9Flags.set(SupportsInlineStringHashCode); }
+   void setSupportsInlineStringHashCode() { _j9Flags.set(SupportsInlineStringHashCode); }
 
    /** \brief
    *    Determines whether the code generator supports inlining of java_util_concurrent_ConcurrentLinkedQueue_tm*
@@ -452,7 +479,7 @@ public:
    /** \brief
    *    The code generator supports inlining of java_util_concurrent_ConcurrentLinkedQueue_tm* methods
    */
-   void setSupportsInlineConcurrentLinkedQueue() { return _j9Flags.set(SupportsInlineConcurrentLinkedQueue); }
+   void setSupportsInlineConcurrentLinkedQueue() { _j9Flags.set(SupportsInlineConcurrentLinkedQueue); }
 
    /**
     * \brief
@@ -507,6 +534,12 @@ public:
    TR::Node *generatePoisonNode(
       TR::Block *currentBlock,
       TR::SymbolReference *liveAutoSymRef);
+   
+
+   /**
+    * \brief Determines whether VM Internal Natives is supported or not
+    */
+   bool supportVMInternalNatives();
 
 private:
 

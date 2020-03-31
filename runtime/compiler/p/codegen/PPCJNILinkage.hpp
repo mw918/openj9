@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2016 IBM Corp. and others
+ * Copyright (c) 2000, 2019 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,7 +23,7 @@
 #ifndef PPC_JNILINKAGE_INCL
 #define PPC_JNILINKAGE_INCL
 
-#include "p/codegen/PPCPrivateLinkage.hpp"
+#include "codegen/PPCPrivateLinkage.hpp"
 
 #include "codegen/Linkage.hpp"
 #include "infra/Assert.hpp"
@@ -44,15 +44,19 @@ namespace TR { class ParameterSymbol; }
 namespace TR { class RegisterDependencyConditions; }
 namespace TR { class ResolvedMethodSymbol; }
 
-namespace TR {
+namespace J9
+{
 
-class PPCJNILinkage : public TR::PPCPrivateLinkage
+namespace Power
+{
+
+class JNILinkage : public PrivateLinkage
    {
    protected:
    TR::PPCLinkageProperties _properties;
 
    public:
-   PPCJNILinkage(TR::CodeGenerator *cg);
+   JNILinkage(TR::CodeGenerator *cg);
 
    void releaseVMAccess(TR::Node* callNode, TR::RegisterDependencyConditions* deps, TR::RealRegister* metaReg, TR::Register* zeroReg, TR::Register* tempReg1, TR::Register* tempReg2);
    void acquireVMAccess(TR::Node* callNode, TR::RegisterDependencyConditions* deps, TR::RealRegister* metaReg, TR::Register* tempReg0, TR::Register* tempReg1, TR::Register* tempReg2);
@@ -82,6 +86,8 @@ class PPCJNILinkage : public TR::PPCPrivateLinkage
 
    virtual const TR::PPCLinkageProperties& getProperties();
    };
+
+}
 
 }
 

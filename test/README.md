@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2016, 2019 IBM Corp. and others
+Copyright (c) 2016, 2020 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,12 +26,13 @@ Below is an example to run all sanity.functional tests against a JDK8
 Linux x86-64 cmprssptrs OpenJ9 SDK:
 
 ```
-    cd openj9/test/TestConfig
+    cd openj9/test
+    git clone https://github.com/AdoptOpenJDK/TKG.git
+    cd TKG
     export TEST_JDK_HOME=/my/openj9/jdk
-    make -f run_configure.mk   // generates makefiles
     make compile               // downloads test related material/libs
                                // and compiles test material
-    make _sanity.functional    // runs tests
+    make _sanity.functional    // generates makefiles and runs tests
 ```
 
 Please read [OpenJ9 Test User Guide](./docs/OpenJ9TestUserGuide.md) for
@@ -70,7 +71,7 @@ Adding a testNG test as an example:
     - update testng.xml to add the test class to a existing <test> or
     create a new <test>
     - If the new <test> is created in testng.xml, playlist.xml should
-    be updated to add the new <test> based on [playlist.xsd](./TestConfig/playlist.xsd)
+    be updated to add the new <test> based on [playlist.xsd](./TKG/playlist.xsd)
     Supported test groups are `functional|system|openjdk|external|perf|jck`.
     It is required to provide one group per test in playlist.xml.
 - adding additional new test methods for new Java10 functionality
@@ -108,7 +109,7 @@ Supported levels are `sanity|extended`
 
 Supported groups  are `functional|system|openjdk|external|perf|jck`
 
-Supported groups  are `regular|native`
+Supported types  are `regular|native`
 
 ```
     make _sanity
@@ -118,7 +119,15 @@ Supported groups  are `regular|native`
     make _extended.functional.native
 ```
 
-## 5) How to execute disabled tests?
+## 5) How to execute a list of tests?
+
+A list of Tests can be executed through the `_testList` target followed by parameter `TESTLIST`. User can specify comma separated list of test names in `TESTLIST`. Note:  level, group, type or combinations of above (e.g., functional, sanity, sanity.native) are not supported in the TESTLIST.
+
+```
+make _testList TESTLIST=jit_jitt,jit_recognizedMethod,testSCCMLTests2_1
+```
+
+## 6) How to execute disabled tests?
 
 If a test is disabled using `<disabled>` tag in playlist.xml, it can be executed through specifying the test target or adding `disabled` in front of regular target.
 
@@ -136,24 +145,21 @@ Disabled tests and reasons can also be printed through adding `echo.disabled` in
     make _echo.disabled.extended
 ```
 
-## 6) How to execute a directory of tests?
+## 7) How to execute a directory of tests?
 
-The example below executes all of the sanity tests found within the
-JIT_Test directory
+Only the tests in `BUILD_LIST` will be executed.
 
 ```
-    make -C ../functional/JIT_Test -f autoGen.mk _sanity
-```
-or
-```
-    cd ../functional/JIT_Test; make -f autoGen.mk _sanity
+    export BUILD_LIST=functional/JIT_Test
+    make compile
+    make _sanity
 ```
 
-## 7) How to run an individual JCK?
+## 8) How to run an individual JCK?
 
 Please read [How-to Run customized JCK test targets](https://github.com/AdoptOpenJDK/openjdk-tests/blob/master/jck/README.md) for details.
 
-## 8) How to run the test with different `JDK_VERSION` and `JDK_IMPL`?
+## 9) How to run the test with different `JDK_VERSION` and `JDK_IMPL`?
 
 User can run tests against different jdk version and/or jdk
 implementation. While the default values of these variables match a
@@ -166,7 +172,7 @@ By default, AUTO_DETECT is turned on, and the test framework will
 auto detect SPEC, JDK_IMPL, and JDK_VERSION. Please read [Configure environment](./docs/OpenJ9TestUserGuide.md#1-configure-environment) for
 details and examples. 
 
-## 9) How to interpret test results?
+## 10) How to interpret test results?
 - test results summary
 
 At the end of each run, test results summary will be printed:
@@ -206,7 +212,7 @@ If a test is skipped, it means that this test cannot be run on this
 platform due to jvm options, platform requirements and/or test
 capabilities.
 
-## 10) How to rerun failed tests?
+## 11) How to rerun failed tests?
 
 `failed.mk` will be generated if there is any failed test target.
 We can rerun failed tests as following:

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,6 +25,7 @@
 
 #include "runtime/Runtime.hpp"
 #include "codegen/PreprologueConst.hpp"
+#include "codegen/PrivateLinkage.hpp"
 
 
 #if defined(TR_HOST_S390)
@@ -39,7 +40,7 @@ void saveJitEntryPoint(uint8_t* intEP, uint8_t* jitEP);
 inline uint16_t jitEntryOffset(void *startPC)
    {
 #if defined(TR_HOST_64BIT)
-   return TR_LinkageInfo::get(startPC)->getReservedWord();
+   return J9::PrivateLinkage::LinkageInfo::get(startPC)->getReservedWord();
 #else
    return 0;
 #endif
@@ -62,14 +63,14 @@ void replaceFirstTwoBytesWithData(void *startPC, int32_t startPCToData);
 #if defined(TR_HOST_POWER)
 
 #define  OFFSET_REVERT_INTP_PRESERVED_FSD                (-4)
-#define  OFFSET_REVERT_INTP_FIXED_PORTION                (-12-2*sizeof(intptrj_t))
+#define  OFFSET_REVERT_INTP_FIXED_PORTION                (-12-2*sizeof(intptr_t))
 
-#define  OFFSET_SAMPLING_PREPROLOGUE_FROM_STARTPC        (-(16+sizeof(intptrj_t)))
-#define  OFFSET_SAMPLING_BRANCH_FROM_STARTPC             (-(12+sizeof(intptrj_t)))
-#define  OFFSET_SAMPLING_METHODINFO_FROM_STARTPC         (-(8+sizeof(intptrj_t)))
+#define  OFFSET_SAMPLING_PREPROLOGUE_FROM_STARTPC        (-(16+sizeof(intptr_t)))
+#define  OFFSET_SAMPLING_BRANCH_FROM_STARTPC             (-(12+sizeof(intptr_t)))
+#define  OFFSET_SAMPLING_METHODINFO_FROM_STARTPC         (-(8+sizeof(intptr_t)))
 #define  OFFSET_SAMPLING_PRESERVED_FROM_STARTPC          (-8)
 
-inline uint32_t getJitEntryOffset(TR_LinkageInfo *linkageInfo)
+inline uint32_t getJitEntryOffset(J9::PrivateLinkage::LinkageInfo *linkageInfo)
    {
    return linkageInfo->getReservedWord() & 0x0ffff;
    }
@@ -78,10 +79,10 @@ inline uint32_t getJitEntryOffset(TR_LinkageInfo *linkageInfo)
 
 
 #if defined(TR_HOST_ARM)
-#define  OFFSET_REVERT_INTP_FIXED_PORTION                (-12-2*sizeof(intptrj_t))
-#define  OFFSET_SAMPLING_PREPROLOGUE_FROM_STARTPC        (-(16+sizeof(intptrj_t)))
-#define  OFFSET_SAMPLING_BRANCH_FROM_STARTPC             (-(12+sizeof(intptrj_t)))
-#define  OFFSET_METHODINFO_FROM_STARTPC                  (-(8+sizeof(intptrj_t)))
+#define  OFFSET_REVERT_INTP_FIXED_PORTION                (-12-2*sizeof(intptr_t))
+#define  OFFSET_SAMPLING_PREPROLOGUE_FROM_STARTPC        (-(16+sizeof(intptr_t)))
+#define  OFFSET_SAMPLING_BRANCH_FROM_STARTPC             (-(12+sizeof(intptr_t)))
+#define  OFFSET_METHODINFO_FROM_STARTPC                  (-(8+sizeof(intptr_t)))
 #define  OFFSET_SAMPLING_PRESERVED_FROM_STARTPC          (-8)
 #define  START_PC_TO_METHOD_INFO_ADDRESS                  -8 // offset from startpc to jitted body info
 #define  OFFSET_COUNTING_BRANCH_FROM_JITENTRY             36
@@ -91,7 +92,7 @@ inline uint32_t getJitEntryOffset(TR_LinkageInfo *linkageInfo)
 #if defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM) || defined(TR_HOST_ARM64)
 uint32_t *getLinkageInfo(void * startPC);
 uint32_t isRecompMethBody(void *li);
-void fixPersistentMethodInfo(void *table);
+void fixPersistentMethodInfo(void *table, bool isJITClientAOTLoad = false);
 void fixupMethodInfoAddressInCodeCache(void *startPC, void *bodyInfo);
 #endif
 
@@ -158,7 +159,7 @@ typedef struct TR_AOTMethodHeader {
    uintptr_t compileMethodCodeSize;
    uintptr_t compileMethodDataStartPC;
    uintptr_t compileMethodDataSize;
-   uintptr_t compileFirstClassLocation;
+   uintptr_t unused;
    uint32_t flags;
    } TR_AOTMethodHeader;
 

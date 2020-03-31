@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -374,12 +374,13 @@ SH_CacheMap::cleanup(J9VMThread* currentThread)
 		walkManager = managers()->nextDo(&state);
 	}
 	while (theCC) {
+		SH_CompositeCacheImpl* nextCC = theCC->getNext();
 		theCC->cleanup(currentThread);
-		theCC = theCC->getNext();
 		if (_ccHead != theCC) {
 			/* _ccHead is deallocated together with sharedClassConfig in j9shr_shutdown() */
 			j9mem_free_memory(theCC);
 		}
+		theCC = nextCC;
 	}
 	
 	if (_sharedClassConfig) {
@@ -451,6 +452,8 @@ SH_CacheMap::startup(J9VMThread* currentThread, J9SharedClassPreinitConfig* pico
 	PORT_ACCESS_FROM_PORT(_portlib);
 	SH_CompositeCacheImpl* ccToUse = _ccHead;
 	SH_CompositeCacheImpl* ccNext = NULL;
+	SH_CompositeCacheImpl* ccPrevious = NULL;
+	bool isCacheUniqueIdStored = false;
 
 	_actualSize = (U_32)piconfig->sharedClassCacheSize;
 
@@ -485,6 +488,7 @@ SH_CacheMap::startup(J9VMThread* currentThread, J9SharedClassPreinitConfig* pico
 	do {
 		IDATA tryCntr = 0;
 		bool isCcHead = (ccToUse == _ccHead);
+		bool storeToCcHead = (ccPrevious == _ccHead);
 		const char* cacheUniqueIDPtr = NULL;
 
 		/* start up _ccHead (the top layer cache) and then statrt its pre-requiste cache (ccNext). Contine to startup ccNext and its pre-requiste cache, util there is no more pre-requiste cache.
@@ -518,13 +522,37 @@ SH_CacheMap::startup(J9VMThread* currentThread, J9SharedClassPreinitConfig* pico
 						return -1;
 					}
 				}
+				
+				UDATA idLen = 0;
+				bool isReadOnly = ccToUse->isRunningReadOnly();
+				char cacheDirBuf[J9SH_MAXPATH];
+				U_32 cacheType = J9_ARE_ALL_BITS_SET(*runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_PERSISTENT_CACHE) ? J9PORT_SHR_CACHE_TYPE_PERSISTENT : J9PORT_SHR_CACHE_TYPE_NONPERSISTENT;
+				SH_OSCache::getCacheDir(vm, cacheDirName, cacheDirBuf, J9SH_MAXPATH, cacheType, false);
+
+				if (storeToCcHead && !isCacheUniqueIdStored && !ccPrevious->isRunningReadOnly()) {
+					if (ccPrevious->enterWriteMutex(currentThread, false, fnName) == 0) {
+						storeCacheUniqueID(currentThread, cacheDirBuf, ccToUse->getCreateTime(), ccToUse->getMetadataBytes(), ccToUse->getClassesBytes(), ccToUse->getLineNumberTableBytes(), ccToUse->getLocalVariableTableBytes(), &cacheUniqueIDPtr, &idLen);
+						Trc_SHR_Assert_True(idLen < sizeof(cacheUniqueID));
+						memcpy(cacheUniqueID, cacheUniqueIDPtr, idLen);
+						cacheUniqueID[idLen] = 0;
+						ccPrevious->exitWriteMutex(currentThread, fnName);
+					} else {
+						CACHEMAP_TRACE(J9SHR_VERBOSEFLAG_ENABLE_VERBOSE_DEFAULT, J9NLS_ERROR, J9NLS_SHRC_CM_FAILED_ENTER_WRITE_MUTEX_STARTUP);
+						Trc_SHR_CM_startup_Exit7(currentThread);
+						return -1;
+					}
+				}
+
 				if (ccToUse->enterWriteMutex(currentThread, false, fnName) == 0) {
-					UDATA idLen = 0;
-					bool isReadOnly = ccToUse->isRunningReadOnly();
+
 					if (false == isCcHead) {
 						if (strlen(cacheUniqueID) > 0) {
 							if (false == ccToUse->verifyCacheUniqueID(currentThread, cacheUniqueID)) {
 								/* modification to a low layer cache has been detected */
+								if (_ccHead->isNewCache()) {
+									CACHEMAP_TRACE4(J9SHR_VERBOSEFLAG_ENABLE_VERBOSE_DEFAULT, J9NLS_ERROR, J9NLS_SHRC_CM_NEW_LAYER_CACHE_DESTROYED, _ccHead->getLayer(), ccToUse->getLayer(), cacheUniqueID, ccToUse->getCacheUniqueID(currentThread));
+									_ccHead->deleteCache(currentThread, true);
+								}
 								CACHEMAP_TRACE1(J9SHR_VERBOSEFLAG_ENABLE_VERBOSE_DEFAULT, J9NLS_ERROR, J9NLS_SHRC_CM_VERIFY_CACHE_ID_FAILED, cacheUniqueID);
 								ccToUse->exitWriteMutex(currentThread, fnName);
 								Trc_SHR_CM_startup_Exit8(currentThread);
@@ -536,11 +564,8 @@ SH_CacheMap::startup(J9VMThread* currentThread, J9SharedClassPreinitConfig* pico
 					if (J9_ARE_ANY_BITS_SET(*runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_REDUCE_STORE_CONTENTION) && !isReadOnly) {
 						ccToUse->setWriteHash(currentThread, 0);				/* Initialize to zero so that peek will work */
 					}
-					char cacheDirBuf[J9SH_MAXPATH];
-					U_32 cacheType = J9_ARE_ALL_BITS_SET(*runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_PERSISTENT_CACHE) ? J9PORT_SHR_CACHE_TYPE_PERSISTENT : J9PORT_SHR_CACHE_TYPE_NONPERSISTENT;
 
-					SH_OSCache::getCacheDir(vm, cacheDirName, cacheDirBuf, J9SH_MAXPATH, cacheType, false);
-					IDATA preqRC = getPrereqCache(currentThread, cacheDirBuf, ccToUse, false, &cacheUniqueIDPtr, &idLen);
+					IDATA preqRC = getPrereqCache(currentThread, cacheDirBuf, ccToUse, false, &cacheUniqueIDPtr, &idLen, &isCacheUniqueIdStored);
 
 					if (0 > preqRC) {
 						if (CM_CACHE_CORRUPT == preqRC) {
@@ -567,18 +592,32 @@ SH_CacheMap::startup(J9VMThread* currentThread, J9SharedClassPreinitConfig* pico
 						}
 						if (0 == _sharedClassConfig->readOnlyCacheRuntimeFlags) {
 							_sharedClassConfig->readOnlyCacheRuntimeFlags = (_sharedClassConfig->runtimeFlags | J9SHR_RUNTIMEFLAG_ENABLE_READONLY);
+							_sharedClassConfig->readOnlyCacheRuntimeFlags &= ~J9SHR_RUNTIMEFLAG_AUTOKILL_DIFF_BUILDID;
 							_readOnlyCacheRuntimeFlags = &_sharedClassConfig->readOnlyCacheRuntimeFlags;
 						}
 						I_8 preLayer = 0;
+						const char* cacheName = _cacheName;
 						char cacheNameBuf[USER_SPECIFIED_CACHE_NAME_MAXLEN];
+						
+						if (isCacheUniqueIdStored) {
+							Trc_SHR_Assert_True(idLen < sizeof(cacheUniqueID));
+							memcpy(cacheUniqueID, cacheUniqueIDPtr, idLen);
+							cacheUniqueID[idLen] = 0;
+							SH_OSCache::getCacheNameAndLayerFromUnqiueID(vm, cacheUniqueID, idLen, cacheNameBuf, USER_SPECIFIED_CACHE_NAME_MAXLEN, &preLayer);
+							cacheName = cacheNameBuf;
+						} else {
+							/**
+							 * 	The CacheUniqueID of the pre-requisite cache is not stored when a new layer of cache is created (using createLayer or layer=<num> option).
+							 * 	Thus, we get the CacheUniqueID of the current cache and decrement the layer number by 1 to get the cacheName and layer number of the pre-requisite cache.
+							 */
+							preLayer = _sharedClassConfig->layer - 1; 
+						}
 
-						strncpy(cacheUniqueID, cacheUniqueIDPtr, idLen);
-						SH_OSCache::getCacheNameAndLayerFromUnqiueID(vm, cacheDirBuf, cacheUniqueID, idLen, cacheNameBuf, USER_SPECIFIED_CACHE_NAME_MAXLEN, &preLayer);
-						const char* cacheName = cacheNameBuf;
 						ccNext = SH_CompositeCacheImpl::newInstance(vm, _sharedClassConfig, allocPtr, cacheName, cacheType, false, preLayer);
 						ccNext->setNext(NULL);
 						ccNext->setPrevious(ccToUse);
 						ccToUse->setNext(ccNext);
+						ccPrevious = ccToUse;
 						_ccTail = ccNext;
 					} else {
 						/* no prereq cache, do nothing */
@@ -595,7 +634,7 @@ error:
 				if (isCcHead) {
 					cacheFileSize = _ccHead->getTotalSize();
 				}
-				handleStartupError(currentThread, ccToUse, rc, *runtimeFlags, _verboseFlags, &doRetry);
+				handleStartupError(currentThread, ccToUse, rc, *runtimeFlags, _verboseFlags, &doRetry, &deleteRC);
 
 				if (isCcHead && doRetry) {
 					if (cacheFileSize > 0) {
@@ -620,19 +659,16 @@ error:
 	}
 
 	setCacheAddressRangeArray();
-
+	ccToUse = _ccTail;
 	if (J9_ARE_ALL_BITS_SET(*runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_STATS)) {
 		if (UnitTest::CORRUPT_CACHE_TEST != UnitTest::unitTest) {
 			Trc_SHR_Assert_True(J9_ARE_ALL_BITS_SET(*runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_READONLY));
 		}
-		/* TODO: Currently printStats only show stats on the top layer cache. Use "layer=<lowerLayerNumber>" in the CML to check stats of a lower layer cache. 
-		 * Ideally, printStats should show stats on all layers
-		 */
-		ccToUse = _ccHead;
-	} else {
-		/* Start up the from _ccTail to _ccHead to populate the hashtable */
-		ccToUse = _ccTail;
+		if (J9_ARE_ALL_BITS_SET(vm->sharedCacheAPI->printStatsOptions, PRINTSTATS_SHOW_TOP_LAYER_ONLY)) {
+			ccToUse = _ccHead;
+		}
 	}
+
 	do {
 		if (ccToUse == _ccHead) {
 			runtimeFlags = _runtimeFlags;
@@ -693,7 +729,7 @@ error:
 	} while (NULL != ccToUse && CC_STARTUP_OK == rc);
 
 	if (rc != CC_STARTUP_OK) {
-		handleStartupError(currentThread, ccToUse, rc, *runtimeFlags, _verboseFlags, &doRetry);
+		handleStartupError(currentThread, ccToUse, rc, *runtimeFlags, _verboseFlags, &doRetry, &deleteRC);
 		Trc_SHR_CM_startup_Exit1(currentThread);
 		return -1;
 	}
@@ -759,7 +795,7 @@ error:
 		 */
 		if ((false == _runningNested) && (false == _ccHead->getContainsCachelets())) {
 #endif /*J9SHR_CACHELET_SUPPORT*/
-			updateROMSegmentList(currentThread, false);
+			updateROMSegmentList(currentThread, false, false);
 #if defined(J9SHR_CACHELET_SUPPORT)
 		}
 	} else {
@@ -782,9 +818,10 @@ error:
  * @param [in] runtimeFlags  The runtime flags
  * @param [in] verboseFlags  Flags controlling the verbose output
  * @param [out] doRetry  Whether to retry starting up the cache
+ * @param [out] deleteRC  0 if cache is successful deleted, -1 otherwise.
  */
 void
-SH_CacheMap::handleStartupError(J9VMThread* currentThread, SH_CompositeCacheImpl* ccToUse, IDATA errorCode, U_64 runtimeFlags, UDATA verboseFlags, bool *doRetry)
+SH_CacheMap::handleStartupError(J9VMThread* currentThread, SH_CompositeCacheImpl* ccToUse, IDATA errorCode, U_64 runtimeFlags, UDATA verboseFlags, bool *doRetry, IDATA *deleteRC)
 {
 	PORT_ACCESS_FROM_VMC(currentThread);
 	if (errorCode == CC_STARTUP_CORRUPT) {
@@ -805,9 +842,9 @@ SH_CacheMap::handleStartupError(J9VMThread* currentThread, SH_CompositeCacheImpl
 		if ((errorCode == CC_STARTUP_CORRUPT) || (errorCode == CC_STARTUP_RESET) || (errorCode == CC_STARTUP_SOFT_RESET)) {
 			/* If SOFT_RESET, suppress verbose unless "verbose" is explicitly set
 				* This will ensure that if the VM can't destroy the cache, we don't get unwanted error messages */
-			IDATA deleteRC = ccToUse->deleteCache(currentThread, (errorCode == CC_STARTUP_SOFT_RESET) && !(verboseFlags & J9SHR_VERBOSEFLAG_ENABLE_VERBOSE));
+			*deleteRC = ccToUse->deleteCache(currentThread, (errorCode == CC_STARTUP_SOFT_RESET) && !(verboseFlags & J9SHR_VERBOSEFLAG_ENABLE_VERBOSE));
 			ccToUse->cleanup(currentThread);
-			if (deleteRC == 0) {
+			if (0 == *deleteRC) {
 				if (errorCode == CC_STARTUP_CORRUPT) {
 					/* Recovering from a corrupted cache, clear the flags which prevent access */
 					resetCorruptState(currentThread, FALSE);
@@ -817,7 +854,7 @@ SH_CacheMap::handleStartupError(J9VMThread* currentThread, SH_CompositeCacheImpl
 			/* If the restored cache is corrupted, return CC_STARTUP_CORRUPT and do not retry,
 			 * as retry will create another empty cache that is not restored from the snapshot
 			 */
-				if ((deleteRC == 0) || (errorCode == CC_STARTUP_SOFT_RESET)) {
+				if ((0 == *deleteRC) || (errorCode == CC_STARTUP_SOFT_RESET)) {
 					/* If we deleted the cache, or in the case of SOFT_RESET, even if we failed to delete the cache, retry */
 					Trc_SHR_Assert_True(ccToUse == _ccHead);
 					*doRetry = true;
@@ -879,43 +916,40 @@ SH_CacheMap::createNewSegment(J9VMThread* currentThread, UDATA type, J9MemorySeg
  * THREADING: The only time that hasClassSegmentMutex can be false is if the caller does not hold the write mutex
  * findROMClass and storeROMClass prereq that the class segment mutex is held. 
  * Therefore, we can enter the write mutex if we have the class segment mutex, but NOT vice-versa.
+ * 
+ * @param [in] currentThread  The current thread
+ * @param [in] hasClassSegmentMutex  Whether the currrent thread has ClassSegmentMutex
+ * @param [in] topLayerOnly  Whether update romClass segment for top layer cache only
  */
 void
-SH_CacheMap::updateROMSegmentList(J9VMThread* currentThread, bool hasClassSegmentMutex)
+SH_CacheMap::updateROMSegmentList(J9VMThread* currentThread, bool hasClassSegmentMutex, bool topLayerOnly)
 {
-	SH_CompositeCacheImpl* cache;
+	SH_CompositeCacheImpl* cache = _ccHead;
 #if defined(J9VM_THR_PREEMPTIVE)
-	J9JavaVM* vm = currentThread->javaVM;
-
-	omrthread_monitor_t classSegmentMutex = vm->classMemorySegments->segmentMutex;
+	omrthread_monitor_t classSegmentMutex = currentThread->javaVM->classMemorySegments->segmentMutex;
 #endif
 	
 #if defined(J9VM_THR_PREEMPTIVE)
-	if (classSegmentMutex) {
-		if (!hasClassSegmentMutex) {
-			Trc_SHR_Assert_ShouldNotHaveLocalMutex(classSegmentMutex);
-			enterLocalMutex(currentThread, classSegmentMutex, "class segment mutex", "updateROMSegmentList");
-		} else {
-			Trc_SHR_Assert_ShouldHaveLocalMutex(classSegmentMutex);
-		}
+	if (!hasClassSegmentMutex) {
+		Trc_SHR_Assert_ShouldNotHaveLocalMutex(classSegmentMutex);
+		enterLocalMutex(currentThread, classSegmentMutex, "class segment mutex", "updateROMSegmentList");
+	} else {
+		Trc_SHR_Assert_ShouldHaveLocalMutex(classSegmentMutex);
 	}
 #endif
-
-	if (_cacheletHead != NULL) {
-		cache = _cacheletHead;
-	} else {
-		cache = _cc;
-	}
 	
 	while (cache) {
-		if (cache && cache->isStarted()) {
+		if (cache->isStarted()) {
 			updateROMSegmentListForCache(currentThread, cache);
+		}
+		if (topLayerOnly) {
+			break;
 		}
 		cache = cache->getNext();
 	}
 
 #if defined(J9VM_THR_PREEMPTIVE)
-	if (classSegmentMutex && !hasClassSegmentMutex) {
+	if (!hasClassSegmentMutex) {
 		exitLocalMutex(currentThread, classSegmentMutex, "class segment mutex", "updateROMSegmentList");
 	}
 #endif
@@ -930,7 +964,6 @@ SH_CacheMap::updateROMSegmentListForCache(J9VMThread* currentThread, SH_Composit
 {
 	J9JavaVM* vm = currentThread->javaVM;
 	U_8 *currentSegAlloc, *cacheAlloc;
-	UDATA currentSegSize, maxSegmentSize;
 	J9MemorySegment* currentSegment = forCache->getCurrentROMSegment();
 	PORT_ACCESS_FROM_PORT(_portlib);
 	
@@ -945,13 +978,13 @@ SH_CacheMap::updateROMSegmentListForCache(J9VMThread* currentThread, SH_Composit
 		forCache->setCurrentROMSegment(currentSegment);
 	}
 	currentSegAlloc = currentSegment->heapAlloc;
-	currentSegSize = currentSegment->heapAlloc - currentSegment->heapBase;
 	cacheAlloc = (U_8*)forCache->getSegmentAllocPtr();
-	maxSegmentSize = vm->romClassAllocationIncrement;
 
 	/* If there is a cache update which is not reflected in the current ROMClass segment... */
 	if (currentSegAlloc < cacheAlloc) {
 		U_8* currentROMClass = currentSegAlloc;
+		UDATA currentSegSize = currentSegment->heapAlloc - currentSegment->heapBase;
+		UDATA maxSegmentSize = vm->romClassAllocationIncrement;
 
 		/* Walk ROMClasses to the limit of cacheAlloc */
 		while (currentROMClass < cacheAlloc) {
@@ -984,6 +1017,8 @@ SH_CacheMap::updateROMSegmentListForCache(J9VMThread* currentThread, SH_Composit
 			currentROMClass += currentROMSize;
 		}
 		currentSegment->heapAlloc = cacheAlloc;
+		VM_AtomicSupport::writeBarrier();
+		Trc_SHR_CM_updateROMSegmentList_NewHeapAlloc(currentThread, currentSegment, cacheAlloc);
 	}
 
 	Trc_SHR_CM_updateROMSegmentList_Exit(currentThread, currentSegment);
@@ -1346,7 +1381,13 @@ SH_CacheMap::refreshHashtables(J9VMThread* currentThread, bool hasClassSegmentMu
 
 	if (enterRefreshMutex(currentThread, "refreshHashtables")==0) {
 		itemsRead = readCacheUpdates(currentThread);
-		if (itemsRead > 0) {
+		if ((UnitTest::CACHE_FULL_TEST != UnitTest::unitTest)
+			|| (itemsRead > 0)
+		) {
+			/* A previous call might enter here with hasClassSegmentMutex = false, which added romclasses to the hashtable without updating the 
+			 * romClass segment list. In this case updateROMSegmentList() needs to be called this time if hasClassSegmentMutex is true, 
+			 * regaredless of the itemsRead value.
+			 */
 			if (hasClassSegmentMutex) {
 				/* Only refresh the segment list if we hold the class segment mutex. This is because:
 				 * a) we need the mutex to call the function
@@ -1355,12 +1396,12 @@ SH_CacheMap::refreshHashtables(J9VMThread* currentThread, bool hasClassSegmentMu
 				 * For other types of find and store, the segment list is irrelevant */ 
 				updateROMSegmentList(currentThread, true);
 			}
-			_ccHead->updateMetadataSegment(currentThread);
-			 if( _ccHead->isCacheCorrupt()) {
-				 exitRefreshMutex(currentThread, "refreshHashtables");
-				 Trc_SHR_CM_refreshHashtables_Corrupt_Exit(currentThread);
-				 return -1;
-			 }
+		}
+		_ccHead->updateMetadataSegment(currentThread);
+		 if( _ccHead->isCacheCorrupt()) {
+			 exitRefreshMutex(currentThread, "refreshHashtables");
+			 Trc_SHR_CM_refreshHashtables_Corrupt_Exit(currentThread);
+				return -1;
 		}
 		exitRefreshMutex(currentThread, "refreshHashtables");
 	}
@@ -2687,7 +2728,14 @@ SH_CacheMap::findROMClass(J9VMThread* currentThread, const char* path, Classpath
 		Trc_SHR_CM_findROMClass_Exit_Null_Event(currentThread, path, cp->getHelperID());
 		Trc_SHR_CM_findROMClass_Exit_Null(currentThread);
 		return NULL;
-	}		
+	}
+	
+	/* There is a time window here that another thread reads new metadata and adds them into the hashtable.
+	 * In this case, localRCM->locateROMClass() below will be able to find and return the new ROMClass. 
+	 * However the above runEntryPointChecks() did not update heapAlloc of the romClass segment to include the returned new ROMClass.
+	 * (The other thread that reads new metadata might not have segmentMutex, so it might not update heapAlloc of the romClass segment either)
+	 * So call updateROMSegmentList() before returning a romClass from this function.
+	 */
 
 	rc = localRCM->locateROMClass(currentThread, path, pathLen, cp, -1, confirmedEntries, cp->getHelperID(), NULL, partition, modContext, &locateResult);
 	if ((rc & LOCATE_ROMCLASS_RETURN_MARKED_ITEM_STALE) != LOCATE_ROMCLASS_RETURN_MARKED_ITEM_STALE) {
@@ -2863,7 +2911,9 @@ SH_CacheMap::findROMClass(J9VMThread* currentThread, const char* path, Classpath
 #endif /* !defined(J9ZOS390) && !defined(AIXPPC) */
 	}
 
-	if (returnVal) { 
+	if (returnVal) {
+		/* Call updateROMSegmentList() to ensure that heapAlloc of the romClass segment is always updated to include the returned romClass */
+		updateROMSegmentList(currentThread, true);
 		updateBytesRead(returnVal->romSize);		/* This is kind of inaccurate as the strings are all external to the ROMClass */
 		/* trace event is at level 1 and trace exit message is at level 2 as per CMVC 155318/157683 */
 		Trc_SHR_CM_findROMClass_Exit_Found_Event(currentThread, path, returnVal, locateResult.foundAtIndex, cp->getHelperID());
@@ -3120,17 +3170,44 @@ SH_CacheMap::updateROMClassResource(J9VMThread* currentThread, const void* addre
 				break;
 			}
 			U_8* updateAddress = (U_8*)resourceDescriptor->unWrap(resourceWrapper) + updateAtOffset;
+			const ShcItem *itemInCache = resourceDescriptor->wrapperToItem(resourceWrapper);
+			ShcItem *tmpItem = NULL;
+			const ShcItem *itemToUse = itemInCache;
+			bool addResourceInTopLayer = false;
 			if (false == isAddressInCache((void*)updateAddress, data->length, false, true)) {
-				Trc_SHR_CM_updateROMClassResource_Exit7(currentThread, updateAddress, data->length);
-				result = J9SHR_RESOURCE_STORE_ERROR;
-				break;
+				/* We cannot overwrite the existing resource which is in a lower layer cache, instead we add a new resource. 
+				 * The old resources will be removed from the hashtable. */
+				Trc_SHR_Assert_True(isAddressInCache((void*)updateAddress, data->length, false, false));
+				tmpItem = (ShcItem*)j9mem_allocate_memory(itemInCache->dataLen, J9MEM_CATEGORY_CLASSES);
+				if (NULL == tmpItem) {
+					Trc_SHR_CM_updateROMClassResource_Exit8(currentThread);
+					result = J9SHR_RESOURCE_STORE_ERROR;
+					break;
+				} else {
+					memcpy(tmpItem, itemInCache, itemInCache->dataLen);
+					addResourceInTopLayer = true;
+					itemToUse = tmpItem;
+				}
 			}
 
-			const ShcItem *itemInCache = resourceDescriptor->wrapperToItem(resourceWrapper);
 			if (false == isUDATA) {
-				resourceDescriptor->updateDataInCache(itemInCache, updateAtOffset, data);
+				resourceDescriptor->updateDataInCache(itemToUse, updateAtOffset, data);
 			} else {
-				resourceDescriptor->updateUDATAInCache(itemInCache, updateAtOffset, *((UDATA *)data->address));
+				resourceDescriptor->updateUDATAInCache(itemToUse, updateAtOffset, *((UDATA *)data->address));
+			}
+			if (addResourceInTopLayer) {
+				U_8* resourceWrapper = ITEMDATA(itemToUse);
+				SH_AttachedDataManager::SH_AttachedDataResourceDescriptor tmpDescriptor(ADWDATA(resourceWrapper), (U_32)resourceDescriptor->resourceLengthFromWrapper(resourceWrapper), resourceDescriptor->getResourceDataSubType());
+				const void* ret = addROMClassResourceToCache(currentThread, addressInCache, localRRM, &tmpDescriptor, p_subcstr);
+				Trc_SHR_CM_updateROMClassResource_Exit7(currentThread, updateAddress, data->length);
+				if (((void*)J9SHR_RESOURCE_STORE_FULL == ret)
+					|| ((void*)J9SHR_RESOURCE_STORE_ERROR == ret)
+					|| (NULL == ret)
+				) {
+					result = J9SHR_RESOURCE_STORE_ERROR;
+				}
+				j9mem_free_memory(tmpItem);
+				break;
 			}
 		} else {
 			if(NULL != p_subcstr) {
@@ -4002,7 +4079,6 @@ SH_CacheMap::storeSharedData(J9VMThread* currentThread, const char* key, UDATA k
 	J9UTF8* utfKeyStruct = NULL;
 	UDATA dataNotIndexed = (data != NULL) ? (data->flags & J9SHRDATA_NOT_INDEXED) : 0;
 	SH_ByteDataManager* localBDM;
-	SH_ScopeManager* localSCM = NULL;
 	bool overwrite = false;
 
 	PORT_ACCESS_FROM_VMC(currentThread);
@@ -4079,8 +4155,13 @@ SH_CacheMap::storeSharedData(J9VMThread* currentThread, const char* key, UDATA k
 										memcpy((void *)result, data->address, foundDatalen);
 										Trc_SHR_CM_storeSharedData_OverwriteExisting(currentThread, result, data->address, foundDatalen);
 									}
-								} else {
+								} else if (isAddressInCache(result, foundDatalen, true, true)) {
+									/* Do nothing here. We do not overwrite if the existing byteData is in readWrite area */ 
+								} else if (isAddressInCache(result, foundDatalen, false, false)) {
+									/* Existing byteData is in non-readwrite area of a lower layer cache, in this case, we store a new byteData.
+									 * Even though we are unable to mark the existing byteData stale, SH_ByteDataManager always find the byteData under the same key in higher layer first. */
 									Trc_SHR_CM_storeSharedData_OverwriteExisting_NotInTopLayer(currentThread, data->address, foundDatalen);
+									goto _addData;
 								}
 							} else {
 								Trc_SHR_Assert_ShouldNeverHappen();
@@ -4102,19 +4183,20 @@ SH_CacheMap::storeSharedData(J9VMThread* currentThread, const char* key, UDATA k
 		} else {
 			localBDM->markAllStaleForKey(currentThread, key, keylen);
 		}
-	
-		if (!(localSCM = getScopeManager(currentThread))) {
-			Trc_SHR_CM_storeSharedData_NoSCM(currentThread);
-			result = NULL;
-			goto _done;
-		}
 	}
 
+_addData:
 	/* If data is NULL or datalen <= 0, mark the original item(s) stale, but don't store anything */
 	if ((data != NULL) && (data->length > 0) && ((data->address != NULL) || (data->flags & J9SHRDATA_ALLOCATE_ZEROD_MEMORY))) {
 		const J9UTF8* tokenKey = NULL;	
 
 		if (!dataNotIndexed) {
+			SH_ScopeManager* localSCM = getScopeManager(currentThread);
+			if (NULL == localSCM) {
+				Trc_SHR_CM_storeSharedData_NoSCM(currentThread);
+				result = NULL;
+				goto _done;
+			}
 			/* Create J9UTF8 struct as key */
 			if (keylen >= (STACK_STRINGBUF_SIZE - sizeof(J9UTF8))) {
 				if (!(utfKeyPtr = (char*)j9mem_allocate_memory((keylen * sizeof(U_8)) + sizeof(ShcItem), J9MEM_CATEGORY_CLASSES))) {
@@ -4135,7 +4217,6 @@ SH_CacheMap::storeSharedData(J9VMThread* currentThread, const char* key, UDATA k
 				}
 			}
 		}
-
 		result = (const U_8*)addByteDataToCache(currentThread, localBDM, tokenKey, data, NULL, false);
 	}
 
@@ -4272,18 +4353,44 @@ SH_CacheMap::releasePrivateSharedData(J9VMThread* currentThread, const J9SharedD
 }
 
 /* THREADING: Can be called at any time by any thread. Should not try to get any locks as it may be being
- * called as a result of a deadlock. The only locks obtained are by the managers when querying their hashtables. */
+ * called as a result of a deadlock. The only locks obtained are by the managers when querying their hashtables.
+ * 
+ * Get the J9SharedClassJavacoreDataDescriptor for all layers of the cache.
+ * 
+ * @param[in] vm  The J9JavaVM
+ * @param[out] descriptor The J9SharedClassJavacoreDataDescriptor
+ * 
+ * @return 1 on success and 0 otherwise
+ * */
 UDATA 
 SH_CacheMap::getJavacoreData(J9JavaVM *vm, J9SharedClassJavacoreDataDescriptor* descriptor)
 {
-	UDATA stale, nonstale;
-	SH_CompositeCacheImpl* walk = _ccHead;  /* Currently only print _ccHead */
+	return getJavacoreData(vm, descriptor, false);
+}
 
-	/* TODO: Deal with multiple supercaches */
+/* THREADING: Can be called at any time by any thread. Should not try to get any locks as it may be being
+ * called as a result of a deadlock. The only locks obtained are by the managers when querying their hashtables. 
+ * 
+ * Get the J9SharedClassJavacoreDataDescriptor for the current shared cache.
+ * 
+ * @param[in] vm  The J9JavaVM
+ * @param[out] descriptor The J9SharedClassJavacoreDataDescriptor
+ * @param[in] topLayerOnly  Whether J9SharedClassJavacoreDataDescriptor from the top layer cache only or all layers
+ * 
+ * @return 1 on success and 0 otherwise
+ * */
+UDATA 
+SH_CacheMap::getJavacoreData(J9JavaVM *vm, J9SharedClassJavacoreDataDescriptor* descriptor, bool topLayerOnly)
+{
+	UDATA stale, nonstale;
+	SH_CompositeCacheImpl* walk = _ccTail;
+
 	if ((NULL != _ccHead) && !_ccHead->getJavacoreData(vm, descriptor)) {
 		return 0;
 	}
-
+	if (topLayerOnly) {
+		walk = _ccHead;
+	}
 	/*
 	 * Turn off assertion on local mutex now and turn on assertion at the end of this method. 
 	 * reference CMVC 145844
@@ -4293,11 +4400,12 @@ SH_CacheMap::getJavacoreData(J9JavaVM *vm, J9SharedClassJavacoreDataDescriptor* 
 		descriptor->ccCount++;
 		if (walk->isStarted()) {
 			descriptor->ccStartedCount++;
-			descriptor->freeBytes += walk->getFreeAvailableBytes();
-			descriptor->aotBytes += walk->getAOTBytes();
-			if ((walk != _ccHead) || (_cacheletHead == NULL)) {
-				descriptor->romClassBytes += ((UDATA)(walk->getSegmentAllocPtr()) - (UDATA)(walk->getBaseAddress()));
+			if (walk == _ccHead) {
+				descriptor->topLayer = walk->getLayer();
+				descriptor->freeBytes = walk->getFreeAvailableBytes();
 			}
+			descriptor->aotBytes += walk->getAOTBytes();
+			descriptor->romClassBytes += ((UDATA)(walk->getSegmentAllocPtr()) - (UDATA)(walk->getBaseAddress()));
 		}
 		walk = walk->getPrevious();
 	}
@@ -4392,19 +4500,26 @@ SH_CacheMap::getJavacoreData(J9JavaVM *vm, J9SharedClassJavacoreDataDescriptor* 
 	}
 
 	descriptor->romClassBytes += descriptor->unindexedDataBytes;
-	descriptor->otherBytes = descriptor->cacheSize - ((UDATA)descriptor->metadataStart - (UDATA)descriptor->romClassEnd) - descriptor->aotBytes -
-			descriptor->romClassBytes - descriptor->readWriteBytes - 
-			descriptor->zipCacheDataBytes -
-			descriptor->startupHintBytes-
-			descriptor->jclDataBytes -
-			descriptor->jitHintDataBytes -
-			descriptor->jitProfileDataBytes -
-			descriptor->aotDataBytes -
-			descriptor->aotClassChainDataBytes -
-			descriptor->aotThunkDataBytes -
-			descriptor->indexedDataBytes -
-			descriptor->objectBytes -
-			descriptor->debugAreaSize;
+	if ((0 >= descriptor->topLayer)
+		|| (true == topLayerOnly)
+	) {
+		descriptor->otherBytes = descriptor->cacheSize - ((UDATA)descriptor->metadataStart - (UDATA)descriptor->romClassEnd) - descriptor->aotBytes -
+					descriptor->romClassBytes - descriptor->readWriteBytes - 
+					descriptor->zipCacheDataBytes -
+					descriptor->startupHintBytes-
+					descriptor->jclDataBytes -
+					descriptor->jitHintDataBytes -
+					descriptor->jitProfileDataBytes -
+					descriptor->aotDataBytes -
+					descriptor->aotClassChainDataBytes -
+					descriptor->aotThunkDataBytes -
+					descriptor->indexedDataBytes -
+					descriptor->objectBytes -
+					descriptor->debugAreaSize;
+	} else {
+		/* otherBytes does not make sence to multi-layer cache */
+		descriptor->otherBytes = 0;
+	}
 	
 	if (_rcm && (_rcm->getState() == MANAGER_STATE_STARTED)) {
 		_rcm->getNumItems(NULL, &nonstale, &stale);
@@ -5031,10 +5146,222 @@ SH_CacheMap::printAllCacheStats(J9VMThread* currentThread, UDATA showFlags, SH_C
 		}
 	} while (it); 
 
-	_ccHead->exitWriteMutex(currentThread, fnName);
+	cache->exitWriteMutex(currentThread, fnName);
 	return 0;
 }
 
+/*
+ * Helper funtion to print the statistics of the top layer cache.
+ * 
+ * @param[in] currentThread  The current thread
+ * @param[in] showFlags  Flags controlling information printed
+ * @param[in] runtimeFlags  The runtime flags
+ * @param[in] javacoreData  Pointer to J9SharedClassJavacoreDataDescriptor
+ * @param[in] multiLayerStats  Whether J9SharedClassJavacoreDataDescriptor is from a multi-layer cache
+ * */
+void
+SH_CacheMap::printCacheStatsTopLayerStatsHelper(J9VMThread* currentThread, UDATA showFlags, U_64 runtimeFlags, J9SharedClassJavacoreDataDescriptor *javacoreData, bool multiLayerStats)
+{
+	PORT_ACCESS_FROM_PORT(_portlib);
+#if !defined(WIN32)
+	if (javacoreData->shmid >= 0) {
+		CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SHMID, javacoreData->shmid);
+	}
+#endif
+
+	CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_CACHE_CREATED_WITH);
+		
+	j9tty_printf(_portlib, "\t");
+	if (true == this->_ccHead->getIsNoLineNumberEnabled()) {
+		CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_XNOLINENUMERS_ENABLED_TRUE);
+	} else {
+		CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_XNOLINENUMERS_ENABLED_FALSE);
+	}
+	j9tty_printf(_portlib, "\t");
+	if (true == this->_ccHead->getIsBCIEnabled()) {
+		CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_BCI_ENABLED_TRUE);
+	} else {
+		CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_BCI_ENABLED_FALSE);
+	}
+	j9tty_printf(_portlib, "\t");
+	if (true == this->_ccHead->isRestrictClasspathsSet(currentThread)) {
+		CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_RESTRICT_CLASSPATHS_TRUE);
+	} else {
+		CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_RESTRICT_CLASSPATHS_FALSE);
+	}
+
+	j9tty_printf(_portlib, "\t");
+	if (J9_ARE_ALL_BITS_SET(javacoreData->feature, J9SH_FEATURE_COMPRESSED_POINTERS)) {
+		CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_FEATURE, "cr");
+	} else if (J9_ARE_ALL_BITS_SET(javacoreData->feature, J9SH_FEATURE_NON_COMPRESSED_POINTERS)) {
+		CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_FEATURE, "non-cr");
+	} else {
+		CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_FEATURE, "default");
+	}
+
+	j9tty_printf(_portlib, "\n");
+	if (true == this->_ccHead->getIsNoLineNumberContentEnabled()) {
+		if (true == this->_ccHead->getIsLineNumberContentEnabled()) {
+			CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_CACHE_CONTAINS_CONTENT_WITH_AND_WITHOUT_LINE_NUMBERS);
+		} else {
+			CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_CACHE_CONTAINS_CONTENT_ONLY_WITHOUT_LINE_NUMBERS);
+		}
+	} else {
+		if (true == this->_ccHead->getIsLineNumberContentEnabled()) {
+			CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_CACHE_CONTAINS_CONTENT_ONLY_WITH_LINE_NUMBERS);
+		}
+	}
+
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_BASEADDRESS_V2, javacoreData->romClassStart);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_ENDADDRESS_V2, javacoreData->cacheEndAddress);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_ALLOCPTR_V2, javacoreData->romClassEnd);
+	if (J9_ARE_ALL_BITS_SET(runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS)) {
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_METADATA_STARTADDRESS, javacoreData->metadataStart);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_RUNTIME_FLAGS, javacoreData->runtimeFlags);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_CACHE_GEN, javacoreData->cacheGen);
+	}
+
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_CACHE_LAYER, javacoreData->topLayer);
+
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_CACHESIZE_V2, javacoreData->cacheSize);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_SOFTMXBYTES, javacoreData->softMaxBytes);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_FREEBYTES_V2, javacoreData->freeBytes);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_MIN, javacoreData->minAOT);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_MAX, javacoreData->maxAOT);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JIT_MIN, javacoreData->minJIT);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JIT_MAX, javacoreData->maxJIT);
+	if (J9_ARE_ALL_BITS_SET(runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS)) {
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_READWRITE_BYTES, javacoreData->readWriteBytes);
+	}
+	if (!multiLayerStats) {
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_META_BYTES_V2, javacoreData->otherBytes);
+		if ((U_32)-1 == javacoreData->softMaxBytes) {
+			/* similarly to the calculation of cache full percentage, take used debug area into account */
+			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_META_PERCENT_V2, ((javacoreData->otherBytes * 100) / (javacoreData->cacheSize - javacoreData->freeBytes)));
+		} else {
+			/* cache header size is not included in javacoreData->cacheSize, but it is included in softmx as used bytes. To be consistent, subtract cache header size here */ 
+			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_META_PERCENT_V2, ((javacoreData->otherBytes * 100) / (javacoreData->softMaxBytes - (javacoreData->totalSize - javacoreData->cacheSize)  /* subtract header size */
+																																										- javacoreData->freeBytes)));
+		}
+	}
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_DEBUGAREA_SIZE, javacoreData->debugAreaSize);
+	if (J9_ARE_ALL_BITS_SET(runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS)) {
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_DEBUGAREA_LINENUMBERTABLE_BYTES, javacoreData->debugAreaLineNumberTableBytes);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_DEBUGAREA_LOCALVARIABLETABLE_BYTES_V2, javacoreData->debugAreaLocalVariableTableBytes);
+	} else {
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_DEBUGAREA_USED_BYTES, javacoreData->debugAreaLineNumberTableBytes + javacoreData->debugAreaLocalVariableTableBytes);
+	}
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_DEBUGAREA_USED, javacoreData->debugAreaUsed);
+}
+/*
+ * Helper funtion to print the statistics summary of the top layer cache.
+ * 
+ * @param[in] currentThread  the current thread
+ * @param[in] showFlags Flags controlling information printed
+ * @param[in] runtimeFlags  The runtime flags
+ * @param[in] javacoreData  Pointer to J9SharedClassJavacoreDataDescriptor
+ * */
+void
+SH_CacheMap::printCacheStatsTopLayerSummaryStatsHelper(J9VMThread* currentThread, UDATA showFlags, U_64 runtimeFlags, J9SharedClassJavacoreDataDescriptor *javacoreData)
+{
+	PORT_ACCESS_FROM_PORT(_portlib);
+	j9tty_printf(_portlib, "\n");
+	const char *accessString = NULL;
+
+	if (javacoreData->cacheSize == javacoreData->softMaxBytes) {
+		CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_PERC_FULL, javacoreData->percFull);
+	} else {
+		CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_PERC_SOFT_FULL, javacoreData->percFull);
+	}
+	switch (this->_ccHead->isCacheAccessible()) {
+	case J9SH_CACHE_ACCESS_ALLOWED:
+		accessString = "true";
+		break;
+	case J9SH_CACHE_ACCESS_ALLOWED_WITH_GROUPACCESS:
+		accessString = "only with 'groupAccess' option";
+		break;
+	case J9SH_CACHE_ACCESS_ALLOWED_WITH_GROUPACCESS_READONLY:
+		accessString = "only with 'groupAccess' and 'readonly' option";
+		break;
+	case J9SH_CACHE_ACCESS_NOT_ALLOWED:
+		accessString = "false";
+		break;
+	default:
+		accessString = "false";
+		break;
+	}	
+	CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_IS_CACHE_ACCESSIBLE, accessString);
+}
+
+/*
+ * Helper funtion to print the cache statistics of all layers.
+ * 
+ * @param[in] currentThread  the current thread
+ * @param[in] showFlags Flags controlling information printed
+ * @param[in] runtimeFlags  The runtime flags
+ * @param[in] javacoreData  Pointer to J9SharedClassJavacoreDataDescriptor
+ * @param[in] staleBytes  The stale bytes in the cache
+ * */
+void
+SH_CacheMap::printCacheStatsAllLayersStatsHelper(J9VMThread* currentThread, UDATA showFlags, U_64 runtimeFlags, J9SharedClassJavacoreDataDescriptor *javacoreData, U_32 staleBytes)
+{
+	PORT_ACCESS_FROM_PORT(_portlib);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_ROMCLASS_BYTES_V2, javacoreData->romClassBytes);
+	if (J9_ARE_ALL_BITS_SET(runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS)) {
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_CODE_BYTES, javacoreData->aotBytes);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_DATA_BYTES, javacoreData->aotDataBytes);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_CLASS_HIERARCHY_BYTES, javacoreData->aotClassChainDataBytes);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_THUNK_BYTES, javacoreData->aotThunkDataBytes);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JIT_HINT_BYTES, javacoreData->jitHintDataBytes);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JIT_PROFILE_BYTES, javacoreData->jitProfileDataBytes);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JAVA_OBJECT_BYTES, javacoreData->objectBytes);
+	} else {
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_BYTES_V2, javacoreData->aotBytes + javacoreData->aotDataBytes + javacoreData->aotClassChainDataBytes + javacoreData->aotThunkDataBytes);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JIT_DATA_BYTES_V2, javacoreData->jitHintDataBytes + javacoreData->jitProfileDataBytes);
+	}
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_ZIP_CACHE_DATA_BYTES_V2, javacoreData->zipCacheDataBytes);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_STARTUP_HINT_BYTES, javacoreData->startupHintBytes);
+
+	if (J9_ARE_ALL_BITS_SET(runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS)) {
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JCL_DATA_BYTES, javacoreData->jclDataBytes);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_BYTE_DATA_BYTES, javacoreData->indexedDataBytes);
+	} else {
+		UDATA dataBytes = javacoreData->indexedDataBytes +
+							javacoreData->readWriteBytes +
+							javacoreData->jclDataBytes +
+							javacoreData->objectBytes;
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_DATA_BYTES_V2, dataBytes);
+		
+	}
+	if ((0 != showFlags) 
+		&& (PRINTSTATS_SHOW_TOP_LAYER_ONLY != showFlags)
+	) {
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_STALE_BYTES, staleBytes);
+	}
+	j9tty_printf(_portlib, "\n");
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_ROMCLASSES_V2, javacoreData->numROMClasses);
+	if (J9_ARE_ALL_BITS_SET(runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS)) {
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_AOT_DATA, javacoreData->numAotDataEntries);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_AOT_CLASS_HIERARCHY, javacoreData->numAotClassChains);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_AOT_THUNKS, javacoreData->numAotThunks);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_JIT_HINTS, javacoreData->numJitHints);
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_JIT_PROFILES, javacoreData->numJitProfiles);
+	}
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_AOT_V2, javacoreData->numAOTMethods);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_CLASSPATHS_V2, javacoreData->numClasspaths);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_URLS_V2, javacoreData->numURLs);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_TOKENS_V2, javacoreData->numTokens);
+	if (J9_ARE_ALL_BITS_SET(runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS)) {
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_JAVA_OBJECTS, javacoreData->numObjects);
+	}
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_ZIP_CACHES_V2, javacoreData->numZipCaches);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_STARTUP_HINTS, javacoreData->numStartupHints);
+	if (J9_ARE_ALL_BITS_SET(runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS)) {
+		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_JCL_ENTRIES, javacoreData->numJclEntries);
+	}
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_STALE_CLASSES_V2, javacoreData->numStaleClasses);
+	CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_PERC_STALE_CLASSES_V2, javacoreData->percStale);
+}
 /**
  * Print stats on an existing cache
  * 
@@ -5051,9 +5378,8 @@ SH_CacheMap::printCacheStats(J9VMThread* currentThread, UDATA showFlags, U_64 ru
 {	
 	J9SharedClassJavacoreDataDescriptor javacoreData;
 	U_32 staleBytes = 0;
+	bool multiLayerStats = J9_ARE_NO_BITS_SET(showFlags, PRINTSTATS_SHOW_TOP_LAYER_ONLY);
 	PORT_ACCESS_FROM_PORT(_portlib);
-
-	CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_TITLE, _cacheName);
 
 #if defined(J9SHR_CACHELET_SUPPORT)
 	/* startup all cachelets to get stats */
@@ -5067,203 +5393,44 @@ SH_CacheMap::printCacheStats(J9VMThread* currentThread, UDATA showFlags, U_64 ru
 #endif
 
 	if (0 != showFlags) {
-
-#if defined(J9SHR_CACHELET_SUPPORT)
-		/* print cachelets */
-		cache = _cacheletHead; /* this list currently spans all supercaches */
+		SH_CompositeCacheImpl* cache = _ccTail;
+		if (J9_ARE_ALL_BITS_SET(showFlags, PRINTSTATS_SHOW_TOP_LAYER_ONLY)) {
+			cache = _ccHead;
+		}
+		
 		while (cache) {
 			if (printAllCacheStats(currentThread, showFlags, cache, &staleBytes) == -1) {
 				Trc_SHR_Assert_ShouldNeverHappen();
 				return -1;
 			}
-			cache = cache->getNext();
-		}
-#endif
-		/* print _ccHead */
-		if (printAllCacheStats(currentThread, showFlags, _ccHead, &staleBytes) == -1) {
-			return -1;
+			cache = cache->getPrevious();
 		}
 	}
 
 	memset(&javacoreData, 0, sizeof(J9SharedClassJavacoreDataDescriptor));
-	if ( 1 == getJavacoreData(currentThread->javaVM, &javacoreData) ) {
-		const char *accessString = NULL;
+	if ( 1 == getJavacoreData(currentThread->javaVM, &javacoreData, !multiLayerStats) ) {
+		multiLayerStats = multiLayerStats && (0 < javacoreData.topLayer);
 
 		/* all CompositeCaches must be started to get proper stats */
 		Trc_SHR_Assert_True(javacoreData.ccCount == javacoreData.ccStartedCount);
-		
+
 		if (_runningNested) {
 			_runningNested = false;			/* TODO: Hack to stop metadata being written on printStats */
 		}
-
-#if !defined(WIN32)
-		if (javacoreData.shmid >= 0) {
-			CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SHMID, javacoreData.shmid);
-		}
-#endif
-
-		CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_CACHE_CREATED_WITH);
-		
-		j9tty_printf(_portlib, "\t");
-		if (true == this->_cc->getIsNoLineNumberEnabled()) {
-			CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_XNOLINENUMERS_ENABLED_TRUE);
+		if (multiLayerStats) {
+			CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_TOP_LAYER_TITLE, _cacheName);
+			printCacheStatsTopLayerStatsHelper(currentThread, showFlags, runtimeFlags, &javacoreData, multiLayerStats);
+			printCacheStatsTopLayerSummaryStatsHelper(currentThread, showFlags, runtimeFlags, &javacoreData);
+			j9tty_printf(_portlib, "---------------------------------------------------------\n");
+			CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_ALL_LAYERS_TITLE, _cacheName);
+			printCacheStatsAllLayersStatsHelper(currentThread, showFlags, runtimeFlags, &javacoreData, staleBytes);
 		} else {
-			CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_XNOLINENUMERS_ENABLED_FALSE);
+			CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_TITLE, _cacheName);
+			printCacheStatsTopLayerStatsHelper(currentThread, showFlags, runtimeFlags, &javacoreData, multiLayerStats);
+			j9tty_printf(_portlib, "\n");
+			printCacheStatsAllLayersStatsHelper(currentThread, showFlags, runtimeFlags, &javacoreData, staleBytes);
+			printCacheStatsTopLayerSummaryStatsHelper(currentThread, showFlags, runtimeFlags, &javacoreData);
 		}
-		j9tty_printf(_portlib, "\t");
-		if (true == this->_cc->getIsBCIEnabled()) {
-			CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_BCI_ENABLED_TRUE);
-		} else {
-			CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_BCI_ENABLED_FALSE);
-		}
-		j9tty_printf(_portlib, "\t");
-		if (true == this->_cc->isRestrictClasspathsSet(currentThread)) {
-			CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_RESTRICT_CLASSPATHS_TRUE);
-		} else {
-			CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_RESTRICT_CLASSPATHS_FALSE);
-		}
-		
-		j9tty_printf(_portlib, "\t");
-		if (J9_ARE_ALL_BITS_SET(javacoreData.feature, J9SH_FEATURE_COMPRESSED_POINTERS)) {
-			CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_FEATURE, "cr");
-		} else if (J9_ARE_ALL_BITS_SET(javacoreData.feature, J9SH_FEATURE_NON_COMPRESSED_POINTERS)) {
-			CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_FEATURE, "non-cr");
-		} else {
-			CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_FEATURE, "default");
-		}
-
-		j9tty_printf(_portlib, "\n");
-		if (true == this->_cc->getIsNoLineNumberContentEnabled()) {
-			if (true == this->_cc->getIsLineNumberContentEnabled()) {
-				CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_CACHE_CONTAINS_CONTENT_WITH_AND_WITHOUT_LINE_NUMBERS);
-			} else {
-				CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_CACHE_CONTAINS_CONTENT_ONLY_WITHOUT_LINE_NUMBERS);
-			}
-		} else {
-			if (true == this->_cc->getIsLineNumberContentEnabled()) {
-				CACHEMAP_PRINT(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_CACHE_CONTAINS_CONTENT_ONLY_WITH_LINE_NUMBERS);
-			}
-		}
-
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_BASEADDRESS_V2, javacoreData.romClassStart);
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_ENDADDRESS_V2, javacoreData.cacheEndAddress);
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_ALLOCPTR_V2, javacoreData.romClassEnd);
-		if (runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS) {
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_METADATA_STARTADDRESS, javacoreData.metadataStart);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_RUNTIME_FLAGS, javacoreData.runtimeFlags);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_CACHE_GEN, javacoreData.cacheGen);
-		}
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_CACHESIZE_V2, javacoreData.cacheSize);
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_SOFTMXBYTES, javacoreData.softMaxBytes);
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_FREEBYTES_V2, javacoreData.freeBytes);
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_ROMCLASS_BYTES_V2, javacoreData.romClassBytes);
-		if (runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS) {
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_CODE_BYTES, javacoreData.aotBytes);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_DATA_BYTES, javacoreData.aotDataBytes);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_CLASS_HIERARCHY_BYTES, javacoreData.aotClassChainDataBytes);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_THUNK_BYTES, javacoreData.aotThunkDataBytes);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_MIN, javacoreData.minAOT);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_MAX, javacoreData.maxAOT);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JIT_HINT_BYTES, javacoreData.jitHintDataBytes);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JIT_PROFILE_BYTES, javacoreData.jitProfileDataBytes);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JIT_MIN, javacoreData.minJIT);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JIT_MAX, javacoreData.maxJIT);
-		} else {
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_BYTES_V2, javacoreData.aotBytes + javacoreData.aotDataBytes + javacoreData.aotClassChainDataBytes + javacoreData.aotThunkDataBytes);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_MIN, javacoreData.minAOT);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_AOT_MAX, javacoreData.maxAOT);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JIT_DATA_BYTES_V2, javacoreData.jitHintDataBytes + javacoreData.jitProfileDataBytes);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JIT_MIN, javacoreData.minJIT);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JIT_MAX, javacoreData.maxJIT);
-		}
-
-		if (runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS) {
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JAVA_OBJECT_BYTES, javacoreData.objectBytes);
-		}
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_ZIP_CACHE_DATA_BYTES_V2, javacoreData.zipCacheDataBytes);
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_STARTUP_HINT_BYTES, javacoreData.startupHintBytes);
-
-		if (runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS) {
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_READWRITE_BYTES, javacoreData.readWriteBytes);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_JCL_DATA_BYTES, javacoreData.jclDataBytes);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_BYTE_DATA_BYTES, javacoreData.indexedDataBytes);
-		} else {
-			UDATA dataBytes = javacoreData.indexedDataBytes +
-					javacoreData.readWriteBytes +
-					javacoreData.jclDataBytes +
-					javacoreData.objectBytes;
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_DATA_BYTES_V2, dataBytes);
-		}
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_META_BYTES_V2, javacoreData.otherBytes);
-		if ((U_32)-1 == javacoreData.softMaxBytes) {
-			/* similarly to the calculation of cache full percentage, take used debug area into account */
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_META_PERCENT_V2, ((javacoreData.otherBytes * 100) / (javacoreData.cacheSize - javacoreData.freeBytes)));
-		} else {
-			/* cache header size is not included in javacoreData.cacheSize, but it is included in softmx as used bytes. To be consistent, subtract cache header size here */ 
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_META_PERCENT_V2, ((javacoreData.otherBytes * 100) / (javacoreData.softMaxBytes - (javacoreData.totalSize - javacoreData.cacheSize)  /* subtract header size */
-																																						- javacoreData.freeBytes)));
-		}
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_DEBUGAREA_SIZE, javacoreData.debugAreaSize);
-
-		if (runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS) {
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_DEBUGAREA_LINENUMBERTABLE_BYTES, javacoreData.debugAreaLineNumberTableBytes);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_DEBUGAREA_LOCALVARIABLETABLE_BYTES_V2, javacoreData.debugAreaLocalVariableTableBytes);
-		} else {
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_DEBUGAREA_USED_BYTES, javacoreData.debugAreaLineNumberTableBytes + javacoreData.debugAreaLocalVariableTableBytes);
-		}
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_DEBUGAREA_USED, javacoreData.debugAreaUsed);
-
-		if (0 != showFlags) {
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_STALE_BYTES, staleBytes);
-		}
-		j9tty_printf(_portlib, "\n");
-
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_ROMCLASSES_V2, javacoreData.numROMClasses);
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_AOT_V2, javacoreData.numAOTMethods);
-		if (runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS) {
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_AOT_DATA, javacoreData.numAotDataEntries);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_AOT_CLASS_HIERARCHY, javacoreData.numAotClassChains);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_AOT_THUNKS, javacoreData.numAotThunks);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_JIT_HINTS, javacoreData.numJitHints);
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_JIT_PROFILES, javacoreData.numJitProfiles);
-		}
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_CLASSPATHS_V2, javacoreData.numClasspaths);
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_URLS_V2, javacoreData.numURLs);
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_TOKENS_V2, javacoreData.numTokens);
-		if (runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS) {
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_JAVA_OBJECTS, javacoreData.numObjects);
-		}
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_ZIP_CACHES_V2, javacoreData.numZipCaches);
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_STARTUP_HINTS, javacoreData.numStartupHints);
-		if (runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_DETAILED_STATS) {
-			CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_JCL_ENTRIES, javacoreData.numJclEntries);
-		}
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_NUM_STALE_CLASSES_V2, javacoreData.numStaleClasses);
-		CACHEMAP_FMTPRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_PERC_STALE_CLASSES_V2, javacoreData.percStale);
-		if (javacoreData.cacheSize == javacoreData.softMaxBytes) {
-			CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_PERC_FULL, javacoreData.percFull);
-		} else {
-			CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_SUMMARY_PERC_SOFT_FULL, javacoreData.percFull);
-		}
-
-		switch (this->_cc->isCacheAccessible()) {
-		case J9SH_CACHE_ACCESS_ALLOWED:
-			accessString = "true";
-			break;
-		case J9SH_CACHE_ACCESS_ALLOWED_WITH_GROUPACCESS:
-			accessString = "only with 'groupAccess' option";
-			break;
-		case J9SH_CACHE_ACCESS_ALLOWED_WITH_GROUPACCESS_READONLY:
-			accessString = "only with 'groupAccess' and 'readonly' option";
-			break;
-		case J9SH_CACHE_ACCESS_NOT_ALLOWED:
-			accessString = "false";
-			break;
-		default:
-			accessString = "false";
-			break;
-		}
-		CACHEMAP_PRINT1(J9NLS_DO_NOT_PRINT_MESSAGE_TAG, J9NLS_SHRC_CM_PRINTSTATS_IS_CACHE_ACCESSIBLE, accessString);
 	}
 
 	return 0;
@@ -6837,26 +7004,24 @@ SH_CacheMap::managers()
  *
  * THREADING: Only ever single threaded
  *
- * @param [in] currentThread  The current thread
- * @param [in] config  The shared class config
- * @param [in] attachedMemory  The attached shared memory region
- * @param [in] runtimeflags  The runtime flags used by this cache
+ * @param [in] currentThread The current thread
+ * @param [in] ctrlDirName The cache control directroy
+ * @param [in] groupPerm Group permissions to open the cache directory
+ * @param [in] oscache An exiting top layer SH_OSCache
+ * @param [in] runtimeflags The runtime flags used by this cache
+ * @param [out] lowerLayerList A list of SH_OSCache_Info for lower layer caches.
  *
- * @return 0 on success or -1 for failure
- * @retval CC_STARTUP_OK (0) success
- * @retval CC_STARTUP_FAILED (-1)
- * @retval CC_STARTUP_CORRUPT (-2)
+ * @return CC_STARTUP_OK on success, CC_STARTUP_FAILED(-1) or CC_STARTUP_CORRUPT(-2) on failure
  */
 IDATA
-SH_CacheMap::startupForStats(J9VMThread* currentThread, SH_OSCache * oscache, U_64 * runtimeflags)
+SH_CacheMap::startupForStats(J9VMThread* currentThread, const char* ctrlDirName, UDATA groupPerm, SH_OSCache *oscache, U_64 *runtimeflags, J9Pool **lowerLayerList)
 {
 	IDATA retval = 0;
 	UDATA verboseFlags = 0;
 	IDATA startuprc = CC_STARTUP_OK;
 	IDATA itemsRead = -1;
-#if defined(J9SHR_CACHELET_SUPPORT)
-	SH_CompositeCacheImpl* cache = _cacheletHead; /* this list currently spans all supercaches */
-#endif
+	SH_CompositeCacheImpl* ccToUse = NULL;
+	J9JavaVM *vm = currentThread->javaVM;
 
 	/*The below runtime flags are used during:
 	 * 	1.) 'SH_CacheMap::startManager'
@@ -6865,15 +7030,14 @@ SH_CacheMap::startupForStats(J9VMThread* currentThread, SH_OSCache * oscache, U_
 	 */
 	_runtimeFlags = runtimeflags;
 
-	/* When 'SH_CacheMap::startManager' is called it expected that the _refreshMutex is created.
-	 * -Xshareclasses:noLocalLocking looks like it should enable a mode where '_refreshMutex' should not
-	 * be required. However it also looks like this feature should be disabled.
-	 */
+	/* When 'SH_CacheMap::startManager' is called it expected that the _refreshMutex is created. */
 	if (omrthread_monitor_init(&_refreshMutex, 0) != 0) {
 		_refreshMutex = NULL;
 		retval = CC_STARTUP_FAILED;
 		goto done;
 	}
+	
+	
 	startuprc = _ccHead->startupForStats(currentThread, oscache, _runtimeFlags, verboseFlags);
 	if (startuprc != CC_STARTUP_OK) {
 		if (startuprc == CC_STARTUP_CORRUPT) {
@@ -6882,37 +7046,67 @@ SH_CacheMap::startupForStats(J9VMThread* currentThread, SH_OSCache * oscache, U_
 			retval = CC_STARTUP_FAILED;
 		}
 		goto done;
+	} else {
+		if (oscache->getLayer() > 0) {
+			startuprc = startupLowerLayerForStats(currentThread, ctrlDirName, groupPerm, oscache, lowerLayerList);
+			if (startuprc != CC_STARTUP_OK) {
+				if (startuprc == CC_STARTUP_CORRUPT) {
+					retval = CC_STARTUP_CORRUPT;
+				} else {
+					retval = CC_STARTUP_FAILED;
+				}
+				goto done;
+			}
+		}
 	}
 	setCacheAddressRangeArray();
 
-	if (oscache->getLayer() == 0) {
-		/* TODO: Should also read cache if layer > 0 */
-		/* populate the hashtables */
-		itemsRead = readCache(currentThread, _ccHead, -1, true);
+	ccToUse = _ccTail;
+	
+	do {
+		itemsRead = readCache(currentThread, ccToUse, -1, true);
 		if (CM_READ_CACHE_FAILED == itemsRead) {
 			retval = CC_STARTUP_FAILED;
-			goto done;
 		} else if (CM_CACHE_CORRUPT == itemsRead) {
 			retval = CC_STARTUP_CORRUPT;
-			goto done;
 		}
-	}
 
-#if defined(J9SHR_CACHELET_SUPPORT)
-	/* startup all cachelets to get stats */
-	while (cache) {
-		IDATA startupcachelet = startupCacheletForStats(currentThread, cache);
-		if ( CC_STARTUP_OK != startupcachelet ) {
-			if (startupcachelet == CC_STARTUP_CORRUPT) {
-				retval = CC_STARTUP_CORRUPT;
+		if (ccToUse != _ccHead) {
+			if (NULL == *lowerLayerList) {
+				*lowerLayerList = pool_new(sizeof(SH_OSCache_Info),  0, 0, 0, J9_GET_CALLSITE(), J9MEM_CATEGORY_CLASSES, POOL_FOR_PORT(_portlib));
+			}
+			if (NULL == *lowerLayerList) {
+				retval = CC_STARTUP_FAILED;
+				break;
+			}
+			(*lowerLayerList)->flags |= POOL_ALWAYS_KEEP_SORTED;
+			SH_OSCache_Info tempInfo;
+			if (-1 != ccToUse->getNonTopLayerCacheInfo(vm, ctrlDirName, groupPerm, &tempInfo)) {
+				if (CC_STARTUP_CORRUPT == retval) {
+					tempInfo.isCorrupt = 1;
+				}
+				if (!ccToUse->getJavacoreData(vm, &tempInfo.javacoreData)) {
+					retval = CC_STARTUP_FAILED;
+					break;
+				}
+				tempInfo.javacoreData.freeBytes = ccToUse->getFreeAvailableBytes();
+				tempInfo.isJavaCorePopulated = 1;
+				SH_OSCache_Info* newElement = (SH_OSCache_Info*) pool_newElement(*lowerLayerList);
+				if (NULL == newElement) {
+					Trc_SHR_CM_startupForStats_pool_newElement_failed(currentThread);
+					pool_kill(*lowerLayerList);
+					*lowerLayerList = NULL;
+					retval = CC_STARTUP_FAILED;
+					break;
+				}
+				memcpy(newElement, &tempInfo, sizeof(SH_OSCache_Info));
 			} else {
 				retval = CC_STARTUP_FAILED;
+				break;
 			}
-			goto done;
 		}
-		cache = cache->getNext();
-	}
-#endif
+		ccToUse = ccToUse->getPrevious();
+	} while (NULL != ccToUse && CC_STARTUP_OK == retval);
 
 done:
 	if (retval != CC_STARTUP_OK) {
@@ -6920,6 +7114,83 @@ done:
 	}
 	return retval;
 }
+
+/**
+ * Start up the lower layer shared cache for statistics.
+ *
+ * @param [in] currentThread Pointer to J9VMThread structure for the current thread
+ * @param [in] oscache an exiting top layer SH_OSCache
+ * @param [out] lowerLayerStatsList A list of SH_OSCache_Info for all lower layer caches.
+ *
+ * @retval CC_STARTUP_OK (0) success
+ * @retval CC_STARTUP_FAILED(-1) or CC_STARTUP_CORRUPT (-2) on failure.
+ */
+IDATA
+SH_CacheMap::startupLowerLayerForStats(J9VMThread* currentThread, const char* ctrlDirName, UDATA groupPerm, SH_OSCache *oscache, J9Pool** lowerLayerList)
+{
+	IDATA rc = CC_STARTUP_OK;
+	SH_CompositeCacheImpl* ccToUse = _ccHead;
+	const char* cacheName = NULL;
+	U_32 cacheType = oscache->getCacheType();
+	char cacheUniqueID[J9SHR_UNIQUE_CACHE_ID_BUFSIZE];
+	J9JavaVM *vm = currentThread->javaVM;
+	char cacheDirBuf[J9SH_MAXPATH];
+	SH_OSCache::getCacheDir(vm, ctrlDirName, cacheDirBuf, J9SH_MAXPATH, cacheType, false);
+	
+	do {
+		const char* cacheUniqueIDPtr = NULL;
+		UDATA idLen = 0;
+		bool isCacheUniqueIdStored = false;
+		
+		IDATA preqRC = getPrereqCache(currentThread, cacheDirBuf, ccToUse, true, &cacheUniqueIDPtr, &idLen, &isCacheUniqueIdStored);
+		I_8 layer = 0;
+
+		if (0 > preqRC) {
+			if (CM_CACHE_CORRUPT == preqRC) {
+				rc = CC_STARTUP_CORRUPT;
+				SH_Managers::ManagerWalkState state;
+				SH_Manager* walkManager = managers()->startDo(currentThread, 0, &state);
+				while (walkManager) {
+					/* Corruption on the metadata detected. We will return from this function. Clean up the managers before that. */ 
+					walkManager->cleanup(currentThread);
+					walkManager = managers()->nextDo(&state);
+				}
+			} else {
+				rc = CC_STARTUP_FAILED;
+			}
+			break;
+		} else if (1 == preqRC) {
+			PORT_ACCESS_FROM_VMC(currentThread);
+			UDATA reqBytes = SH_CompositeCacheImpl::getRequiredConstrBytesWithCommonInfo(false, true);
+			SH_CompositeCacheImpl* allocPtr = (SH_CompositeCacheImpl*)j9mem_allocate_memory(reqBytes, J9MEM_CATEGORY_CLASSES);
+			if (NULL == allocPtr) {
+				rc = CC_STARTUP_FAILED;
+				break;
+			}
+			char cacheNameBuf[USER_SPECIFIED_CACHE_NAME_MAXLEN];
+			Trc_SHR_Assert_True(idLen < sizeof(cacheUniqueID));
+			memcpy(cacheUniqueID, cacheUniqueIDPtr, idLen);
+			cacheUniqueID[idLen] = '\0';
+			SH_OSCache::getCacheNameAndLayerFromUnqiueID(vm, cacheUniqueID, idLen, cacheNameBuf, USER_SPECIFIED_CACHE_NAME_MAXLEN, &layer);
+			cacheName = cacheNameBuf;
+			SH_CompositeCacheImpl* ccNext = SH_CompositeCacheImpl::newInstance(vm, _sharedClassConfig, allocPtr, cacheName, cacheType, true, layer);
+			ccNext->setNext(NULL);
+			ccNext->setPrevious(ccToUse);
+			ccToUse->setNext(ccNext);
+			_ccTail = ccNext;
+		} else {
+			/* no prereq cache */
+			break;
+		}
+		ccToUse = ccToUse->getNext();
+		if (NULL != ccToUse) {
+			rc = ccToUse->startupNonTopLayerForStats(currentThread, ctrlDirName, cacheName, cacheType, layer, _runtimeFlags, 0);
+		}
+	} while (NULL != ccToUse && CC_STARTUP_OK == rc);
+
+	return rc;
+}
+
 
 /**
  * Shut down a CacheMap started with startupForStats().
@@ -6943,10 +7214,24 @@ SH_CacheMap::shutdownForStats(J9VMThread* currentThread)
 		walkManager = managers()->nextDo(&state);
 	}	
 
-	if (_ccHead != NULL) {
-		if (_ccHead->shutdownForStats(currentThread) != 0) {
+	SH_CompositeCacheImpl* ccToUse = _ccHead;
+	
+	while (ccToUse != NULL) {
+		if (ccToUse->shutdownForStats(currentThread) != 0) {
 			retval = -1;
 		}
+		ccToUse = ccToUse->getNext();
+	}
+	ccToUse = _ccHead;
+	while (ccToUse != NULL) {
+		SH_CompositeCacheImpl* ccNext = ccToUse->getNext();
+		if (_ccHead != ccToUse) {
+			PORT_ACCESS_FROM_VMC(currentThread);
+			/* _ccHead is alloacated together with the SH_CacheMap instance, it will be free together with the SH_CacheMap instance */
+			ccToUse->cleanup(currentThread);
+			j9mem_free_memory(ccToUse);
+		}
+		ccToUse = ccNext;
 	}
 
 	if (_refreshMutex != NULL) {
@@ -7667,6 +7952,7 @@ checkROMClassUTF8SRPs(J9ROMClass *romClass)
 		|| (UnitTest::CACHE_FULL_TEST == UnitTest::unitTest)
 		|| (UnitTest::PROTECTA_SHARED_CACHE_DATA_TEST == UnitTest::unitTest)
 		|| (UnitTest::PROTECT_NEW_ROMCLASS_DATA_TEST == UnitTest::unitTest)
+		|| (UnitTest::ATTACHED_DATA_TEST == UnitTest::unitTest)
 	) {
 		return;
 	}
@@ -7733,13 +8019,14 @@ SH_CacheMap::isAddressInReleasedMetaDataBounds(J9VMThread* currentThread, UDATA 
  *  Get the unique ID of a pre-requisite cache at a lower layer
  *
  *	@param [in] currentThread The current JVM thread
- *	@pamra [in] the cache directory
+ *	@param [in] the cache directory
  *	@param [in] ccToUse The current cache that depends on lower layer cache.
  *	@param [in] startupForStats If the cache is started up for cache statistics
- * 	@param [out] the Unique ID of a re-requiste cache.
- * 	@param [out] the length of the Unique ID string.
+ *	@param [out] the Unique ID of a pre-requisite cache.
+ *	@param [out] the length of the Unique ID string.
+ *	@param [out] true if the unique id of pre-requisite cache is found, false otherwise.
  *
- *	@return 1 This cache depends on a lower layer cache. The unique ID of the re-requisite cache is found in or stored to this cache as metadata.
+ *	@return 1 This cache depends on a lower layer cache. The unique ID of the pre-requisite cache is found in ccToUse as metadata or needs to be stored as metadata.
  *			0 This cache does not depend on a low layer cache.
  *			CM_CACHE_CORRUPT if cache is corrupted.
  *			CM_READ_CACHE_FAILED if failed to get the existing pre-requisite cache ID from metadata.
@@ -7748,7 +8035,7 @@ SH_CacheMap::isAddressInReleasedMetaDataBounds(J9VMThread* currentThread, UDATA 
  *
  */
 IDATA
-SH_CacheMap::getPrereqCache(J9VMThread* currentThread, const char* cacheDir, SH_CompositeCacheImpl* ccToUse, bool startupForStats, const char** prereqCacheID, UDATA* idLen)
+SH_CacheMap::getPrereqCache(J9VMThread* currentThread, const char* cacheDir, SH_CompositeCacheImpl* ccToUse, bool startupForStats, const char** prereqCacheID, UDATA* idLen, bool *isCacheUniqueIdStored)
 {
 	ShcItem* it = NULL;
 	IDATA result = 0;
@@ -7763,13 +8050,15 @@ SH_CacheMap::getPrereqCache(J9VMThread* currentThread, const char* cacheDir, SH_
 		return 0;
 	}
 
-	/* If there is a pre-requite cache, the re-requites cache ID the first metadate item */
+	/* If there is a pre-requisite cache, then re-requites cache ID is the first metadate item */
 	it = (ShcItem*)ccToUse->nextEntry(currentThread, NULL);
 	if (it) {
 		UDATA itemType = ITEMTYPE(it);
 		if ((itemType <= TYPE_UNINITIALIZED) || (itemType > MAX_DATA_TYPES)) {
 			CACHEMAP_TRACE1(J9SHR_VERBOSEFLAG_ENABLE_VERBOSE_DEFAULT, J9NLS_ERROR, J9NLS_SHRC_CM_READ_CORRUPT_DATA, it);
-			if (startupForStats == false && isReadOnly) {
+			if ((false == startupForStats)
+				&& (false == isReadOnly)
+			) {
 				ccToUse->setCorruptCache(currentThread, ITEM_TYPE_CORRUPT, (UDATA)it);
 			}
 			reportCorruptCache(currentThread, ccToUse);
@@ -7779,6 +8068,7 @@ SH_CacheMap::getPrereqCache(J9VMThread* currentThread, const char* cacheDir, SH_
 			const J9UTF8* scopeUTF8 = (const J9UTF8*)ITEMDATA(it);
 			*prereqCacheID = (const char*)J9UTF8_DATA(scopeUTF8);
 			*idLen = J9UTF8_LENGTH(scopeUTF8);
+			*isCacheUniqueIdStored = true;
 			Trc_SHR_CM_getPrereqCache_Found(currentThread, J9UTF8_LENGTH(scopeUTF8), J9UTF8_DATA(scopeUTF8));
 			result = 1;
 		} else {
@@ -7813,46 +8103,86 @@ SH_CacheMap::getPrereqCache(J9VMThread* currentThread, const char* cacheDir, SH_
 			ccToUse->doneReadUpdates(currentThread, 1);
 		}
 	} else if (!startupForStats) {
-		if (isReadOnly) {
-			goto done;
-		}
-
-		SH_ScopeManager* localSCM = getScopeManager(currentThread);
-		if (NULL == localSCM) {
-			Trc_SHR_CM_getPrereqCache_Failed_To_Get_Manager(currentThread);
-			result = CM_CACHE_STORE_PREREQ_ID_FAILED;
-			goto done;
-		}
-
-		const J9UTF8* tokenKey = NULL;
-		char utfKey[J9SHR_UNIQUE_CACHE_ID_BUFSIZE];
-		char key[J9SHR_UNIQUE_CACHE_ID_BUFSIZE];
-		char* utfKeyPtr = (char*)&utfKey;
-		I_8 layer = _sharedClassConfig->layer;
-		if (0 == layer) {
+		I_8 layer = _sharedClassConfig->layer;	
+		if (0 == layer || isReadOnly) {
 			result = 0;
-			goto done;
+		} else {
+			/* A new layer is created and the CacheUniqueID of pre-requisite cache is not stored */
+			result = 1;
 		}
-
-		SH_OSCache::generateCacheUniqueID(currentThread, cacheDir, _cacheName, layer - 1, getCacheTypeFromRuntimeFlags(*_runtimeFlags), key, J9SHR_UNIQUE_CACHE_ID_BUFSIZE);
-		UDATA keylen = strlen(key);
-
-		J9UTF8* utfKeyStruct = (J9UTF8*)utfKeyPtr;
-		J9UTF8_SET_LENGTH(utfKeyStruct, (U_16)keylen);
-		strncpy((char*)J9UTF8_DATA(utfKeyStruct), (char*)key, keylen);
-
-		tokenKey = addScopeToCache(currentThread, utfKeyStruct, TYPE_PREREQ_CACHE);
-		if (NULL == tokenKey) {
-			Trc_SHR_CM_getPrereqCache_Failed_To_Store_Prereq_UniqueID(currentThread, J9UTF8_LENGTH(tokenKey), (char*)J9UTF8_DATA(tokenKey));
-			result = CM_CACHE_STORE_PREREQ_ID_FAILED;
-			goto done;
-		}
-		result = 1;
-		*prereqCacheID = (const char*)J9UTF8_DATA(tokenKey);
-		*idLen = J9UTF8_LENGTH(tokenKey);
 	}
 
-done:
+	return result;
+}
+
+/**
+ *  Store the actual cache unique ID in the previous cache 
+ *
+ *	@param [in] currentThread The current JVM thread
+ *	@param [in] the cache directory
+ *	@param [in] createtime The cache create time which is stored in OSCache_header2.
+ *	@param [in] metadataBytes  The size of the metadata section of current oscache.
+ *	@param [in] classesBytes  The size of the classes section of current oscache.
+ *	@param [in] lineNumTabBytes  The size of the line number table section of current oscache.
+ *	@param [in] varTabBytes  The size of the variable table section of current oscache.
+ *	@param [out] the Unique ID of a pre-requisite cache.
+ *	@param [out] the length of the Unique ID string.
+ *
+ *	@return 1 This cache depends on a lower layer cache. The unique ID of the pre-requisite cache is found in or stored to this cache as metadata.
+ *			0 This cache does not depend on a low layer cache.
+ *			CM_CACHE_CORRUPT if cache is corrupted.
+ *			CM_READ_CACHE_FAILED if failed to get the existing pre-requisite cache ID from metadata.
+ *			CM_CACHE_STORE_PREREQ_ID_FAILED if failed to store the pre-requisite cache ID
+ *
+ *
+ */
+IDATA
+SH_CacheMap::storeCacheUniqueID(J9VMThread* currentThread, const char* cacheDir, U_64 createtime, UDATA metadataBytes, UDATA classesBytes, UDATA lineNumTabBytes, UDATA varTabBytes, const char** prereqCacheID, UDATA* idLen)
+{
+	IDATA result = 0;
+
+	if (UnitTest::CORRUPT_CACHE_TEST == UnitTest::unitTest) {
+		return 0;
+	}
+
+	SH_ScopeManager* localSCM = getScopeManager(currentThread);
+	if (NULL == localSCM) {
+		Trc_SHR_CM_storeCacheUniqueID_Failed_To_Get_Manager(currentThread);
+		result = CM_CACHE_STORE_PREREQ_ID_FAILED;
+		return result;
+	}
+
+	const J9UTF8* tokenKey = NULL;
+	char utfKey[J9SHR_UNIQUE_CACHE_ID_BUFSIZE + sizeof(J9UTF8)];
+	char key[J9SHR_UNIQUE_CACHE_ID_BUFSIZE];
+	char* utfKeyPtr = (char*)&utfKey;
+
+	I_8 layer = _sharedClassConfig->layer;
+	if (0 == layer) {
+		result = 0;
+		return result;
+	}
+
+	Trc_SHR_CM_storeCacheUniqueID_generateCacheUniqueID_before(currentThread, createtime, metadataBytes, classesBytes, lineNumTabBytes, varTabBytes);
+	SH_OSCache::generateCacheUniqueID(currentThread, cacheDir, _cacheName, layer - 1, getCacheTypeFromRuntimeFlags(*_runtimeFlags), key, sizeof(key), createtime, metadataBytes, classesBytes, lineNumTabBytes, varTabBytes);
+	UDATA keylen = strlen(key);
+	Trc_SHR_CM_storeCacheUniqueID_generateCacheUniqueID_after(currentThread, keylen, key);
+
+	J9UTF8* utfKeyStruct = (J9UTF8*)utfKeyPtr;
+	J9UTF8_SET_LENGTH(utfKeyStruct, (U_16)keylen);
+	memcpy((char*)J9UTF8_DATA(utfKeyStruct), (char*)key, keylen);
+
+	tokenKey = addScopeToCache(currentThread, utfKeyStruct, TYPE_PREREQ_CACHE);
+	if (NULL == tokenKey) {
+		Trc_SHR_CM_storeCacheUniqueID_Failed_To_Store_Prereq_UniqueID(currentThread, J9UTF8_LENGTH(tokenKey), (char*)J9UTF8_DATA(tokenKey));
+		result = CM_CACHE_STORE_PREREQ_ID_FAILED;
+		return result;
+	}
+
+	result = 1;
+	*prereqCacheID = (const char*)J9UTF8_DATA(tokenKey);
+	*idLen = J9UTF8_LENGTH(tokenKey);
+
 	return result;
 }
 

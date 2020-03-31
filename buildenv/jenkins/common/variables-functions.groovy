@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,7 +20,187 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
+/*
+ * Represents a single build spec ie. platform it
+ */
+class Buildspec {
+    private List parents;
+    private my_def;
+
+    /*
+     * Helper function to check if a variable is a map.
+     * This is needed because .isMap() is not on the default jenkins whitelist
+     */
+    private static boolean isMap(x){
+        switch(x){
+        case Map:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /*
+     * If x can be converted to integer, return the result.
+     * else return x
+     */
+    private static toKey(x){
+        def key = x
+        try{
+            key = x as int
+        } catch (def e){ }
+        return key
+    }
+
+    /* perform a repeated map lookup of a given '.' separated name in my def
+     * eg. getNestedField('foo.bar.baz') is equivilent to
+     * my_def['foo']['bar']['baz'], with the added benefit that if any lookup
+     * along the path fails, null is returned rather than throwing an exception
+     */
+    private getNestedField(String full_name){
+        def names = full_name.split("\\.")
+        def value = my_def
+        // note we don't really want to find, but we use this as a verson of .each which we can abort
+        if (names.size() == 0){
+            return null
+        }
+        names.find { element_name ->
+            if (value.containsKey(element_name)){
+                value = value[element_name]
+                return false // continue iterating the list
+            } else {
+                value = null
+                return true // abort processing
+            }
+        }
+        return value
+    }
+
+    /*
+     * look up a scalar field for the first field in this list to have a value:
+     * if <name> is a map:
+     *    - <name>.<sdk_ver>
+     *    - <name>.all
+     * else:
+     *    - <name>
+     *  - <parent>.getScalarField()
+     *  with the parents being evaluated in the the order they are listed in the yaml file
+     */
+    public getScalarField(name, sdk_ver){
+        def sdk_key = toKey(sdk_ver)
+        def field = getNestedField(name)
+        if(field == null){
+            field = parents.findResult {it.getScalarField(name, sdk_ver)}
+        }
+
+        // Does this entry specify different values for different sdk versions?
+        if (null != field && isMap(field)){
+            // If we have an sdk specific value use that
+            if (field.containsKey(sdk_key)){
+                field = field[sdk_key]
+            } else {
+                // else fall back to the "all" key
+                field = field['all']
+            }
+        }
+        return field
+    }
+
+
+    /* Get a list of values composed by concatinating the values of the
+     * following fields in order:
+     * - <parent>.getVectorField()
+     * if <name> is a map:
+     *   - <name>.all
+     *   - <name>.sdk
+     * else:
+     *   - <name>
+     * with parents being evaluated in the order they are listed in the yaml file.
+     * - Note: any list elements which are themselves list ar flattened.
+     */
+    public List getVectorField(name, sdk_ver) {
+        // Yaml will use an integer key if possible, otherwise it falls back to string
+        def sdk_key = toKey(sdk_ver)
+
+        def field_value = []
+        parents.each { parent ->
+            field_value += parent.getVectorField(name, sdk_ver);
+        }
+        def my_value = getNestedField(name)
+        if (my_value != null){
+            // Do we specify different values for different SDK versions?
+            if (isMap(my_value)){
+                // If there is an "all" definition put that first
+                if (my_value.containsKey('all')){
+                    field_value += my_value['all']
+                }
+                // If we have an SDK specific value, add that as well
+                if (my_value.containsKey(sdk_key)) {
+                    def sdk_val = my_value[sdk_key]
+                    // Special case handling for old style variables where
+                    // excluded tests are stored as a map rather than a list
+                    if(isMap(sdk_val)){
+                        field_value += sdk_val.keySet()
+                    } else {
+                        field_value += sdk_val
+                    }
+                }
+            } else {
+                field_value += my_value
+            }
+        }
+        return field_value.flatten()
+    }
+
+    /* Construct a build spec
+     * mgr - reference to the BuildspecManager used to cache Buildspecs
+     * cfg - Collection returned from yaml corresponding to this buildspec.
+     *       Typically this would be VARIABLES[<build_spec_name>]
+     */
+    public Buildspec(mgr, cfg){
+        my_def = cfg
+        parents = []
+        if(my_def.containsKey('extends')) {
+            my_def['extends'].each { parent_name ->
+                parents << mgr.getSpec(parent_name)
+            }
+        }
+    }
+}
+
+/*
+ * Used to cache a map of names -> Builspecs
+ */
+class BuildspecManager {
+
+    private buildspecs
+    private vars
+
+    /*
+     * vars_ - Collection that the buildspec info should be pulled from
+     *         Typically this would be VARIABLES.
+     */
+    public BuildspecManager(vars_){
+        vars = vars_
+        buildspecs = [:]
+    }
+
+
+    /*
+     * Get a Buildspec for a given name.
+     */
+    @NonCPS
+    public getSpec(name){
+        if(!buildspecs.containsKey(name)){
+            buildspecs[name] = new Buildspec(this, vars[name])
+        }
+        return buildspecs[name]
+    }
+}
+
 def VARIABLES
+def buildspec_manager
+pipelineFunctions = load 'buildenv/jenkins/common/pipeline-functions.groovy'
 
 /*
 * Parses the Jenkins job variables file and populates the VARIABLES collection.
@@ -45,6 +225,7 @@ def parse_variables_file(){
 
     echo "Using variables file: ${VARIABLE_FILE}"
     VARIABLES = readYaml file: "${VARIABLE_FILE}"
+    buildspec_manager = new BuildspecManager(VARIABLES)
 }
 
 /*
@@ -145,7 +326,7 @@ def set_repos_variables(BUILD_SPECS=null) {
 * Initializes OpenJDK repository URL, branch, SHA for given release and returns
 * them as a map.
 * Build parameters take precedence over custom variables (see variables file).
-* Throws an error if repository URL or branch are not provided. 
+* Throws an error if repository URL or branch are not provided.
 */
 def get_openjdk_info(SDK_VERSION, SPECS, MULTI_RELEASE) {
     // map to store git repository information by spec
@@ -164,6 +345,7 @@ def get_openjdk_info(SDK_VERSION, SPECS, MULTI_RELEASE) {
     }
 
     for (build_spec in SPECS) {
+
         // default values from variables file
         def repo = default_openjdk_info.get('default').get('repoUrl')
         def branch = default_openjdk_info.get('default').get('branch')
@@ -216,9 +398,9 @@ def get_openjdk_info(SDK_VERSION, SPECS, MULTI_RELEASE) {
 
 /*
 * Initializes the OpenJ9 and OMR repositories variables with values from
-* the variables file if they are not set as build parameters. 
+* the variables file if they are not set as build parameters.
 * If no values available in the variable file then initialize these variables
-* with default values, otherwise set them to empty strings (to avoid 
+* with default values, otherwise set them to empty strings (to avoid
 * downstream builds errors - Jenkins build parameters should not be null).
 */
 def set_extensions_variables(defaults=null) {
@@ -361,10 +543,11 @@ def set_node(job_type) {
 
     if (!NODE) {
         // fetch from variables file
-        NODE = get_value(VARIABLES."${SPEC}".node_labels."${job_type}", SDK_VERSION)
+        NODE = buildspec_manager.getSpec(SPEC).getScalarField("node_labels.${job_type}", SDK_VERSION)
         if (!NODE) {
             error("Missing ${job_type} NODE!")
         }
+
     }
 }
 
@@ -372,14 +555,14 @@ def set_node(job_type) {
 * Set the RELEASE variable with the value provided in the variables file.
 */
 def set_release() {
-    RELEASE = get_value(VARIABLES."${SPEC}".release, SDK_VERSION)
+    RELEASE = buildspec_manager.getSpec(SPEC).getScalarField("release", SDK_VERSION)
 }
 
 /*
 * Set the JDK_FOLDER variable with the value provided in the variables file.
 */
 def set_jdk_folder() {
-    JDK_FOLDER = get_value(VARIABLES.jdk_image_dir, SDK_VERSION)
+    JDK_FOLDER = buildspec_manager.getSpec('misc').getScalarField("jdk_image_dir", SDK_VERSION)
 }
 
 /*
@@ -389,10 +572,12 @@ def set_jdk_folder() {
 def set_build_variables() {
     set_repos_variables()
 
+    def buildspec = buildspec_manager.getSpec(SPEC)
+
     // fetch values per spec and Java version from the variables file
-    BOOT_JDK = get_value(VARIABLES."${SPEC}".boot_jdk, SDK_VERSION)
-    FREEMARKER = VARIABLES."${SPEC}".freemarker
-    OPENJDK_REFERENCE_REPO = VARIABLES."${SPEC}".openjdk_reference_repo
+    BOOT_JDK = buildspec.getScalarField("boot_jdk", SDK_VERSION)
+    FREEMARKER = buildspec.getScalarField("freemarker", SDK_VERSION)
+    OPENJDK_REFERENCE_REPO = buildspec.getScalarField("openjdk_reference_repo", SDK_VERSION)
     set_release()
     set_jdk_folder()
     set_build_extra_options()
@@ -400,8 +585,8 @@ def set_build_variables() {
     // set variables for the build environment configuration
     // check job parameters, if not provided default to variables file
     BUILD_ENV_VARS = params.BUILD_ENV_VARS
-    if (!BUILD_ENV_VARS && VARIABLES."${SPEC}".build_env) {
-        BUILD_ENV_VARS = get_value(VARIABLES."${SPEC}".build_env.vars, SDK_VERSION)
+    if (!BUILD_ENV_VARS) {
+        BUILD_ENV_VARS = buildspec.getVectorField("build_env.vars", SDK_VERSION).join(" ")
     }
 
     BUILD_ENV_VARS_LIST = []
@@ -418,8 +603,8 @@ def set_build_variables() {
     }
 
     BUILD_ENV_CMD = params.BUILD_ENV_CMD
-    if (!BUILD_ENV_CMD && VARIABLES."${SPEC}".build_env) {
-        BUILD_ENV_CMD = get_value(VARIABLES."${SPEC}".build_env.cmd, SDK_VERSION)
+    if (!BUILD_ENV_CMD) {
+        BUILD_ENV_CMD = buildspec.getScalarField("build_env.cmd", SDK_VERSION)
     }
 
     if (BUILD_ENV_CMD) {
@@ -435,9 +620,13 @@ def set_build_variables() {
 def set_sdk_variables() {
     DATESTAMP = get_date()
     SDK_FILENAME = "OpenJ9-JDK${SDK_VERSION}-${SPEC}-${DATESTAMP}.tar.gz"
-    TEST_FILENAME = "native-test-libs.tar.gz"
+    TEST_FILENAME = "test-images.tar.gz"
+    JAVADOC_FILENAME = "OpenJ9-JDK${SDK_VERSION}-Javadoc-${SPEC}-${DATESTAMP}.tar.gz"
+    DEBUG_IMAGE_FILENAME = "debug-image.tar.gz"
     echo "Using SDK_FILENAME = ${SDK_FILENAME}"
     echo "Using TEST_FILENAME = ${TEST_FILENAME}"
+    echo "Using JAVADOC_FILENAME = ${JAVADOC_FILENAME}"
+    echo "Using DEBUG_IMAGE_FILENAME = ${DEBUG_IMAGE_FILENAME}"
     DIAGNOSTICS_FILENAME = "${JOB_NAME}-${BUILD_NUMBER}-${DATESTAMP}-diagnostics.tar.gz"
 }
 
@@ -453,32 +642,63 @@ def get_date() {
 * Set TESTS_TARGETS, indicating the level of testing.
 */
 def set_test_targets() {
-    TESTS_TARGETS = params.TESTS_TARGETS
-    if (!TESTS_TARGETS) {
-        // set default TESTS_TARGETS for pipeline job (fetch from variables file)
-        TESTS_TARGETS = get_default_test_targets()
-    }
+    TARGET_NAMES = []
 
-    EXCLUDED_TESTS = []
-    if (VARIABLES."${SPEC}".excluded_tests) {
-        def excludedTests = get_value(VARIABLES."${SPEC}".excluded_tests, SDK_VERSION)
-        if (excludedTests) {
-            EXCLUDED_TESTS.addAll(excludedTests.keySet())
+    if (TESTS_TARGETS != 'none') {
+        for (target in TESTS_TARGETS.replaceAll("\\s","").toLowerCase().tokenize(',')) {
+            switch (target) {
+                case ["sanity", "extended"]:
+                    TARGET_NAMES.add("${target}.functional")
+                    break
+                default:
+                    TARGET_NAMES.add(target)
+            }
+        }
+    }
+    echo "TARGET_NAMES:'${TARGET_NAMES}'"
+}
+
+/*
+* Set TEST_FLAG for all targets if defined in variable file.
+* Set EXCLUDED_TESTS if defined in variable file.
+* Set EXTRA_TEST_LABELS map if defined in variable file.
+*/
+def set_test_misc() {
+    EXTRA_TEST_LABELS = [:]
+    if (!params.TEST_NODE) {
+        // Only add extra test labels if the user has not specified a specific TEST_NODE
+        TARGET_NAMES.each { target ->
+            EXTRA_TEST_LABELS[target] = buildspec.getVectorField("extra_test_labels", target).join('&&') ?: ''
         }
     }
 
-    echo "TESTS_TARGETS: ${TESTS_TARGETS}"
-    echo "EXCLUDED_TESTS: ${EXCLUDED_TESTS}"
-}
-
-def get_default_test_targets() {
-    if (VARIABLES.tests_targets && VARIABLES.tests_targets.default) {
-        // VARIABLES.tests_targets.default is a map where all values are null
-        return VARIABLES.tests_targets.default.keySet().join(',')
+    EXCLUDED_TESTS = []
+    def buildspec = buildspec_manager.getSpec(SPEC)
+    def excludedTests = buildspec.getVectorField("excluded_tests", SDK_VERSION)
+    if (excludedTests) {
+        EXCLUDED_TESTS.addAll(excludedTests)
     }
 
-    return ''
+    TEST_FLAG = buildspec.getScalarField("test_flags", SDK_VERSION) ?: ''
+
+    // Set test param KEEP_REPORTDIR to false unless set true in variable file.
+    TEST_KEEP_REPORTDIR = [:]
+    TARGET_NAMES.each { target ->
+        TEST_KEEP_REPORTDIR[target] = buildspec_manager.getSpec('misc').getScalarField("test_keep_reportdir", target) ?: 'false'
+    }
+
+    TEST_BUILD_LIST = [:]
+    TARGET_NAMES.each { target ->
+        TEST_BUILD_LIST[target] = buildspec.getScalarField("test_build_list", target) ?: ''
+    }
+
+    echo "EXCLUDED_TESTS:'${EXCLUDED_TESTS}'"
+    echo "TEST_FLAG:'${TEST_FLAG}'"
+    echo "EXTRA_TEST_LABELS:'${EXTRA_TEST_LABELS}'"
+    echo "TEST_KEEP_REPORTDIR:'${TEST_KEEP_REPORTDIR}'"
+    echo "TEST_BUILD_LIST:'${TEST_BUILD_LIST}'"
 }
+
 
 def set_slack_channel() {
     SLACK_CHANNEL = params.SLACK_CHANNEL
@@ -488,18 +708,133 @@ def set_slack_channel() {
 }
 
 def set_artifactory_config() {
-    ARTIFACTORY_SERVER = VARIABLES.artifactory_server
-    if (ARTIFACTORY_SERVER) {
-        env.ARTIFACTORY_SERVER = ARTIFACTORY_SERVER
-        env.ARTIFACTORY_REPO = VARIABLES.artifactory_repo
-        env.ARTIFACTORY_NUM_ARTIFACTS = VARIABLES.artifactory_num_artifacts
-        env.ARTIFACTORY_DAYS_TO_KEEP_ARTIFACTS = VARIABLES.artifactory_days_to_keep_artifacts // This is being used by the cleanup script
-        env.ARTIFACTORY_MANUAL_CLEANUP = VARIABLES.artifactory_manual_cleanup // This is being used by the cleanup script
-        env.ARTIFACTORY_UPLOAD_DIR = "${ARTIFACTORY_REPO}/${JOB_NAME}/${BUILD_ID}/"
-        echo "Using artifactory server/repo: ${ARTIFACTORY_SERVER} / ${ARTIFACTORY_REPO}"
-        echo "Keeping '${ARTIFACTORY_NUM_ARTIFACTS}' artifacts"
-        echo "Artifactory Manual Cleanup: ${env.ARTIFACTORY_MANUAL_CLEANUP}"
+    ARTIFACTORY_CONFIG = [:]
+    echo "Configure Artifactory..."
+
+    if (VARIABLES.artifactory.defaultGeo) {
+        // Allow default geo to be overridden with a param. Used by the Clenaup script to target a specific server.
+        ARTIFACTORY_CONFIG['defaultGeo'] = (params.ARTIFACTORY_GEO) ? params.ARTIFACTORY_GEO : VARIABLES.artifactory.defaultGeo
+        ARTIFACTORY_CONFIG['geos'] = VARIABLES.artifactory.server.keySet()
+        ARTIFACTORY_CONFIG['repo'] = VARIABLES.artifactory.repo
+        ARTIFACTORY_CONFIG['uploadDir'] = "${ARTIFACTORY_CONFIG['repo']}/${JOB_NAME}/${BUILD_ID}/"
+
+        for (geo in ARTIFACTORY_CONFIG['geos']) {
+            ARTIFACTORY_CONFIG[geo] = [:]
+            ARTIFACTORY_CONFIG[geo]['server'] = get_value(VARIABLES.artifactory.server, geo)
+            ARTIFACTORY_CONFIG[geo]['numArtifacts'] = get_value(VARIABLES.artifactory.numArtifacts, geo).toInteger()
+            ARTIFACTORY_CONFIG[geo]['daysToKeepArtifacts'] = get_value(VARIABLES.artifactory.daysToKeepArtifacts, geo).toInteger()
+            ARTIFACTORY_CONFIG[geo]['manualCleanup'] = get_value(VARIABLES.artifactory.manualCleanup, geo)
+            ARTIFACTORY_CONFIG[geo]['vpn'] = get_value(VARIABLES.artifactory.vpn, geo)
+        }
+        ARTIFACTORY_CONFIG[VARIABLES.artifactory.defaultGeo]['uploadBool'] = true
+
+        // Determine if we need to upload more than the default server
+        if (ARTIFACTORY_CONFIG['geos'].size() > 1) {
+            // What platform did we build on
+            compilePlatform = get_node_platform(NODE_LABELS)
+
+            // See if there are servers with colocated nodes of matching platform
+            def testNodes = jenkins.model.Jenkins.instance.getLabel('ci.role.test').getNodes()
+            for (node in testNodes) {
+                def nodeGeo = get_node_geo(node.getLabelString())
+                // If we haven't determined yet if we will need to upload to 'nodeGeo'...
+                if (ARTIFACTORY_CONFIG[nodeGeo] && !ARTIFACTORY_CONFIG[nodeGeo]['uploadBool']) {
+                    def nodePlatform = get_node_platform(node.getLabelString())
+                    // Upload if there is a server at geo where there are machines matching our platform.
+                    if (nodePlatform == compilePlatform && ARTIFACTORY_CONFIG['geos'].contains(nodeGeo)) {
+                        ARTIFACTORY_CONFIG[nodeGeo]['uploadBool'] = true
+                    }
+                }
+            }
+        }
+
+        echo "ARTIFACTORY_CONFIG:'${ARTIFACTORY_CONFIG}'"
+        /*
+        * Write out default server values to string variables.
+        * The upstream job calls job.getBuildVariables() which only returns strings.
+        * Rather than parsing out the ARTIFACTORY_CONFIG map that is stored as a string,
+        * we'll write out the values to env here as strings to save work later.
+        */
+        env.ARTIFACTORY_SERVER = ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['server']
+        env.ARTIFACTORY_REPO = ARTIFACTORY_CONFIG['repo']
+        env.ARTIFACTORY_NUM_ARTIFACTS = ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['numArtifacts']
+        env.ARTIFACTORY_DAYS_TO_KEEP_ARTIFACTS = ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['daysToKeepArtifacts']
+        env.ARTIFACTORY_MANUAL_CLEANUP = ARTIFACTORY_CONFIG[ARTIFACTORY_CONFIG['defaultGeo']]['manualCleanup']
     }
+}
+
+def get_node_geo(nodeLabels) {
+    if (nodeLabels.contains('ci.geo.')) {
+        labelArray = nodeLabels.tokenize()
+        for (label in labelArray) {
+            if (label ==~ /ci\.geo\..*/) {
+                return label.substring(7)
+            }
+        }
+    }
+    return ''
+}
+
+def get_node_platform(nodeLabels) {
+    /*
+    * xlinux -> arch=x86 && baseOS=linux
+    * plinux -> arch=ppc64le && baseOS=linux
+    * zlinux -> arch=s390x && baseOS=linux
+    * aix -> baseOS=aix
+    * windows -> baseOS=windows
+    * osx -> baseOS=osx
+    * zos -> baseOS=zos
+    * aarch64 -> arch=aarch64
+    */
+    def arch = ''
+    def baseOS = ''
+    if (nodeLabels.contains('hw.arch.') && nodeLabels.contains('sw.os.')) {
+        labelArray = nodeLabels.tokenize()
+        for (label in labelArray) {
+            switch(label) {
+                case ~/hw\.arch\.[a-z0-9]+/:
+                    arch = label.substring(8)
+                    //println arch
+                    break
+                case ~/sw\.os\.[a-z]+/:
+                    baseOS = label.substring(6)
+                    //println baseOS
+                    break
+            }
+        }
+    }
+    if (!arch || !baseOS) {
+        echo "WARNING: Unable to determine node arch/os:'${nodeLabels}'"
+        return ''
+    }
+    switch(baseOS) {
+        case ['aix', 'windows', 'osx', 'zos']:
+            return baseOS
+            break
+        case ['linux', 'ubuntu', 'rhel', 'cent', 'sles'] :
+            switch(arch) {
+                case 'x86':
+                    return 'xlinux'
+                    break
+                case 'ppc64le':
+                    return 'plinux'
+                    break
+                case 'ppc64':
+                    return 'plinuxBE'
+                case 's390x':
+                    return 'zlinux'
+                    break
+                case ['aarch64', 'aarch32']:
+                    return 'alinux'
+                    break
+                default:
+                    echo "WARNING: Unknown OS:'${baseOS}' for arch:'${arch}'"
+            }
+            break
+        default:
+            echo "WARNING: Unknown baseOS:'${baseOS}'"
+    }
+    return ''
 }
 
 def set_restart_timeout() {
@@ -558,6 +893,29 @@ def add_pr_to_description() {
     }
 }
 
+def setup() {
+    set_job_variables(params.JOB_TYPE)
+
+    switch (params.JOB_TYPE) {
+        case "pipeline":
+            // pipelineFunctions already loads pipeline-functions, so in this case let's just dup the variable buildFile
+            // TODO revisit all the loads and try to optimize.
+            buildFile = pipelineFunctions
+            SHAS = buildFile.get_shas(OPENJDK_REPO, OPENJDK_BRANCH, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, VENDOR_TEST_REPOS_MAP, VENDOR_TEST_BRANCHES_MAP, VENDOR_TEST_SHAS_MAP)
+            BUILD_NAME = buildFile.get_build_job_name(SPEC, SDK_VERSION, BUILD_IDENTIFIER)
+            // Stash DSL file so we can quickly load it on master
+            if (params.AUTOMATIC_GENERATION != 'false'){
+                stash includes: 'buildenv/jenkins/jobs/pipelines/Pipeline_Template.groovy', name: 'DSL'
+            }
+            break
+        case "build":
+            buildFile = load 'buildenv/jenkins/common/build.groovy'
+            break
+        default:
+            error("Unknown Jenkins job type:'${params.JOB_TYPE}'")
+    }
+}
+
 /*
 * Initializes all of the required variables for a Jenkins job by given job type.
 */
@@ -582,6 +940,10 @@ def set_job_variables(job_type) {
     // Add custom description
     set_custom_description()
 
+    // Set ARCHIVE_JAVADOC flag
+    ARCHIVE_JAVADOC = (params.ARCHIVE_JAVADOC) ? params.ARCHIVE_JAVADOC : false
+    echo "Using ARCHIVE_JAVADOC = ${ARCHIVE_JAVADOC}"
+
     switch (job_type) {
         case "build":
             // set the node the Jenkins build would run on
@@ -589,28 +951,28 @@ def set_job_variables(job_type) {
             // set variables for a build job
             set_build_variables()
             set_sdk_variables()
-            set_artifactory_config()
             add_pr_to_description()
             break
         case "pipeline":
+            currentBuild.description = "<a href=\"${RUN_DISPLAY_URL}\">Blue Ocean</a>"
             // set variables for a pipeline job
             set_repos_variables()
             set_adoptopenjdk_tests_repository()
             set_vendor_variables()
             set_build_extra_options()
             set_test_targets()
+            set_test_misc()
             set_slack_channel()
             set_restart_timeout()
             add_pr_to_description()
-            set_misc_variables()
             break
         case "wrapper":
             //set variable for pipeline all/personal
             set_repos_variables(BUILD_SPECS)
             set_build_extra_options(BUILD_SPECS)
             set_adoptopenjdk_tests_repository(get_build_releases(BUILD_SPECS))
+            set_test_targets()
             set_restart_timeout()
-            set_misc_variables()
             break
         default:
             error("Unknown Jenkins job type:'${job_type}'")
@@ -870,20 +1232,21 @@ def get_specs(SUPPORTED_SPECS) {
 */
 def set_build_extra_options(build_specs=null) {
     if (!build_specs) {
+        buildspec = buildspec_manager.getSpec(SPEC)
         // single release
         EXTRA_GETSOURCE_OPTIONS = params.EXTRA_GETSOURCE_OPTIONS
         if (!EXTRA_GETSOURCE_OPTIONS) {
-            EXTRA_GETSOURCE_OPTIONS = get_value(VARIABLES."${SPEC}".extra_getsource_options, SDK_VERSION)
+            EXTRA_GETSOURCE_OPTIONS = buildspec.getVectorField("extra_getsource_options", SDK_VERSION).join(" ")
         }
 
         EXTRA_CONFIGURE_OPTIONS = params.EXTRA_CONFIGURE_OPTIONS
         if (!EXTRA_CONFIGURE_OPTIONS) {
-            EXTRA_CONFIGURE_OPTIONS = get_value(VARIABLES."${SPEC}".extra_configure_options, SDK_VERSION)
+            EXTRA_CONFIGURE_OPTIONS = buildspec.getVectorField("extra_configure_options", SDK_VERSION).join(" ")
         }
 
         EXTRA_MAKE_OPTIONS = params.EXTRA_MAKE_OPTIONS
         if (!EXTRA_MAKE_OPTIONS) {
-            EXTRA_MAKE_OPTIONS = get_value(VARIABLES."${SPEC}".extra_make_options, SDK_VERSION)
+            EXTRA_MAKE_OPTIONS = buildspec.getVectorField("extra_make_options", SDK_VERSION).join(" ")
         }
 
         OPENJDK_CLONE_DIR = params.OPENJDK_CLONE_DIR
@@ -907,13 +1270,14 @@ def set_build_extra_options(build_specs=null) {
             build_specs.each { spec, releases ->
                 if (releases.contains(release)) {
                     ['EXTRA_GETSOURCE_OPTIONS', 'EXTRA_CONFIGURE_OPTIONS', 'EXTRA_MAKE_OPTIONS'].each { it ->
+                        buildspec = buildspec_manager.getSpec(spec)
                         // look up extra options by release and spec/platform provided as build parameters:
                         // e.g. EXTRA_GETSOURCE_OPTIONS_JDK<release>_<spec>
                         //      EXTRA_CONFIGURE_OPTIONS_JDK<release>_<spec>
                         //      EXTRA_MAKE_OPTIONS_JDK<release>_<spec>
                         def extraOptions = params."${it}_JDK${release}_${spec}"
-                        if (!extraOptions && VARIABLES."${spec}") {
-                            extraOptions = get_value(VARIABLES."${spec}"."${it.toLowerCase()}", release)
+                        if (!extraOptions && buildspec) {
+                            extraOptions = buildspec.getVectorField("${it.toLowerCase()}", release).join(" ")
                         }
 
                         if (extraOptions) {
@@ -1042,14 +1406,13 @@ def create_job(JOB_NAME, SDK_VERSION, SPEC, downstreamJobType, id){
     params.put('VENDOR_CREDENTIALS_ID_DEFAULT', VENDOR_CREDENTIALS_ID_DEFAULT)
     params.put('jobType', downstreamJobType)
     params.put('DISCARDER_NUM_BUILDS', DISCARDER_NUM_BUILDS)
+    params.put('SCM_REPO', SCM_REPO)
+    params.put('SCM_BRANCH', SCM_BRANCH)
 
     def templatePath = 'buildenv/jenkins/jobs/pipelines/Pipeline_Template.groovy'
-
-    create = jobDsl targets: templatePath, ignoreExisting: false, additionalParameters: params
-}
-
-def set_misc_variables() {
-    GHPRB_REPO_OPENJ9 = VARIABLES.ghprbGhRepository_openj9
+    pipelineFunctions.retry_and_delay({
+        jobDsl targets: templatePath, ignoreExisting: false, additionalParameters: params},
+        3, 120)
 }
 
 return this

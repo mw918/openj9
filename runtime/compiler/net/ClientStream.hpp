@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,17 +23,14 @@
 #ifndef CLIENT_STREAM_H
 #define CLIENT_STREAM_H
 
-#include <google/protobuf/io/zero_copy_stream_impl.h>
 #include "compile/CompilationTypes.hpp"
 #include "ilgen/J9IlGeneratorMethodDetails.hpp"
-#include "net/ProtobufTypeConvert.hpp"
+#include "net/RawTypeConvert.hpp"
 #include "net/CommunicationStream.hpp"
 
-#if defined(JITSERVER_ENABLE_SSL)
 #include <openssl/ssl.h>
 class SSLOutputStream;
 class SSLInputStream;
-#endif
 
 namespace JITServer
 {
@@ -90,13 +87,13 @@ public:
       {
       if (getVersionCheckStatus() == NOT_DONE)
          {
-         _cMsg.set_version(getJITServerVersion());
+         _cMsg.setFullVersion(getJITServerVersion(), CONFIGURATION_FLAGS);
          write(MessageType::compilationRequest, args...);
-         _cMsg.clear_version();
+         _cMsg.clearFullVersion();
          }
       else // getVersionCheckStatus() == PASSED
          {
-         _cMsg.clear_version(); // the compatibility check is done. We clear the version to save message size.
+         _cMsg.clearFullVersion(); // the compatibility check is done. We clear the version to save message size.
          write(MessageType::compilationRequest, args...);
          }
       }
@@ -110,10 +107,10 @@ public:
    template <typename ...T>
    void write(MessageType type, T... args)
       {
-      _cMsg.set_type(type);
-      setArgs<T...>(_cMsg.mutable_data(), args...);
+      _cMsg.setType(type);
+      setArgsRaw<T...>(_cMsg, args...);
 
-      writeBlocking(_cMsg);
+      writeMessage(_cMsg);
       }
 
    /**
@@ -125,7 +122,7 @@ public:
    */
    MessageType read()
       {
-      readBlocking(_sMsg);
+      readMessage(_sMsg);
       return _sMsg.type();
       }
 
@@ -135,7 +132,7 @@ public:
    template <typename ...T>
    std::tuple<T...> getRecvData()
       {
-      return getArgs<T...>(_sMsg.mutable_data());
+      return getArgsRaw<T...>(_sMsg);
       }
 
    /**
@@ -148,12 +145,14 @@ public:
    template <typename ...T>
    void writeError(MessageType type, T... args)
       {
-      _cMsg.set_type(type);
+      _cMsg.setType(type);
       if (type == MessageType::compilationInterrupted || type == MessageType::connectionTerminate)
-         _cMsg.mutable_data()->clear_data();
+         {
+         // _cMsg.clear();
+         }
       else
-         setArgs<T...>(_cMsg.mutable_data(), args...);
-      writeBlocking(_cMsg);
+         setArgsRaw<T...>(_cMsg, args...);
+      writeMessage(_cMsg);
       }
 
    VersionCheckStatus getVersionCheckStatus()
@@ -214,9 +213,7 @@ private:
    static const uint64_t RETRY_COMPATIBILITY_INTERVAL_MS; // (ms) When we should perform again a version compatibilty check
    static const int INCOMPATIBILITY_COUNT_LIMIT;
 
-#if defined(JITSERVER_ENABLE_SSL)
    static SSL_CTX *_sslCtx;
-#endif
    };
 
 }

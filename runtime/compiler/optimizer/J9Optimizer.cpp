@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -38,7 +38,7 @@
 #include "control/Options_inlines.hpp"
 #include "control/Recompilation.hpp"
 #include "control/RecompilationInfo.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
 #include "optimizer/AllocationSinking.hpp"
 #include "optimizer/IdiomRecognition.hpp"
 #include "optimizer/Inliner.hpp"
@@ -84,10 +84,10 @@ static const OptimizationStrategy J9EarlyGlobalOpts[] =
    {
    { OMR::stringBuilderTransformer             },
    { OMR::stringPeepholes                      }, // need stringpeepholes to catch bigdecimal patterns
-   { OMR::methodHandleInvokeInliningGroup,  OMR::IfMethodHandleInvokes },
    { OMR::inlining                             },
+   { OMR::methodHandleInvokeInliningGroup,  OMR::IfEnabled },
    { OMR::staticFinalFieldFolding,             },
-   { OMR::osrGuardInsertion,                OMR::IfVoluntaryOSR       },
+   { OMR::osrGuardInsertion,                OMR::MustBeDone       },
    { OMR::osrExceptionEdgeRemoval                       }, // most inlining is done by now
    { OMR::jProfilingBlock                      },
    { OMR::stringBuilderTransformer             },
@@ -301,10 +301,10 @@ static const OptimizationStrategy warmStrategyOpts[] =
    { OMR::coldBlockOutlining                                                    },
    { OMR::stringBuilderTransformer                                              },
    { OMR::stringPeepholes                                                       }, // need stringpeepholes to catch bigdecimal patterns
-   { OMR::methodHandleInvokeInliningGroup,                OMR::IfMethodHandleInvokes },
    { OMR::inlining                                                              },
+   { OMR::methodHandleInvokeInliningGroup,                       OMR::IfEnabled },
    { OMR::staticFinalFieldFolding,                                              },
-   { OMR::osrGuardInsertion,                         OMR::IfVoluntaryOSR       },
+   { OMR::osrGuardInsertion,                         OMR::MustBeDone       },
    { OMR::osrExceptionEdgeRemoval                       }, // most inlining is done by now
    { OMR::jProfilingBlock                                                       },
    { OMR::virtualGuardTailSplitter                                              }, // merge virtual guards
@@ -385,7 +385,7 @@ static const OptimizationStrategy reducedWarmStrategyOpts[] =
    {
    { OMR::inlining                                                              },
    { OMR::staticFinalFieldFolding,                                              },
-   { OMR::osrGuardInsertion,                         OMR::IfVoluntaryOSR       },
+   { OMR::osrGuardInsertion,                         OMR::MustBeDone       },
    { OMR::osrExceptionEdgeRemoval                                               }, // most inlining is done by now
    { OMR::jProfilingBlock                                                       },
    { OMR::dataAccessAccelerator                                                 }, // immediate does unconditional dataAccessAccelerator after inlining
@@ -645,10 +645,10 @@ static const OptimizationStrategy cheapWarmStrategyOpts[] =
    { OMR::coldBlockOutlining                                                    },
    { OMR::stringBuilderTransformer                                              },
    { OMR::stringPeepholes                                                       }, // need stringpeepholes to catch bigdecimal patterns
-   { OMR::methodHandleInvokeInliningGroup,           OMR::IfMethodHandleInvokes      },
    { OMR::inlining                                                              },
+   { OMR::methodHandleInvokeInliningGroup,           OMR::IfEnabled             },
    { OMR::staticFinalFieldFolding,                                              },
-   { OMR::osrGuardInsertion,                         OMR::IfVoluntaryOSR       },
+   { OMR::osrGuardInsertion,                         OMR::MustBeDone        },
    { OMR::osrExceptionEdgeRemoval                                               }, // most inlining is done by now
    { OMR::jProfilingBlock                                                       },
    { OMR::virtualGuardTailSplitter                                              }, // merge virtual guards

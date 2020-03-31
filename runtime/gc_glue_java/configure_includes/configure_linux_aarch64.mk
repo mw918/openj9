@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2019, 2019 IBM Corp. and others
+# Copyright (c) 2019, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -39,9 +39,10 @@ CONFIGURE_ARGS += \
 
 ifneq (,$(findstring _cmprssptrs,$(SPEC)))
 	CONFIGURE_ARGS += \
-		--enable-OMR_GC_COMPRESSED_POINTERS \
-		--enable-OMR_INTERP_COMPRESSED_OBJECT_HEADER \
-		--enable-OMR_INTERP_SMALL_MONITOR_SLOT
+		OMR_GC_POINTER_MODE=compressed
+else
+	CONFIGURE_ARGS += \
+		OMR_GC_POINTER_MODE=full
 endif
 
 ifneq (,$(findstring _cross,$(SPEC)))
@@ -62,11 +63,15 @@ ifneq (,$(findstring _cross,$(SPEC)))
 	ifeq (default,$(origin AR))
 		AR = $(OPENJ9_CC_PREFIX)-ar
 	endif
+	OBJCOPY = $(OPENJ9_CC_PREFIX)-objcopy
+else
+	OBJCOPY ?= objcopy
 endif
 
 CONFIGURE_ARGS += 'AS=$(AS)'
 CONFIGURE_ARGS += 'CC=$(CC)'
 CONFIGURE_ARGS += 'CXX=$(CXX)'
+CONFIGURE_ARGS += 'OBJCOPY=$(OBJCOPY)'
 
 CONFIGURE_ARGS += libprefix=lib exeext= solibext=.so arlibext=.a objext=.o
 
@@ -89,5 +94,4 @@ CONFIGURE_ARGS += 'OMR_BUILD_TOOLCHAIN=gcc'
 endif
 
 CONFIGURE_ARGS+= 'GLOBAL_CFLAGS=-fstack-protector'
-CONFIGURE_ARGS+= 'GLOBAL_CPPFLAGS=-fstack-protector'
 CONFIGURE_ARGS+= 'GLOBAL_CXXFLAGS=-fstack-protector'

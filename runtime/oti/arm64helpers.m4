@@ -20,16 +20,13 @@ dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exc
 
 include(jilvalues.m4)
 
-define({CINTERP_STACK_SIZE},{J9CONST(J9TR_cframe_sizeof,$1,$2)})
+J9CONST({CINTERP_STACK_SIZE},J9TR_cframe_sizeof)
 ifelse(eval(CINTERP_STACK_SIZE % 16),0,,{ERROR stack size CINTERP_STACK_SIZE is not 16-aligned})
 
 define({ALen},{8})
 
 define({J9VMTHREAD},{x19})
 define({J9SP},{x20})
-define({J9PC},{x21})
-define({J9LITERALS},{x22})
-define({J9A0},{x23})
 
 define({FUNC_LABEL},{$1})
 
@@ -166,6 +163,7 @@ define({RESTORE_ALL_REGS},{
 })
 
 define({SAVE_PRESERVED_REGS},{
+	str x18,JIT_GPR_SAVE_SLOT(18)
 	str x21,JIT_GPR_SAVE_SLOT(21)
 	stp x22,x23,JIT_GPR_SAVE_SLOT(22)
 	stp x24,x25,JIT_GPR_SAVE_SLOT(24)
@@ -174,6 +172,7 @@ define({SAVE_PRESERVED_REGS},{
 })
 
 define({RESTORE_PRESERVED_REGS},{
+	ldr x18,JIT_GPR_SAVE_SLOT(18)
 	ldr x21,JIT_GPR_SAVE_SLOT(21)
 	ldp x22,x23,JIT_GPR_SAVE_SLOT(22)
 	ldp x24,x25,JIT_GPR_SAVE_SLOT(24)

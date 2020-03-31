@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -34,6 +34,7 @@
 #include "infra/Assert.hpp"
 #include "p/codegen/CallSnippet.hpp"
 #include "runtime/CodeCacheManager.hpp"
+#include "runtime/Runtime.hpp"
 
 uint8_t *TR::PPCDepImmSymInstruction::generateBinaryEncoding()
    {
@@ -41,7 +42,7 @@ uint8_t *TR::PPCDepImmSymInstruction::generateBinaryEncoding()
    TR::Compilation *comp = cg()->comp();
    uint8_t *instructionStart = cg()->getBinaryBufferCursor();
    uint8_t *cursor = getOpCode().copyBinaryToBuffer(instructionStart);
-   intptrj_t imm = getAddrImmediate();
+   intptr_t imm = getAddrImmediate();
 
    if (getOpCodeValue() == TR::InstOpCode::bl || getOpCodeValue() == TR::InstOpCode::b)
       {
@@ -49,6 +50,7 @@ uint8_t *TR::PPCDepImmSymInstruction::generateBinaryEncoding()
       TR::ResolvedMethodSymbol *sym = getSymbolReference()->getSymbol()->getResolvedMethodSymbol();
       TR_ResolvedMethod *resolvedMethod = sym == NULL ? NULL : sym->getResolvedMethod();
       TR::LabelSymbol *label = getSymbolReference()->getSymbol()->getLabelSymbol();
+      bool callToSelf = resolvedMethod != NULL && resolvedMethod->isSameMethod(comp->getCurrentMethod()) && !comp->isDLT();
 
       if (cg()->hasCodeCacheSwitched())
          {
@@ -90,7 +92,7 @@ uint8_t *TR::PPCDepImmSymInstruction::generateBinaryEncoding()
             }
          }
 
-      if (resolvedMethod != NULL && resolvedMethod->isSameMethod(comp->getCurrentMethod()) && !comp->isDLT())
+      if (callToSelf)
          {
          uint8_t *jitTojitStart = cg()->getCodeStart();
          jitTojitStart += ((*(int32_t *)(jitTojitStart - 4)) >> 16) & 0x0000ffff;
@@ -103,13 +105,13 @@ uint8_t *TR::PPCDepImmSymInstruction::generateBinaryEncoding()
          }
       else
          {
-         if (TR::Compiler->target.cpu.isTargetWithinIFormBranchRange(imm, (intptrj_t)cursor))
+         if (cg()->comp()->target().cpu.isTargetWithinIFormBranchRange(imm, (intptr_t)cursor))
             {
-            *(int32_t *)cursor |= (imm - (intptrj_t)cursor) & 0x03fffffc;
+            *(int32_t *)cursor |= (imm - (intptr_t)cursor) & 0x03fffffc;
             }
          else
             {
-            intptrj_t targetAddress;
+            intptr_t targetAddress;
             if (refNum < TR_PPCnumRuntimeHelpers)
                {
                targetAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(refNum, (void *)cursor);
@@ -119,31 +121,46 @@ uint8_t *TR::PPCDepImmSymInstruction::generateBinaryEncoding()
                {
                TR_ASSERT(cg()->hasCodeCacheSwitched(), "Expecting per-codecache helper to be unreachable only when codecache was switched");
                TR_CCPreLoadedCode helper = (TR_CCPreLoadedCode)(refNum - cg()->symRefTab()->getNonhelperIndex(TR::SymbolReferenceTable::firstPerCodeCacheHelperSymbol));
-               _addrImmediate = (uintptrj_t)fej9->getCCPreLoadedCodeAddress(cg()->getCodeCache(), helper, cg());
-               targetAddress = (intptrj_t)_addrImmediate;
+               _addrImmediate = (uintptr_t)fej9->getCCPreLoadedCodeAddress(cg()->getCodeCache(), helper, cg());
+               targetAddress = (intptr_t)_addrImmediate;
                }
             else
                {
                // Must use the trampoline as the target and not the label
                //
-               targetAddress = (intptrj_t)fej9->methodTrampolineLookup(comp, getSymbolReference(), (void *)cursor);
+               targetAddress = (intptr_t)fej9->methodTrampolineLookup(comp, getSymbolReference(), (void *)cursor);
                }
 
-            TR_ASSERT_FATAL(TR::Compiler->target.cpu.isTargetWithinIFormBranchRange(targetAddress, (intptrj_t)cursor),
+            TR_ASSERT_FATAL(cg()->comp()->target().cpu.isTargetWithinIFormBranchRange(targetAddress, (intptr_t)cursor),
                             "Call target address is out of range");
-            *(int32_t *)cursor |= (targetAddress - (intptrj_t)cursor) & 0x03fffffc;
+            *(int32_t *)cursor |= (targetAddress - (intptr_t)cursor) & 0x03fffffc;
             }
          }
 
-      if (cg()->comp()->compileRelocatableCode() && label == NULL)
+      if ((cg()->comp()->compileRelocatableCode() 
+          #ifdef J9VM_OPT_JITSERVER 
+             || cg()->comp()->isOutOfProcessCompilation()
+          #endif
+          ) &&
+          label == NULL && 
+          !callToSelf)
          {
-         cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor,(uint8_t *)getSymbolReference(),TR_HelperAddress, cg()),
-                                __FILE__, __LINE__, getNode());
+         bool callIsJ2ITransition = runtimeHelperValue(TR_j2iTransition) == getSymbolReference()->getMethodAddress();
+         if (sym && !sym->isHelper() && resolvedMethod && !callIsJ2ITransition)
+            {
+            cg()->addProjectSpecializedRelocation(cursor, (uint8_t *)getSymbolReference()->getMethodAddress(), NULL, TR_MethodCallAddress,
+                               __FILE__, __LINE__, getNode());
+            }
+         else
+            {
+            cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor,(uint8_t *)getSymbolReference(),TR_HelperAddress, cg()),
+                               __FILE__, __LINE__, getNode());
+            }
          }
       }
    else
       {
-      intptrj_t distance = imm - (intptrj_t)cursor;
+      intptr_t distance = imm - (intptr_t)cursor;
       // Place holder only: non-TR::InstOpCode::b[l] usage of this instruction doesn't
       // exist at this moment.
       *(int32_t *)cursor |= distance & 0x03fffffc;

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -42,15 +42,16 @@
 #include "env/VMAccessCriticalSection.hpp"
 #include "env/VMJ9.h"
 #include "env/jittypes.h"
+#include "env/j9method.h"
+#include "il/AutomaticSymbol.hpp"
 #include "il/Block.hpp"
+#include "il/LabelSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
 #include "il/NodePool.hpp"
+#include "il/ParameterSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
-#include "il/symbol/ParameterSymbol.hpp"
-#include "il/symbol/AutomaticSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
-#include "il/symbol/LabelSymbol.hpp"
 #include "infra/Assert.hpp"
 #include "infra/BitVector.hpp"
 #include "infra/ILWalk.hpp"
@@ -77,6 +78,7 @@ J9::CodeGenerator::CodeGenerator() :
    _liveMonitors(NULL),
    _nodesSpineCheckedList(getTypedAllocator<TR::Node*>(TR::comp()->allocator())),
    _jniCallSites(getTypedAllocator<TR_Pair<TR_ResolvedMethod,TR::Instruction> *>(TR::comp()->allocator())),
+   _monitorMapping(self()->comp()->trMemory(), 256),
    _dummyTempStorageRefNode(NULL)
    {
    }
@@ -313,12 +315,12 @@ J9::CodeGenerator::lowerCompressedRefs(
    // trees may appear after checks (in which case the node
    // would have already been visited, preventing lowering)
    //
-   TR::ILOpCodes convertOp = TR::Compiler->target.is64Bit() ? TR::l2a : TR::i2a;
+   TR::ILOpCodes convertOp = self()->comp()->target().is64Bit() ? TR::l2a : TR::i2a;
    if (loadOrStoreNode->getOpCodeValue() == convertOp)
       return;
    else if (loadOrStoreNode->getOpCode().isStoreIndirect())
       {
-      convertOp = TR::Compiler->target.is64Bit() ? TR::l2i : TR::iushr;
+      convertOp = self()->comp()->target().is64Bit() ? TR::l2i : TR::iushr;
       if (loadOrStoreNode->getSecondChild()->getOpCodeValue() == convertOp)
          return;
       }
@@ -353,7 +355,7 @@ J9::CodeGenerator::lowerCompressedRefs(
 
    if (loadOrStoreNode->getOpCode().isLoadIndirect() && shouldBeCompressed)
       {
-      if (TR::Compiler->target.cpu.isZ() && TR::Compiler->om.readBarrierType() != gc_modron_readbar_none)
+      if (self()->comp()->target().cpu.isZ() && TR::Compiler->om.readBarrierType() != gc_modron_readbar_none)
          {
          dumpOptDetails(self()->comp(), "converting to ardbari %p under concurrent scavenge on Z.\n", node);
          self()->createReferenceReadBarrier(treeTop, loadOrStoreNode);
@@ -519,6 +521,11 @@ J9::CodeGenerator::lowerCompressedRefs(
       }
    }
 
+bool 
+J9::CodeGenerator::supportVMInternalNatives() 
+   { 
+   return !self()->comp()->compileRelocatableCode(); 
+   }
 
 // J9
 //
@@ -681,7 +688,7 @@ J9::CodeGenerator::lowerTreesPreChildrenVisit(TR::Node *parent, TR::TreeTop *tre
       // Hiding compressedref logic from CodeGen doesn't seem a good practise, the evaluator always need the uncompressedref node for write barrier,
       // therefore, this part is deprecated. It'll be removed once P and Z update their corresponding evaluators.
       static bool UseOldCompareAndSwapObject = (bool)feGetEnv("TR_UseOldCompareAndSwapObject");
-      if (self()->comp()->useCompressedPointers() && (UseOldCompareAndSwapObject || !TR::Compiler->target.cpu.isX86()))
+      if (self()->comp()->useCompressedPointers() && (UseOldCompareAndSwapObject || !(self()->comp()->target().cpu.isX86() || self()->comp()->target().cpu.isARM64())))
          {
          TR::MethodSymbol *methodSymbol = parent->getSymbol()->castToMethodSymbol();
          // In Java9 Unsafe could be the jdk.internal JNI method or the sun.misc ordinary method wrapper,
@@ -859,7 +866,7 @@ J9::CodeGenerator::lowerTreeIfNeeded(
          }
 
       TR::Node *javaOffset;
-      if (TR::Compiler->target.is64Bit())
+      if (self()->comp()->target().is64Bit())
          javaOffset = TR::Node::lconst(node, (int64_t) TR::Compiler->om.contiguousArrayHeaderSizeInBytes());
       else
          javaOffset = TR::Node::iconst(node, TR::Compiler->om.contiguousArrayHeaderSizeInBytes());
@@ -870,7 +877,7 @@ J9::CodeGenerator::lowerTreeIfNeeded(
       TR::Node *oldNativeOffset = nativeOffset;
       TR::Node *oldLen = len;
 
-      if (TR::Compiler->target.is32Bit())
+      if (self()->comp()->target().is32Bit())
          {
          nativeSrc = TR::Node::create(TR::l2i, 1, nativeSrc);
          nativeOffset = TR::Node::create(TR::l2i, 1, nativeOffset);
@@ -882,7 +889,7 @@ J9::CodeGenerator::lowerTreeIfNeeded(
       TR::Node *nativeAddr;
       TR::Node *javaAddr;
 
-      if (TR::Compiler->target.is32Bit())
+      if (self()->comp()->target().is32Bit())
          {
          nativeAddr = nativeSrc;
          javaOffset = TR::Node::create(TR::iadd, 2, javaOffset, nativeOffset);
@@ -932,7 +939,7 @@ J9::CodeGenerator::lowerTreeIfNeeded(
       {
       TR::SymbolReference *symRef = node->getSymbolReference();
       TR::Symbol *symbol = symRef->getSymbol();
-      if (symbol->isVolatile() && node->getDataType() == TR::Int64 && !symRef->isUnresolved() && TR::Compiler->target.is32Bit() &&
+      if (symbol->isVolatile() && node->getDataType() == TR::Int64 && !symRef->isUnresolved() && self()->comp()->target().is32Bit() &&
           !self()->getSupportsInlinedAtomicLongVolatiles())
          {
          bool isLoad = false;
@@ -1085,6 +1092,15 @@ J9::CodeGenerator::lowerTreeIfNeeded(
          if (!allowedToReserve)
             {
             persistentClassInfo->setReservable(false);
+#if defined(J9VM_OPT_JITSERVER)
+            // This is currently the only place where this flag gets cleared. For JITServer, we should propagate it to the client,
+            // to avoid having to call scanForNativeMethodsUntilMonitorNode again.
+            if (auto stream = TR::CompilationInfo::getStream())
+               {
+               stream->write(JITServer::MessageType::CHTable_clearReservable, classPointer);
+               // No response necessary - we can continue concurrently
+               }
+#endif /* defined(J9VM_OPT_JITSERVER) */
             }
          }
       }
@@ -1197,8 +1213,7 @@ J9::CodeGenerator::lowerTreeIfNeeded(
                methodSymbol->getResolvedMethodSymbol() &&
                methodSymbol->getResolvedMethodSymbol()->getResolvedMethod())
             {
-            void * methodAddress = methodSymbol->getResolvedMethodSymbol()->getResolvedMethod()->startAddressForInterpreterOfJittedMethod();
-            TR_PersistentJittedBodyInfo * bodyInfo = TR::Recompilation::getJittedBodyInfoFromPC(methodAddress);
+            TR_PersistentJittedBodyInfo * bodyInfo = ((TR_ResolvedJ9Method*) methodSymbol->getResolvedMethodSymbol()->getResolvedMethod())->getExistingJittedBodyInfo();
             //printf("Pushing node %p\n", node);
             //fflush(stdout);
             if (bodyInfo &&
@@ -2266,143 +2281,6 @@ J9::CodeGenerator::doInstructionSelection()
       diagnostic("</selection>\n");
    }
 
-
-// J9, Z
-//
-// This can surely be done more efficiently.  Walk the CFG and go block by block
-// rather than iterating through TreeTops looking for BBStarts.
-//
-void
-J9::CodeGenerator::splitWarmAndColdBlocks()
-   {
-   if (!self()->allowSplitWarmAndColdBlocks() || self()->comp()->compileRelocatableCode())
-      {
-      return;
-      }
-
-   TR::Block * block = NULL;
-   TR::TreeTop * tt;
-   TR::Node * node;
-   TR::Block * firstColdBlock = NULL, * firstColdExtendedBlock = NULL;
-
-   for (tt = self()->comp()->getStartTree(); tt; tt = tt->getNextTreeTop())
-      {
-      node = tt->getNode();
-
-      if (node->getOpCodeValue() == TR::BBStart)
-         {
-         block = node->getBlock();
-
-         // If this is the first cold block, remember where the warm blocks ended.
-         // If it is a warm block and cold blocks have already been found, they
-         // are treated as warm.
-         //
-         if (block->isCold())
-            {
-            if (!firstColdBlock)
-               firstColdBlock = block;
-            }
-         else
-            {
-            firstColdBlock = NULL;
-            firstColdExtendedBlock = NULL;
-            }
-
-         if (!block->isExtensionOfPreviousBlock())
-            {
-            if (firstColdBlock && !firstColdExtendedBlock)
-               {
-               if (!block->getPrevBlock() ||
-                   !block->getPrevBlock()->canFallThroughToNextBlock())
-                  firstColdExtendedBlock = block;
-               else
-                  firstColdBlock = NULL;
-               }
-            }
-         }
-      }
-
-   // Mark the split point between warm and cold blocks, so they can be
-   // allocated in different code sections.
-   //
-   TR::Block *lastWarmBlock;
-   if (firstColdExtendedBlock)
-      {
-      lastWarmBlock = firstColdExtendedBlock->getPrevBlock();
-      if (!lastWarmBlock)
-         {
-         // All the blocks are cold: insert a new goto block ahead of real blocks
-         lastWarmBlock = TR::TransformUtil::insertNewFirstBlockForCompilation(self()->comp());
-         }
-      }
-   else
-      {
-      // All the blocks are warm - the split point is between the last
-      // instruction and the snippets.
-      //
-      lastWarmBlock = block;
-      }
-
-   // If the last tree in the last warm block is not a TR::Goto, insert a goto tree
-   // at the end of the block.
-   // If there is a following block the goto will branch to it so that when the
-   // code is split any fall-through will go to the right place.
-   // If there is no following block the goto will branch to the first block; in
-   // this case the goto should never be reached, it is there only to
-   // make sure that the instruction following the last real treetop will be in
-   // warm code, so if it is a helper call (e.g. for a throw) the return address
-   // is in this method's code.
-   //
-   if (lastWarmBlock->getNumberOfRealTreeTops() == 0)
-      tt = lastWarmBlock->getEntry();
-   else
-      tt = lastWarmBlock->getLastRealTreeTop();
-
-   node = tt->getNode();
-
-   if (!(node->getOpCode().isGoto() || node->getOpCode().isJumpWithMultipleTargets() || node->getOpCode().isReturn()))
-      {
-      // Find the block to be branched to
-      //
-      TR::TreeTop * targetTreeTop = lastWarmBlock->getExit()->getNextTreeTop();
-      if (targetTreeTop)
-         {
-         // Branch to following block. Make sure it is not marked as an
-         // extension block so that it will get a label generated.
-         //
-         targetTreeTop->getNode()->getBlock()->setIsExtensionOfPreviousBlock(false);
-         }
-      else
-         {
-         // Branch to the first block. This will not be marked as an extension
-         // block.
-         targetTreeTop = self()->comp()->getStartBlock()->getEntry();
-         }
-
-      // Generate the goto and insert it into the end of the last warm block.
-      //
-      TR::TreeTop *gotoTreeTop = TR::TreeTop::create(self()->comp(), TR::Node::create(node, TR::Goto, 0, targetTreeTop));
-
-      // Move reg deps from BBEnd to goto
-      //
-      TR::Node *bbEnd = lastWarmBlock->getExit()->getNode();
-      if (bbEnd->getNumChildren() > 0)
-         {
-         TR::Node *glRegDeps = bbEnd->getChild(0);
-
-         gotoTreeTop->getNode()->setNumChildren(1);
-         gotoTreeTop->getNode()->setChild(0, glRegDeps);
-
-         bbEnd->setChild(0,NULL);
-         bbEnd->setNumChildren(0);
-         }
-
-      tt->insertAfter(gotoTreeTop);
-      }
-
-   }
-
-
 void
 J9::CodeGenerator::populateOSRBuffer()
    {
@@ -2623,9 +2501,8 @@ J9::CodeGenerator::processRelocations()
 
    int32_t missedSite = -1;
 
-   if (self()->comp()->getOption(TR_AOT) != false)
+   if (self()->comp()->compileRelocatableCode())
       {
-//#if (defined(TR_HOST_X86) || defined(TR_HOST_S390) || defined(TR_HOST_POWER))
       uint32_t inlinedCallSize = self()->comp()->getNumInlinedCallSites();
 
       // Create temporary hashtable for ordering AOT guard relocations
@@ -2645,7 +2522,7 @@ J9::CodeGenerator::processRelocations()
       TR::list<TR_AOTGuardSite*> *aotGuardSites = self()->comp()->getAOTGuardPatchSites();
       for(auto it = aotGuardSites->begin(); it != aotGuardSites->end(); ++it)
          {
-         intptrj_t inlinedSiteIndex = -1;
+         intptr_t inlinedSiteIndex = -1;
 
          // first, figure out the appropriate relocation record type from the guard type and symbol
          TR_ExternalRelocationTargetKind type;
@@ -2744,7 +2621,7 @@ J9::CodeGenerator::processRelocations()
             case TR_InlinedVirtualMethod:
             case TR_InlinedInterfaceMethod:
                TR_ASSERT(inlinedCallSize, "TR_AOT expect inlinedCallSize to be larger than 0\n");
-               inlinedSiteIndex = (intptrj_t)(*it)->getGuard()->getCurrentInlinedSiteIndex();
+               inlinedSiteIndex = (intptr_t)(*it)->getGuard()->getCurrentInlinedSiteIndex();
                entry = (TR_InlinedSiteLinkedListEntry *)self()->comp()->trMemory()->allocateMemory(sizeof(TR_InlinedSiteLinkedListEntry), heapAlloc);
 
                entry->reloType = type;
@@ -2803,7 +2680,6 @@ J9::CodeGenerator::processRelocations()
 
                   traceMsg(self()->comp(), "\tinline site %d inlined method %p\n", i, inlinedMethod);
                   if (ramMethod == inlinedMethod)
-                  //if (((uintptrj_t)ramMethod == (uintptrj_t)aotMethodInfo->resolvedMethod->getPersistentIdentifier()) && orderedInlinedSiteListTable[counter].first)
                      {
                      traceMsg(self()->comp(), "\t\tmatch!\n");
                      siteIndex = i;
@@ -2857,7 +2733,14 @@ J9::CodeGenerator::processRelocations()
                }
             }
          }
+      }
 
+#if defined(J9VM_OPT_JITSERVER)
+   if (self()->comp()->compileRelocatableCode() || self()->comp()->isOutOfProcessCompilation())
+#else   
+   if (self()->comp()->compileRelocatableCode())
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      {
       TR::SymbolValidationManager::SymbolValidationRecordList &validationRecords = self()->comp()->getSymbolValidationManager()->getValidationRecordList();
       if (self()->comp()->getOption(TR_UseSymbolValidationManager))
          {
@@ -2875,7 +2758,6 @@ J9::CodeGenerator::processRelocations()
             }
          }
 
-//#endif
       // Now call the platform specific processing of relocations
       self()->getAheadOfTimeCompile()->processRelocations();
       }
@@ -2883,9 +2765,50 @@ J9::CodeGenerator::processRelocations()
    for (auto aotIterator = self()->getExternalRelocationList().begin(); aotIterator != self()->getExternalRelocationList().end(); ++aotIterator)
       {
       // Traverse the AOT/external labels
-	  (*aotIterator)->apply(self());
+      (*aotIterator)->apply(self());
       }
    }
+
+#if defined(J9VM_OPT_JITSERVER)
+void J9::CodeGenerator::addExternalRelocation(TR::Relocation *r, const char *generatingFileName, uintptr_t generatingLineNumber, TR::Node *node, TR::ExternalRelocationPositionRequest where)
+   {
+   TR_ASSERT(generatingFileName, "External relocation location has improper NULL filename specified");
+   if (self()->comp()->compileRelocatableCode() || self()->comp()->isOutOfProcessCompilation())
+      {
+      TR::RelocationDebugInfo *genData = new(self()->trHeapMemory()) TR::RelocationDebugInfo;
+      genData->file = generatingFileName;
+      genData->line = generatingLineNumber;
+      genData->node = node;
+      self()->addExternalRelocation(r, genData, where);
+      }
+   }
+
+void J9::CodeGenerator::addExternalRelocation(TR::Relocation *r, TR::RelocationDebugInfo* info, TR::ExternalRelocationPositionRequest where)
+   {
+   if (self()->comp()->compileRelocatableCode() || self()->comp()->isOutOfProcessCompilation())
+      {
+      TR_ASSERT(info, "External relocation location does not have associated debug information");
+      r->setDebugInfo(info);
+      switch (where)
+         {
+         case TR::ExternalRelocationAtFront:
+            _externalRelocationList.push_front(r);
+            break;
+
+         case TR::ExternalRelocationAtBack:
+            _externalRelocationList.push_back(r);
+            break;
+
+         default:
+            TR_ASSERT_FATAL(
+               false,
+               "invalid TR::ExternalRelocationPositionRequest %d",
+               where);
+            break;
+         }
+      }
+   }
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 void J9::CodeGenerator::addProjectSpecializedRelocation(uint8_t *location, uint8_t *target, uint8_t *target2,
       TR_ExternalRelocationTargetKind kind, char *generatingFileName, uintptr_t generatingLineNumber, TR::Node *node)
@@ -2939,7 +2862,11 @@ void
 J9::CodeGenerator::jitAddUnresolvedAddressMaterializationToPatchOnClassRedefinition(void *firstInstruction)
    {
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(self()->fe());
+#if defined(J9VM_OPT_JITSERVER)
+   if (self()->comp()->compileRelocatableCode() || self()->comp()->isOutOfProcessCompilation())
+#else
    if (self()->comp()->compileRelocatableCode())
+#endif /* defined(J9VM_OPT_JITSERVER) */
       {
       self()->addExternalRelocation(new (self()->trHeapMemory()) TR::ExternalRelocation((uint8_t *)firstInstruction, 0, TR_HCR, self()),
                                  __FILE__,__LINE__, NULL);
@@ -3895,12 +3822,12 @@ J9::CodeGenerator::genSymRefStoreToArray(
    else
       offsetNode = TR::Node::create(refNode, TR::iconst, 0, secondOffset);
 
-   if (TR::Compiler->target.is64Bit())
+   if (self()->comp()->target().is64Bit())
       {
       offsetNode = TR::Node::create(TR::i2l, 1, offsetNode);
       }
 
-   TR::Node* addrNode = TR::Node::create(TR::Compiler->target.is64Bit()?TR::aladd:TR::aiadd,
+   TR::Node* addrNode = TR::Node::create(self()->comp()->target().is64Bit()?TR::aladd:TR::aiadd,
       2, arrayAddressNode, offsetNode);
    TR::Node* storeNode =
       TR::Node::createWithSymRef(self()->comp()->il.opCodeForIndirectStore(loadNode->getDataType()), 2, 2,
@@ -4057,7 +3984,7 @@ J9::CodeGenerator::fixUpProfiledInterfaceGuardTest()
                   comp->failCompilation<TR::CompilationException>("Abort compilation as Virtual Guard has generated illegal memory reference");
                TR::Node *vTableSizeOfReceiver = NULL;
                TR::Node *rangeCheckTest = NULL;
-               if (TR::Compiler->target.is64Bit())
+               if (self()->comp()->target().is64Bit())
                   {
                   vTableSizeOfReceiver = TR::Node::createWithSymRef(TR::lloadi, 1, 1, vTableLoad->getFirstChild(),
                                                                            comp->getSymRefTab()->findOrCreateVtableEntrySymbolRef(comp->getMethodSymbol(),
@@ -4153,7 +4080,7 @@ J9::CodeGenerator::allocateLinkageRegisters()
          TR_ASSERT(regLoad->getSymbol() && regLoad->getSymbol()->isParm(), "First basic block can have only parms live on entry");
          dumpOptDetails(self()->comp(), "  Parm %d has RegLoad %s\n", regLoad->getSymbol()->getParmSymbol()->getOrdinal(), self()->comp()->getDebug()->getName(regLoad));
          regLoads[regLoad->getSymbol()->getParmSymbol()->getOrdinal()] = regLoad;
-         if (regLoad->getType().isInt64() && TR::Compiler->target.is32Bit() && !self()->use64BitRegsOn32Bit())
+         if (regLoad->getType().isInt64() && self()->comp()->target().is32Bit() && !self()->use64BitRegsOn32Bit())
             {
             globalRegsWithRegLoad.set(regLoad->getLowGlobalRegisterNumber());
             globalRegsWithRegLoad.set(regLoad->getHighGlobalRegisterNumber());
@@ -4305,7 +4232,7 @@ J9::CodeGenerator::changeParmLoadsToRegLoads(TR::Node *node, TR::Node **regLoads
          {
          // Transmute this node into a regLoad
 
-         if ((node->getType().isInt64() && TR::Compiler->target.is32Bit() && !self()->use64BitRegsOn32Bit())
+         if ((node->getType().isInt64() && self()->comp()->target().is32Bit() && !self()->use64BitRegsOn32Bit())
               || node->getType().isLongDouble())
             {
             if (self()->getDisableLongGRA())
@@ -4317,7 +4244,7 @@ J9::CodeGenerator::changeParmLoadsToRegLoads(TR::Node *node, TR::Node **regLoads
                // Endianness affects how longs are passed
                //
                int8_t lowLRI, highLRI;
-               if (TR::Compiler->target.cpu.isBigEndian() || node->getType().isLongDouble())
+               if (self()->comp()->target().cpu.isBigEndian() || node->getType().isLongDouble())
                   {
                   highLRI = lri;
                   lowLRI  = lri+1;
@@ -4356,7 +4283,7 @@ J9::CodeGenerator::changeParmLoadsToRegLoads(TR::Node *node, TR::Node **regLoads
                   }
                }
             }
-         else if (TR::Compiler->target.cpu.isZ() && TR::Compiler->target.isLinux() && parm->getDataType() == TR::Aggregate &&
+         else if (self()->comp()->target().cpu.isZ() && self()->comp()->target().isLinux() && parm->getDataType() == TR::Aggregate &&
                   (parm->getSize() <= 2 ||  parm->getSize() == 4 ||  parm->getSize() == 8))
             {
             // On zLinux aggregates with a size of 1, 2, 4 or 8 bytes are passed by value in registers.
@@ -4373,7 +4300,7 @@ J9::CodeGenerator::changeParmLoadsToRegLoads(TR::Node *node, TR::Node **regLoads
                dt = TR::Int8;
 
             // if not 64 bit and data type is 64 bit, need to place it into two registers
-            if ((TR::Compiler->target.is32Bit() && !self()->use64BitRegsOn32Bit()) && dt == TR::Int64)
+            if ((self()->comp()->target().is32Bit() && !self()->use64BitRegsOn32Bit()) && dt == TR::Int64)
                {
                TR_GlobalRegisterNumber lowReg  = self()->getLinkageGlobalRegisterNumber(lri+1, dt);
                TR_GlobalRegisterNumber highReg = self()->getLinkageGlobalRegisterNumber(lri, dt);
@@ -4647,7 +4574,7 @@ J9::CodeGenerator::setUpForInstructionSelection()
       if (!_refinedAliasWalkCollector.killsNonIntPrimitiveArrayShadows)  methodInfo->setDoesntKillNonIntPrimitiveArrayShadows(true);
       }
 
-   if (TR::Compiler->target.cpu.isX86() && self()->getInlinedGetCurrentThreadMethod())
+   if (self()->comp()->target().cpu.isX86() && self()->getInlinedGetCurrentThreadMethod())
       {
       TR::RealRegister *ebpReal = self()->getRealVMThreadRegister();
 
@@ -4680,9 +4607,9 @@ J9::CodeGenerator::wantToPatchClassPointer(const TR_OpaqueClassBlock *allegedCla
    }
 
 bool
-J9::CodeGenerator::supportsMethodEntryPadding()
+J9::CodeGenerator::supportsJitMethodEntryAlignment()
    {
-   return self()->fej9()->supportsMethodEntryPadding();
+   return self()->fej9()->supportsJitMethodEntryAlignment();
    }
 
 bool
@@ -4703,7 +4630,7 @@ J9::CodeGenerator::generateCatchBlockBBStartPrologue(
       TR::Node *node,
       TR::Instruction *fenceInstruction)
    {
-   if (self()->comp()->getOptions()->getReportByteCodeInfoAtCatchBlock())
+   if (self()->comp()->fej9vm()->getReportByteCodeInfoAtCatchBlock())
       {
       // Note we should not use `fenceInstruction` here because it is not the first instruction in this BB. The first
       // instruction is a label that incoming branches will target. We will use this label (first instruction in the
@@ -4723,21 +4650,59 @@ J9::CodeGenerator::registerAssumptions()
       {
       TR_OpaqueMethodBlock *method = (*it)->getKey()->getPersistentIdentifier();
       TR::Instruction *i = (*it)->getValue();
-      TR_PatchJNICallSite::make(self()->fe(), self()->trPersistentMemory(), (uintptrj_t) method, i->getBinaryEncoding(), self()->comp()->getMetadataAssumptionList());
+#ifdef J9VM_OPT_JITSERVER
+      if (self()->comp()->isOutOfProcessCompilation())
+         {
+         // For JITServer we need to build a list of assumptions that will be sent to client at end of compilation
+         intptr_t offset = i->getBinaryEncoding() - self()->getCodeStart();
+         SerializedRuntimeAssumption* sar = 
+            new (self()->trHeapMemory()) SerializedRuntimeAssumption(RuntimeAssumptionOnRegisterNative, (uintptr_t)method, offset);
+         self()->comp()->getSerializedRuntimeAssumptions().push_front(sar);
+         }
+      else
+#endif // J9VM_OPT_JITSERVER
+         {
+         TR_PatchJNICallSite::make(self()->fe(), self()->trPersistentMemory(), (uintptr_t) method, i->getBinaryEncoding(), self()->comp()->getMetadataAssumptionList());
+         }
       }
    }
 
 void
 J9::CodeGenerator::jitAddPicToPatchOnClassUnload(void *classPointer, void *addressToBePatched)
    {
-   createClassUnloadPicSite(classPointer, addressToBePatched, sizeof(uintptrj_t), self()->comp()->getMetadataAssumptionList());
-   self()->comp()->setHasClassUnloadAssumptions();
+#ifdef J9VM_OPT_JITSERVER
+   if (self()->comp()->isOutOfProcessCompilation())
+      {
+      intptr_t offset = (uint8_t*)addressToBePatched - self()->getCodeStart();
+      SerializedRuntimeAssumption* sar = 
+         new (self()->trHeapMemory()) SerializedRuntimeAssumption(RuntimeAssumptionOnClassUnload, (uintptr_t)classPointer, offset, sizeof(uintptr_t));
+      self()->comp()->getSerializedRuntimeAssumptions().push_front(sar);
+      }
+   else
+#endif // J9VM_OPT_JITSERVER
+      {
+      createClassUnloadPicSite(classPointer, addressToBePatched, sizeof(uintptr_t), self()->comp()->getMetadataAssumptionList());
+      self()->comp()->setHasClassUnloadAssumptions();
+      }
    }
+
 void
 J9::CodeGenerator::jitAdd32BitPicToPatchOnClassUnload(void *classPointer, void *addressToBePatched)
    {
-   createClassUnloadPicSite(classPointer, addressToBePatched,4, self()->comp()->getMetadataAssumptionList());
-   self()->comp()->setHasClassUnloadAssumptions();
+#ifdef J9VM_OPT_JITSERVER
+   if (self()->comp()->isOutOfProcessCompilation())
+      {
+      intptr_t offset = (uint8_t*)addressToBePatched - self()->getCodeStart();
+      SerializedRuntimeAssumption* sar = 
+         new (self()->trHeapMemory()) SerializedRuntimeAssumption(RuntimeAssumptionOnClassUnload, (uintptr_t)classPointer, offset, 4);
+      self()->comp()->getSerializedRuntimeAssumptions().push_front(sar);
+      }
+   else
+#endif // J9VM_OPT_JITSERVER
+      {
+      createClassUnloadPicSite(classPointer, addressToBePatched,4, self()->comp()->getMetadataAssumptionList());
+      self()->comp()->setHasClassUnloadAssumptions();
+      }
    }
 
 void
@@ -4745,8 +4710,22 @@ J9::CodeGenerator::jitAddPicToPatchOnClassRedefinition(void *classPointer, void 
    {
     if (!self()->comp()->compileRelocatableCode())
       {
-      createClassRedefinitionPicSite(unresolved? (void*)-1 : classPointer, addressToBePatched, sizeof(uintptrj_t), unresolved, self()->comp()->getMetadataAssumptionList());
-      self()->comp()->setHasClassRedefinitionAssumptions();
+#ifdef J9VM_OPT_JITSERVER
+      if (self()->comp()->isOutOfProcessCompilation())
+         {
+         TR_RuntimeAssumptionKind kind = unresolved ? RuntimeAssumptionOnClassRedefinitionUPIC : RuntimeAssumptionOnClassRedefinitionPIC;
+         uintptr_t key = unresolved ? (uintptr_t)-1 : (uintptr_t)classPointer;
+         intptr_t offset = (uint8_t*)addressToBePatched - self()->getCodeStart();
+         SerializedRuntimeAssumption* sar = 
+            new (self()->trHeapMemory()) SerializedRuntimeAssumption(kind, key, offset, sizeof(uintptr_t));
+         self()->comp()->getSerializedRuntimeAssumptions().push_front(sar);
+         }
+      else
+#endif // J9VM_OPT_JITSERVER
+         {
+         createClassRedefinitionPicSite(unresolved? (void*)-1 : classPointer, addressToBePatched, sizeof(uintptr_t), unresolved, self()->comp()->getMetadataAssumptionList());
+         self()->comp()->setHasClassRedefinitionAssumptions();
+         }
       }
    }
 
@@ -4755,10 +4734,25 @@ J9::CodeGenerator::jitAdd32BitPicToPatchOnClassRedefinition(void *classPointer, 
    {
    if (!self()->comp()->compileRelocatableCode())
       {
-      createClassRedefinitionPicSite(unresolved? (void*)-1 : classPointer, addressToBePatched, 4, unresolved, self()->comp()->getMetadataAssumptionList());
-      self()->comp()->setHasClassRedefinitionAssumptions();
+#ifdef J9VM_OPT_JITSERVER
+      if (self()->comp()->isOutOfProcessCompilation())
+         {
+         TR_RuntimeAssumptionKind kind = unresolved ? RuntimeAssumptionOnClassRedefinitionUPIC : RuntimeAssumptionOnClassRedefinitionPIC;
+         uintptr_t key = unresolved ? (uintptr_t)-1 : (uintptr_t)classPointer;
+         intptr_t offset = (uint8_t*)addressToBePatched - self()->getCodeStart();
+         SerializedRuntimeAssumption* sar = 
+            new (self()->trHeapMemory()) SerializedRuntimeAssumption(kind, key, offset, 4);
+         self()->comp()->getSerializedRuntimeAssumptions().push_front(sar);
+         }
+      else
+#endif // J9VM_OPT_JITSERVER
+         {
+         createClassRedefinitionPicSite(unresolved? (void*)-1 : classPointer, addressToBePatched, 4, unresolved, self()->comp()->getMetadataAssumptionList());
+         self()->comp()->setHasClassRedefinitionAssumptions();
+         }
       }
    }
+
 
 void
 J9::CodeGenerator::createHWPRecords()
@@ -4791,12 +4785,43 @@ J9::CodeGenerator::needClassAndMethodPointerRelocations()
    return self()->fej9()->needClassAndMethodPointerRelocations();
    }
 
+bool
+J9::CodeGenerator::needRelocationsForLookupEvaluationData()
+   {
+   return self()->fej9()->needRelocationsForLookupEvaluationData();
+   }
 
 bool
 J9::CodeGenerator::needRelocationsForStatics()
    {
    return self()->fej9()->needRelocationsForStatics();
    }
+
+bool
+J9::CodeGenerator::needRelocationsForCurrentMethodPC()
+   {
+   return self()->fej9()->needRelocationsForCurrentMethodPC();
+   }
+
+bool
+J9::CodeGenerator::needRelocationsForHelpers()
+   {
+   return self()->fej9()->needRelocationsForHelpers();
+   }
+
+#if defined(J9VM_OPT_JITSERVER)
+bool
+J9::CodeGenerator::needRelocationsForBodyInfoData()
+   {
+   return self()->fej9()->needRelocationsForBodyInfoData();
+   }
+
+bool
+J9::CodeGenerator::needRelocationsForPersistentInfoData()
+   {
+   return self()->fej9()->needRelocationsForPersistentInfoData();
+   }
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 
 bool
@@ -4944,4 +4969,26 @@ J9::CodeGenerator::generatePoisonNode(TR::Block *currentBlock, TR::SymbolReferen
       }
 
    return storeNode;
+   }
+
+
+// I need to preserve the type information for monitorenter/exit through
+// code generation, but the secondChild is being used for other monitor
+// optimizations and I can't find anywhere to stick it on the TR::Node.
+// Creating the node with more children doesn't seem to help either.
+//
+void
+J9::CodeGenerator::addMonClass(TR::Node* monNode, TR_OpaqueClassBlock* clazz)
+   {
+   _monitorMapping.add(monNode);
+   _monitorMapping.add(clazz);
+   }
+
+TR_OpaqueClassBlock *
+J9::CodeGenerator::getMonClass(TR::Node* monNode)
+   {
+   for (int i = 0; i < _monitorMapping.size(); i += 2)
+      if (_monitorMapping[i] == monNode)
+         return (TR_OpaqueClassBlock *) _monitorMapping[i+1];
+   return 0;
    }

@@ -1,4 +1,4 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
  * Copyright (c) 2009, 2019 IBM Corp. and others
  *
@@ -343,6 +343,12 @@ public final class MethodType implements Serializable
 	public static MethodType fromMethodDescriptorString(String methodDescriptor, ClassLoader loader) {
 		ClassLoader classLoader = loader; 
 		if (classLoader == null) {
+			/*[IF Java14]*/
+			SecurityManager security = System.getSecurityManager();
+			if (security != null) {
+				security.checkPermission(sun.security.util.SecurityConstants.GET_CLASSLOADER_PERMISSION);
+			}
+			/*[ENDIF]*/
 			classLoader = ClassLoader.getSystemClassLoader();
 		}
 		

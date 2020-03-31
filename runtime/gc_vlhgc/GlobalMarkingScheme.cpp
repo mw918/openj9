@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -494,6 +494,7 @@ MM_GlobalMarkingScheme::scanMixedObject(MM_EnvironmentVLHGC *env, J9Object *obje
 	UDATA *leafPtr;
 	UDATA leafBits;
 #endif /* J9VM_GC_LEAF_BITS */
+	bool const compressed = env->compressObjectReferences();
 
 	markObjectClass(env, objectPtr);
 
@@ -552,7 +553,7 @@ MM_GlobalMarkingScheme::scanMixedObject(MM_EnvironmentVLHGC *env, J9Object *obje
 #endif /* J9VM_GC_LEAF_BITS */
 			descriptionIndex = J9_OBJECT_DESCRIPTION_SIZE - 1;
 		}
-		scanPtr += 1;
+		scanPtr = GC_SlotObject::addToSlotAddress((fomrobject_t*)scanPtr, 1, compressed);
 	}
 }
 
@@ -594,7 +595,7 @@ MM_GlobalMarkingScheme::scanReferenceMixedObject(MM_EnvironmentVLHGC *env, J9Obj
 		Assert_MM_unreachable();
 	}
 	
-	GC_SlotObject referentPtr(_javaVM->omrVM, &J9GC_J9VMJAVALANGREFERENCE_REFERENT(env, objectPtr));
+	GC_SlotObject referentPtr(_javaVM->omrVM, J9GC_J9VMJAVALANGREFERENCE_REFERENT_ADDRESS(env, objectPtr));
 
 	if (SCAN_REASON_OVERFLOWED_REGION == reason) {
 		/* handled when we empty packet to overflow */
@@ -638,6 +639,7 @@ MM_GlobalMarkingScheme::scanReferenceMixedObject(MM_EnvironmentVLHGC *env, J9Obj
 	}
 	descriptionIndex = J9_OBJECT_DESCRIPTION_SIZE - 1;
 
+	bool const compressed = env->compressObjectReferences();
 	while(scanPtr < endScanPtr) {
 		/* Determine if the slot should be processed */
 		if ((descriptionBits & 1) && ((scanPtr != referentPtr.readAddressFromSlot()) || referentMustBeMarked)) {
@@ -668,7 +670,7 @@ MM_GlobalMarkingScheme::scanReferenceMixedObject(MM_EnvironmentVLHGC *env, J9Obj
 #endif /* J9VM_GC_LEAF_BITS */
 			descriptionIndex = J9_OBJECT_DESCRIPTION_SIZE - 1;
 		}
-		scanPtr += 1;
+		scanPtr = GC_SlotObject::addToSlotAddress((fomrobject_t*)scanPtr, 1, compressed);
 	}
 }
 
@@ -713,7 +715,8 @@ MM_GlobalMarkingScheme::scanPointerArrayObjectSplit(MM_EnvironmentVLHGC *env, J9
 	}
 
 	/* Return number of bytes scanned */
-	return (slotsToScan * sizeof(fj9object_t));
+	uintptr_t const referenceSize = env->compressObjectReferences() ? sizeof(uint32_t) : sizeof(uintptr_t);
+	return (slotsToScan * referenceSize);
 }
 
 void
@@ -1229,6 +1232,17 @@ private:
 		}
 	}
 
+#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
+	virtual void doDoubleMappedObjectSlot(J9Object *objectPtr, struct J9PortVmemIdentifier *identifier) {
+		MM_EnvironmentVLHGC::getEnvironment(_env)->_markVLHGCStats._doubleMappedArrayletsCandidates += 1;
+		if (!_markingScheme->isMarked(objectPtr)) {
+			MM_EnvironmentVLHGC::getEnvironment(_env)->_markVLHGCStats._doubleMappedArrayletsCleared += 1;
+			PORT_ACCESS_FROM_ENVIRONMENT(_env);
+			j9vmem_free_memory(identifier->address, identifier->size, identifier);
+		}
+    }
+#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
+
 	/**
 	 * @Clear the string table cache slot if the object is not marked
 	 */
@@ -1611,7 +1625,7 @@ MM_GlobalMarkingScheme::processReferenceList(MM_EnvironmentVLHGC *env, J9Object*
 	
 		J9Object* nextReferenceObj = _extensions->accessBarrier->getReferenceLink(referenceObj);
 
-		GC_SlotObject referentSlotObject(_extensions->getOmrVM(), &J9GC_J9VMJAVALANGREFERENCE_REFERENT(env, referenceObj));
+		GC_SlotObject referentSlotObject(_extensions->getOmrVM(), J9GC_J9VMJAVALANGREFERENCE_REFERENT_ADDRESS(env, referenceObj));
 		J9Object *referent = referentSlotObject.readReferenceFromSlot();
 		if (NULL != referent) {
 			UDATA referenceObjectType = J9CLASS_FLAGS(J9GC_J9OBJECT_CLAZZ(referenceObj, env)) & J9AccClassReferenceMask;

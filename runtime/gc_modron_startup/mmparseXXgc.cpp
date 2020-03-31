@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -654,6 +654,7 @@ gcParseXXgcArguments(J9JavaVM *vm, char *optArg)
 			continue;
 		}
 		
+#if defined(J9VM_GC_MODRON_SCAVENGER)
 		if(try_scan(&scan_start, "cacheListLockSplit=")) {
 			if(!scan_udata_helper(vm, &scan_start, &extensions->cacheListSplit, "cacheListLockSplit=")) {
 				returnValue = JNI_EINVAL;
@@ -666,6 +667,7 @@ gcParseXXgcArguments(J9JavaVM *vm, char *optArg)
 			}
 			continue;
 		}
+#endif /* J9VM_GC_MODRON_SCAVENGER */
 
 		if (try_scan(&scan_start, "markingArraySplitMinimumAmount=")) {
 			UDATA arraySplitAmount = 0;
@@ -809,6 +811,16 @@ gcParseXXgcArguments(J9JavaVM *vm, char *optArg)
 		}
 		if(try_scan(&scan_start, "softwareRangeCheckReadBarrier")) {
 			extensions->softwareRangeCheckReadBarrier = true;
+			continue;
+		}
+
+		if (try_scan(&scan_start, "enableConcurrentScavengeExhaustiveTermination")) {
+			extensions->concurrentScavengeExhaustiveTermination = true;
+			continue;
+		}
+
+		if (try_scan(&scan_start, "disableConcurrentScavengeExhaustiveTermination")) {
+			extensions->concurrentScavengeExhaustiveTermination = false;
 			continue;
 		}
 #endif /* defined(OMR_GC_CONCURRENT_SCAVENGER) */

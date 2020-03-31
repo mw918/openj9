@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -36,22 +36,22 @@
 #include "compile/ResolvedMethod.hpp"
 #include "env/CompilerEnv.hpp"
 #include "env/jittypes.h"
+#include "il/LabelSymbol.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/RegisterMappedSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
-#include "il/symbol/LabelSymbol.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/RegisterMappedSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "infra/Assert.hpp"
 #include "env/VMJ9.h"
 #include "x/codegen/CheckFailureSnippet.hpp"
 #include "x/codegen/HelperCallSnippet.hpp"
 #include "x/codegen/X86Instruction.hpp"
 
-TR::Register *TR::AMD64JNILinkage::processJNIReferenceArg(TR::Node *child)
+TR::Register *J9::X86::AMD64::JNILinkage::processJNIReferenceArg(TR::Node *child)
    {
    TR::Register *refReg;
 
@@ -104,7 +104,7 @@ TR::Register *TR::AMD64JNILinkage::processJNIReferenceArg(TR::Node *child)
    }
 
 
-int32_t TR::AMD64JNILinkage::computeMemoryArgSize(
+int32_t J9::X86::AMD64::JNILinkage::computeMemoryArgSize(
    TR::Node *callNode,
    int32_t first,
    int32_t last,
@@ -188,7 +188,7 @@ int32_t TR::AMD64JNILinkage::computeMemoryArgSize(
 
 // Build arguments for system linkage dispatch.
 //
-int32_t TR::AMD64JNILinkage::buildArgs(
+int32_t J9::X86::AMD64::JNILinkage::buildArgs(
       TR::Node *callNode,
       TR::RegisterDependencyConditions *deps,
       bool passThread,
@@ -370,7 +370,7 @@ int32_t TR::AMD64JNILinkage::buildArgs(
 
 
 TR::Register *
-TR::AMD64JNILinkage::buildVolatileAndReturnDependencies(
+J9::X86::AMD64::JNILinkage::buildVolatileAndReturnDependencies(
       TR::Node *callNode,
       TR::RegisterDependencyConditions *deps,
       bool omitDedicatedFrameRegister)
@@ -468,7 +468,7 @@ TR::AMD64JNILinkage::buildVolatileAndReturnDependencies(
    }
 
 
-void TR::AMD64JNILinkage::switchToMachineCStack(TR::Node *callNode)
+void J9::X86::AMD64::JNILinkage::switchToMachineCStack(TR::Node *callNode)
    {
    TR::RealRegister *espReal     = machine()->getRealRegister(TR::RealRegister::esp);
    TR::Register        *vmThreadReg = cg()->getVMThreadRegister();
@@ -492,7 +492,7 @@ void TR::AMD64JNILinkage::switchToMachineCStack(TR::Node *callNode)
    }
 
 
-void TR::AMD64JNILinkage::buildJNICallOutFrame(
+void J9::X86::AMD64::JNILinkage::buildJNICallOutFrame(
       TR::Node *callNode,
       TR::LabelSymbol *returnAddrLabel)
    {
@@ -524,7 +524,7 @@ void TR::AMD64JNILinkage::buildJNICallOutFrame(
 
    // Build stack frame in Java stack.  Tag current bp.
    //
-   uintptrj_t tagBits = 0;
+   uintptr_t tagBits = 0;
 
    // If the current method is simply a wrapper for the JNI call, hide the call-out stack frame.
    //
@@ -566,7 +566,7 @@ void TR::AMD64JNILinkage::buildJNICallOutFrame(
    // Push the RAM method for the native.
    //
    auto tempMR = generateX86MemoryReference(espReal, 0, cg());
-   uintptrj_t methodAddr = (uintptrj_t) resolvedMethod->resolvedMethodAddress();
+   uintptr_t methodAddr = (uintptr_t) resolvedMethod->resolvedMethodAddress();
    if (IS_32BIT_SIGNED(methodAddr) && !TR::Compiler->om.nativeAddressesCanChangeSize())
       {
       generateImmInstruction(PUSHImm4, callNode, methodAddr, cg());
@@ -599,7 +599,7 @@ void TR::AMD64JNILinkage::buildJNICallOutFrame(
    }
 
 void
-TR::AMD64JNILinkage::buildJNIMergeLabelDependencies(TR::Node *callNode, bool killNonVolatileGPRs)
+J9::X86::AMD64::JNILinkage::buildJNIMergeLabelDependencies(TR::Node *callNode, bool killNonVolatileGPRs)
    {
    TR::RegisterDependencyConditions *deps = _JNIDispatchInfo.mergeLabelPostDeps;
 
@@ -689,7 +689,7 @@ TR::AMD64JNILinkage::buildJNIMergeLabelDependencies(TR::Node *callNode, bool kil
    deps->stopAddingPostConditions();
    }
 
-void TR::AMD64JNILinkage::buildOutgoingJNIArgsAndDependencies(
+void J9::X86::AMD64::JNILinkage::buildOutgoingJNIArgsAndDependencies(
       TR::Node *callNode,
       bool passThread,
       bool passReceiver,
@@ -740,15 +740,15 @@ void TR::AMD64JNILinkage::buildOutgoingJNIArgsAndDependencies(
    }
 
 TR::Instruction *
-TR::AMD64JNILinkage::generateMethodDispatch(
+J9::X86::AMD64::JNILinkage::generateMethodDispatch(
       TR::Node *callNode,
       bool isJNIGCPoint,
-      uintptrj_t targetAddress)
+      uintptr_t targetAddress)
    {
    TR::ResolvedMethodSymbol *callSymbol  = callNode->getSymbol()->castToResolvedMethodSymbol();
    TR::RealRegister *espReal     = machine()->getRealRegister(TR::RealRegister::esp);
    TR::Register *vmThreadReg = cg()->getMethodMetaDataRegister();
-   intptrj_t argSize     = _JNIDispatchInfo.argSize;
+   intptr_t argSize     = _JNIDispatchInfo.argSize;
    TR::SymbolReference *methodSymRef= callNode->getSymbolReference();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp()->fe());
 
@@ -813,9 +813,9 @@ TR::AMD64JNILinkage::generateMethodDispatch(
    //
    if (!cg()->getJNILinkageCalleeCleanup())
       {
-      intptrj_t cleanUpSize = argSize - TR::Compiler->om.sizeofReferenceAddress();
+      intptr_t cleanUpSize = argSize - TR::Compiler->om.sizeofReferenceAddress();
 
-      if (TR::Compiler->target.is64Bit())
+      if (cg()->comp()->target().is64Bit())
          TR_ASSERT(cleanUpSize <= 0x7fffffff, "Caller cleanup argument size too large for one instruction on AMD64.");
 
 
@@ -830,7 +830,7 @@ TR::AMD64JNILinkage::generateMethodDispatch(
    }
 
 
-void TR::AMD64JNILinkage::switchToJavaStack(TR::Node *callNode)
+void J9::X86::AMD64::JNILinkage::switchToJavaStack(TR::Node *callNode)
    {
    TR::RealRegister *espReal = machine()->getRealRegister(TR::RealRegister::esp);
    TR::Register *vmThreadReg = cg()->getMethodMetaDataRegister();
@@ -847,7 +847,7 @@ void TR::AMD64JNILinkage::switchToJavaStack(TR::Node *callNode)
    }
 
 
-void TR::AMD64JNILinkage::releaseVMAccess(TR::Node *callNode)
+void J9::X86::AMD64::JNILinkage::releaseVMAccess(TR::Node *callNode)
    {
    // Release VM access (spin lock).
    //
@@ -888,9 +888,9 @@ void TR::AMD64JNILinkage::releaseVMAccess(TR::Node *callNode)
    TR::LabelSymbol *longReleaseSnippetLabel = generateLabelSymbol(cg());
    TR::LabelSymbol *longReleaseRestartLabel = generateLabelSymbol(cg());
 
-   uintptrj_t mask = fej9->constReleaseVMAccessOutOfLineMask();
+   uintptr_t mask = fej9->constReleaseVMAccessOutOfLineMask();
 
-   if (TR::Compiler->target.is64Bit() && (mask > 0x7fffffff))
+   if (cg()->comp()->target().is64Bit() && (mask > 0x7fffffff))
       {
       if (!scratchReg3)
          scratchReg3 = cg()->allocateRegister();
@@ -908,13 +908,13 @@ void TR::AMD64JNILinkage::releaseVMAccess(TR::Node *callNode)
    {
    TR_OutlinedInstructionsGenerator og(longReleaseSnippetLabel, callNode, cg());
    auto helper = comp()->getSymRefTab()->findOrCreateReleaseVMAccessSymbolRef(comp()->getMethodSymbol());
-   generateImmSymInstruction(CALLImm4, callNode, (uintptrj_t)helper->getMethodAddress(), helper, cg());
+   generateImmSymInstruction(CALLImm4, callNode, (uintptr_t)helper->getMethodAddress(), helper, cg());
    generateLabelInstruction(JMP4, callNode, longReleaseRestartLabel, cg());
    }
 
    mask = fej9->constReleaseVMAccessMask();
 
-   if (TR::Compiler->target.is64Bit() && (mask > 0x7fffffff))
+   if (cg()->comp()->target().is64Bit() && (mask > 0x7fffffff))
       {
       if (!scratchReg3)
          scratchReg3 = cg()->allocateRegister();
@@ -928,7 +928,7 @@ void TR::AMD64JNILinkage::releaseVMAccess(TR::Node *callNode)
       generateRegImmInstruction(op, callNode, scratchReg2, mask, cg());
       }
 
-   op = TR::Compiler->target.isSMP() ? LCMPXCHGMemReg() : CMPXCHGMemReg(cg());
+   op = cg()->comp()->target().isSMP() ? LCMPXCHGMemReg() : CMPXCHGMemReg(cg());
    generateMemRegInstruction(
       op,
       callNode,
@@ -961,7 +961,7 @@ void TR::AMD64JNILinkage::releaseVMAccess(TR::Node *callNode)
    }
 
 
-void TR::AMD64JNILinkage::acquireVMAccess(TR::Node *callNode)
+void J9::X86::AMD64::JNILinkage::acquireVMAccess(TR::Node *callNode)
    {
    // Re-acquire VM access.
    //
@@ -979,9 +979,9 @@ void TR::AMD64JNILinkage::acquireVMAccess(TR::Node *callNode)
    generateRegRegInstruction(XORRegReg(), callNode, scratchReg1, scratchReg1, cg());
 
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
-   uintptrj_t mask = fej9->constAcquireVMAccessOutOfLineMask();
+   uintptr_t mask = fej9->constAcquireVMAccessOutOfLineMask();
 
-   if (TR::Compiler->target.is64Bit() && (mask > 0x7fffffff))
+   if (cg()->comp()->target().is64Bit() && (mask > 0x7fffffff))
       generateRegImm64Instruction(MOV8RegImm64, callNode, scratchReg2, mask, cg());
    else
       generateRegImmInstruction(MOV4RegImm4, callNode, scratchReg2, mask, cg());
@@ -989,7 +989,7 @@ void TR::AMD64JNILinkage::acquireVMAccess(TR::Node *callNode)
    TR::LabelSymbol *longReacquireSnippetLabel = generateLabelSymbol(cg());
    TR::LabelSymbol *longReacquireRestartLabel = generateLabelSymbol(cg());
 
-   TR_X86OpCodes op = TR::Compiler->target.isSMP() ? LCMPXCHGMemReg() : CMPXCHGMemReg(cg());
+   TR_X86OpCodes op = cg()->comp()->target().isSMP() ? LCMPXCHGMemReg() : CMPXCHGMemReg(cg());
    generateMemRegInstruction(
       op,
       callNode,
@@ -1005,7 +1005,7 @@ void TR::AMD64JNILinkage::acquireVMAccess(TR::Node *callNode)
    {
    TR_OutlinedInstructionsGenerator og(longReacquireSnippetLabel, callNode, cg());
    auto helper = comp()->getSymRefTab()->findOrCreateAcquireVMAccessSymbolRef(comp()->getMethodSymbol());
-   generateImmSymInstruction(CALLImm4, callNode, (uintptrj_t)helper->getMethodAddress(), helper, cg());
+   generateImmSymInstruction(CALLImm4, callNode, (uintptr_t)helper->getMethodAddress(), helper, cg());
    generateLabelInstruction(JMP4, callNode, longReacquireRestartLabel, cg());
    }
    TR::RegisterDependencyConditions *deps = generateRegisterDependencyConditions(2, 2, cg());
@@ -1024,7 +1024,7 @@ void TR::AMD64JNILinkage::acquireVMAccess(TR::Node *callNode)
 
 
 #ifdef J9VM_INTERP_ATOMIC_FREE_JNI
-void TR::AMD64JNILinkage::releaseVMAccessAtomicFree(TR::Node *callNode)
+void J9::X86::AMD64::JNILinkage::releaseVMAccessAtomicFree(TR::Node *callNode)
    {
    TR::Register *vmThreadReg = cg()->getMethodMetaDataRegister();
 
@@ -1037,7 +1037,7 @@ void TR::AMD64JNILinkage::releaseVMAccessAtomicFree(TR::Node *callNode)
                              cg());
 
 #if !defined(J9VM_INTERP_ATOMIC_FREE_JNI_USES_FLUSH)
-   TR::MemoryReference *mr = generateX86MemoryReference(cg()->machine()->getRealRegister(TR::RealRegister::esp), intptrj_t(0), cg());
+   TR::MemoryReference *mr = generateX86MemoryReference(cg()->machine()->getRealRegister(TR::RealRegister::esp), intptr_t(0), cg());
    mr->setRequiresLockPrefix();
    generateMemImmInstruction(OR4MemImms, callNode, mr, 0, cg());
 #endif /* !J9VM_INTERP_ATOMIC_FREE_JNI_USES_FLUSH */
@@ -1056,12 +1056,12 @@ void TR::AMD64JNILinkage::releaseVMAccessAtomicFree(TR::Node *callNode)
 
    TR_OutlinedInstructionsGenerator og(longReleaseSnippetLabel, callNode, cg());
    auto helper = comp()->getSymRefTab()->findOrCreateReleaseVMAccessSymbolRef(comp()->getMethodSymbol());
-   generateImmSymInstruction(CALLImm4, callNode, (uintptrj_t)helper->getMethodAddress(), helper, cg());
+   generateImmSymInstruction(CALLImm4, callNode, (uintptr_t)helper->getMethodAddress(), helper, cg());
    generateLabelInstruction(JMP4, callNode, longReleaseRestartLabel, cg());
    }
 
 
-void TR::AMD64JNILinkage::acquireVMAccessAtomicFree(TR::Node *callNode)
+void J9::X86::AMD64::JNILinkage::acquireVMAccessAtomicFree(TR::Node *callNode)
    {
    TR::Register *vmThreadReg = cg()->getMethodMetaDataRegister();
 
@@ -1074,7 +1074,7 @@ void TR::AMD64JNILinkage::acquireVMAccessAtomicFree(TR::Node *callNode)
                              cg());
 
 #if !defined(J9VM_INTERP_ATOMIC_FREE_JNI_USES_FLUSH)
-   TR::MemoryReference *mr = generateX86MemoryReference(cg()->machine()->getRealRegister(TR::RealRegister::esp), intptrj_t(0), cg());
+   TR::MemoryReference *mr = generateX86MemoryReference(cg()->machine()->getRealRegister(TR::RealRegister::esp), intptr_t(0), cg());
    mr->setRequiresLockPrefix();
    generateMemImmInstruction(OR4MemImms, callNode, mr, 0, cg());
 #endif /* !J9VM_INTERP_ATOMIC_FREE_JNI_USES_FLUSH */
@@ -1093,14 +1093,14 @@ void TR::AMD64JNILinkage::acquireVMAccessAtomicFree(TR::Node *callNode)
 
    TR_OutlinedInstructionsGenerator og(longAcquireSnippetLabel, callNode, cg());
    auto helper = comp()->getSymRefTab()->findOrCreateAcquireVMAccessSymbolRef(comp()->getMethodSymbol());
-   generateImmSymInstruction(CALLImm4, callNode, (uintptrj_t)helper->getMethodAddress(), helper, cg());
+   generateImmSymInstruction(CALLImm4, callNode, (uintptr_t)helper->getMethodAddress(), helper, cg());
    generateLabelInstruction(JMP4, callNode, longAcquireRestartLabel, cg());
    }
 
 
 #endif /* J9VM_INTERP_ATOMIC_FREE_JNI */
 
-void TR::AMD64JNILinkage::cleanupReturnValue(
+void J9::X86::AMD64::JNILinkage::cleanupReturnValue(
       TR::Node *callNode,
       TR::Register *linkageReturnReg,
       TR::Register *targetReg)
@@ -1127,25 +1127,25 @@ void TR::AMD64JNILinkage::cleanupReturnValue(
                generateRegRegInstruction(TEST1RegReg, callNode,
                      linkageReturnReg, linkageReturnReg, cg());
                generateRegInstruction(SETNE1Reg, callNode, linkageReturnReg, cg());
-               op = TR::Compiler->target.is64Bit() ? MOVZXReg8Reg1 : MOVZXReg4Reg1;
+               op = cg()->comp()->target().is64Bit() ? MOVZXReg8Reg1 : MOVZXReg4Reg1;
                }
             else if (isUnsigned)
                {
-               op = TR::Compiler->target.is64Bit() ? MOVZXReg8Reg1 : MOVZXReg4Reg1;
+               op = cg()->comp()->target().is64Bit() ? MOVZXReg8Reg1 : MOVZXReg4Reg1;
                }
             else
                {
-               op = TR::Compiler->target.is64Bit() ? MOVSXReg8Reg1 : MOVSXReg4Reg1;
+               op = cg()->comp()->target().is64Bit() ? MOVSXReg8Reg1 : MOVSXReg4Reg1;
                }
             break;
          case TR::Int16:
             if (isUnsigned)
                {
-               op = TR::Compiler->target.is64Bit() ? MOVZXReg8Reg2 : MOVZXReg4Reg2;
+               op = cg()->comp()->target().is64Bit() ? MOVZXReg8Reg2 : MOVZXReg4Reg2;
                }
             else
                {
-               op = TR::Compiler->target.is64Bit() ? MOVSXReg8Reg2 : MOVSXReg4Reg2;
+               op = cg()->comp()->target().is64Bit() ? MOVSXReg8Reg2 : MOVSXReg4Reg2;
                }
             break;
          default:
@@ -1161,7 +1161,7 @@ void TR::AMD64JNILinkage::cleanupReturnValue(
    }
 
 
-void TR::AMD64JNILinkage::checkForJNIExceptions(TR::Node *callNode)
+void J9::X86::AMD64::JNILinkage::checkForJNIExceptions(TR::Node *callNode)
    {
    TR::Register *vmThreadReg = cg()->getMethodMetaDataRegister();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
@@ -1174,7 +1174,7 @@ void TR::AMD64JNILinkage::checkForJNIExceptions(TR::Node *callNode)
    TR::Instruction *instr = generateLabelInstruction(JNE4, callNode, snippetLabel, cg());
 
    uint32_t gcMap = _systemLinkage->getProperties().getPreservedRegisterMapForGC();
-   if (TR::Compiler->target.is32Bit())
+   if (cg()->comp()->target().is32Bit())
       {
       gcMap |= (_JNIDispatchInfo.argSize<<14);
       }
@@ -1190,7 +1190,7 @@ void TR::AMD64JNILinkage::checkForJNIExceptions(TR::Node *callNode)
    }
 
 
-void TR::AMD64JNILinkage::cleanupJNIRefPool(TR::Node *callNode)
+void J9::X86::AMD64::JNILinkage::cleanupJNIRefPool(TR::Node *callNode)
    {
    // Must check to see if the ref pool was used and clean them up if so--or we
    // leave a bunch of pinned garbage behind that screws up the gc quality forever.
@@ -1218,7 +1218,7 @@ void TR::AMD64JNILinkage::cleanupJNIRefPool(TR::Node *callNode)
    }
 
 
-TR::Register *TR::AMD64JNILinkage::buildDirectDispatch(
+TR::Register *J9::X86::AMD64::JNILinkage::buildDirectDispatch(
       TR::Node *callNode,
       bool spillFPRegs)
    {
@@ -1246,7 +1246,7 @@ TR::Register *TR::AMD64JNILinkage::buildDirectDispatch(
 
 
 void
-TR::AMD64JNILinkage::populateJNIDispatchInfo()
+J9::X86::AMD64::JNILinkage::populateJNIDispatchInfo()
    {
    _JNIDispatchInfo.numJNIFrameSlotsPushed = 5;
 
@@ -1266,7 +1266,7 @@ TR::AMD64JNILinkage::populateJNIDispatchInfo()
    }
 
 
-TR::Register *TR::AMD64JNILinkage::buildDirectJNIDispatch(TR::Node *callNode)
+TR::Register *J9::X86::AMD64::JNILinkage::buildDirectJNIDispatch(TR::Node *callNode)
    {
 #ifdef DEBUG
    if (debug("reportJNI"))
@@ -1419,17 +1419,17 @@ TR::Register *TR::AMD64JNILinkage::buildDirectJNIDispatch(TR::Node *callNode)
 #endif
       }
 
-   uintptrj_t targetAddress;
+   uintptr_t targetAddress;
 
    if (isGPUHelper)
       {
       callNode->setSymbolReference(gpuHelperSymRef);
-      targetAddress = (uintptrj_t)callSymbol->getMethodAddress();
+      targetAddress = (uintptr_t)callSymbol->getMethodAddress();
       }
    else
       {
       TR::ResolvedMethodSymbol *callSymbol1  = callNode->getSymbol()->castToResolvedMethodSymbol();
-      targetAddress = (uintptrj_t)callSymbol1->getResolvedMethod()->startAddressForJNIMethod(comp());
+      targetAddress = (uintptr_t)callSymbol1->getResolvedMethod()->startAddressForJNIMethod(comp());
       }
 
    TR::Instruction *callInstr = generateMethodDispatch(callNode, isJNIGCPoint, targetAddress);

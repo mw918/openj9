@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -28,6 +28,8 @@
 #include "codegen/GenerateInstructions.hpp"
 #include "codegen/Linkage.hpp"
 #include "codegen/Linkage_inlines.hpp"
+#include "codegen/PPCJNILinkage.hpp"
+#include "codegen/PPCPrivateLinkage.hpp"
 #include "env/CompilerEnv.hpp"
 #include "env/OMRMemory.hpp"
 #include "env/VMJ9.h"
@@ -37,8 +39,6 @@
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
 #include "p/codegen/PPCInstruction.hpp"
-#include "p/codegen/PPCJNILinkage.hpp"
-#include "p/codegen/PPCPrivateLinkage.hpp"
 #include "p/codegen/PPCRecompilation.hpp"
 #include "p/codegen/PPCSystemLinkage.hpp"
 
@@ -75,8 +75,8 @@ J9::Power::CodeGenerator::CodeGenerator() :
    cg->setSupportsPartialInlineOfMethodHooks();
    cg->setSupportsInliningOfTypeCoersionMethods();
 
-   if (TR::Compiler->target.cpu.id() >= TR_PPCp8 && TR::Compiler->target.cpu.getPPCSupportsVSX() &&
-      TR::Compiler->target.is64Bit() && !comp->getOption(TR_DisableFastStringIndexOf) &&
+   if (cg->comp()->target().cpu.id() >= TR_PPCp8 && cg->comp()->target().cpu.getPPCSupportsVSX() &&
+      cg->comp()->target().is64Bit() && !comp->getOption(TR_DisableFastStringIndexOf) &&
       !TR::Compiler->om.canGenerateArraylets())
       cg->setSupportsInlineStringIndexOf();
 
@@ -123,7 +123,20 @@ J9::Power::CodeGenerator::CodeGenerator() :
 
    }
 
-
+bool
+J9::Power::CodeGenerator::canEmitDataForExternallyRelocatableInstructions()
+   {
+   // On Power, data cannot be emitted inside instructions that will be associated with an
+   // external relocation record (ex. AOT or Remote compiles in OpenJ9). This is because when the
+   // relocation is applied when a method is loaded, the new data in the instruction is OR'ed in (The reason
+   // for OR'ing is that sometimes usefule information such as flags and hints can be stored during compilation in these data fields).
+   // Hence, for the relocation to be applied correctly, we must ensure that the data fields inside the instruction
+   // initially are zero.
+#ifdef J9VM_OPT_JITSERVER
+   return !self()->comp()->compileRelocatableCode() && !self()->comp()->isOutOfProcessCompilation();
+#endif
+   return !self()->comp()->compileRelocatableCode();
+   }
 
 // Get or create the TR::Linkage object that corresponds to the given linkage
 // convention.
@@ -136,17 +149,17 @@ J9::Power::CodeGenerator::createLinkage(TR_LinkageConventions lc)
    switch (lc)
       {
       case TR_Private:
-         linkage = new (self()->trHeapMemory()) TR::PPCPrivateLinkage(self());
+         linkage = new (self()->trHeapMemory()) J9::Power::PrivateLinkage(self());
          break;
       case TR_System:
          linkage = new (self()->trHeapMemory()) TR::PPCSystemLinkage(self());
          break;
       case TR_CHelper:
       case TR_Helper:
-         linkage = new (self()->trHeapMemory()) TR::PPCHelperLinkage(self(), lc);
+         linkage = new (self()->trHeapMemory()) J9::Power::HelperLinkage(self(), lc);
          break;
       case TR_J9JNILinkage:
-         linkage = new (self()->trHeapMemory()) TR::PPCJNILinkage(self());
+         linkage = new (self()->trHeapMemory()) J9::Power::JNILinkage(self());
          break;
       default :
          linkage = new (self()->trHeapMemory()) TR::PPCSystemLinkage(self());
@@ -195,15 +208,15 @@ J9::Power::CodeGenerator::generateBinaryEncodingPrologue(
          /* thunk is not recompilable, nor does it support FSD */
          if (methodSymbol->isJNI())
             {
-            uintptrj_t JNIMethodAddress = (uintptrj_t)methodSymbol->getResolvedMethod()->startAddressForJNIMethod(comp);
+            uintptr_t JNIMethodAddress = (uintptr_t)methodSymbol->getResolvedMethod()->startAddressForJNIMethod(comp);
             TR::Node *firstNode = comp->getStartTree()->getNode();
-            if (TR::Compiler->target.is64Bit())
+            if (comp->target().is64Bit())
                {
                int32_t highBits = (int32_t)(JNIMethodAddress>>32), lowBits = (int32_t)JNIMethodAddress;
                TR::Instruction *cursor = new (self()->trHeapMemory()) TR::PPCImmInstruction(TR::InstOpCode::dd, firstNode,
-                  TR::Compiler->target.cpu.isBigEndian()?highBits:lowBits, NULL, self());
+                  comp->target().cpu.isBigEndian()?highBits:lowBits, NULL, self());
                generateImmInstruction(self(), TR::InstOpCode::dd, firstNode,
-                  TR::Compiler->target.cpu.isBigEndian()?lowBits:highBits, cursor);
+                  comp->target().cpu.isBigEndian()?lowBits:highBits, cursor);
                }
             else
                {
@@ -221,12 +234,10 @@ J9::Power::CodeGenerator::generateBinaryEncodingPrologue(
       data->cursorInstruction = data->cursorInstruction->getNext();
       }
 
-   int32_t boundary = comp->getOptions()->getJitMethodEntryAlignmentBoundary(self());
-   if (boundary && (boundary > 4) && ((boundary & (boundary - 1)) == 0))
+   if (self()->supportsJitMethodEntryAlignment())
       {
-      comp->getOptions()->setJitMethodEntryAlignmentBoundary(boundary);
       self()->setPreJitMethodEntrySize(data->estimate);
-      data->estimate += (boundary - 4);
+      data->estimate += (self()->getJitMethodEntryAlignmentBoundary() - 1);
       }
 
    tempInstruction = data->cursorInstruction;
@@ -300,7 +311,7 @@ bool J9::Power::CodeGenerator::suppressInliningOfRecognizedMethod(TR::Recognized
 
    if (!self()->comp()->compileRelocatableCode() &&
        !self()->comp()->getOption(TR_DisableDFP) &&
-       TR::Compiler->target.cpu.supportsDecimalFloatingPoint())
+       self()->comp()->target().cpu.supportsDecimalFloatingPoint())
       {
       if (method == TR::java_math_BigDecimal_DFPIntConstructor ||
           method == TR::java_math_BigDecimal_DFPLongConstructor ||
@@ -335,24 +346,13 @@ bool J9::Power::CodeGenerator::suppressInliningOfRecognizedMethod(TR::Recognized
       return true;
       }
 
-   if (method == TR::java_lang_Math_abs_F ||
-       method == TR::java_lang_Math_abs_D ||
-       method == TR::java_lang_Math_abs_I ||
-       method == TR::java_lang_Math_abs_L ||
-       method == TR::java_lang_Integer_highestOneBit ||
-       method == TR::java_lang_Integer_numberOfLeadingZeros ||
-       method == TR::java_lang_Integer_numberOfTrailingZeros ||
-       method == TR::java_lang_Integer_rotateLeft ||
-       method == TR::java_lang_Integer_rotateRight ||
-       method == TR::java_lang_Long_highestOneBit ||
-       method == TR::java_lang_Long_numberOfLeadingZeros ||
-       method == TR::java_lang_Long_numberOfTrailingZeros ||
-       method == TR::java_lang_Short_reverseBytes ||
+   if (method == TR::java_lang_Short_reverseBytes ||
        method == TR::java_lang_Integer_reverseBytes ||
        method == TR::java_lang_Long_reverseBytes ||
-       (TR::Compiler->target.is64Bit() &&
-        (method == TR::java_lang_Long_rotateLeft ||
-        method == TR::java_lang_Long_rotateRight)))
+       method == TR::java_lang_Math_fma_D ||
+       method == TR::java_lang_Math_fma_F ||
+       method == TR::java_lang_StrictMath_fma_D ||
+       method == TR::java_lang_StrictMath_fma_F)
       {
       return true;
       }
@@ -375,7 +375,7 @@ bool J9::Power::CodeGenerator::suppressInliningOfRecognizedMethod(TR::Recognized
 bool
 J9::Power::CodeGenerator::enableAESInHardwareTransformations()
    {
-   if ( (TR::Compiler->target.cpu.getPPCSupportsAES() || (TR::Compiler->target.cpu.getPPCSupportsVMX() && TR::Compiler->target.cpu.getPPCSupportsVSX())) &&
+   if ( (self()->comp()->target().cpu.getPPCSupportsAES() || (self()->comp()->target().cpu.getPPCSupportsVMX() && self()->comp()->target().cpu.getPPCSupportsVSX())) &&
          !self()->comp()->getOption(TR_DisableAESInHardware))
       return true;
    else
@@ -392,12 +392,12 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
    bool optDisabled = false;
 
    if (node->getOpCodeValue() == TR::aloadi ||
-        (TR::Compiler->target.is64Bit() &&
+        (self()->comp()->target().is64Bit() &&
          comp()->useCompressedPointers() &&
          node->getOpCodeValue() == TR::l2a &&
          comp()->getMethodHotness() >= scorching &&
          TR::Compiler->om.compressedReferenceShiftOffset() == 0 &&
-         TR::Compiler->target.cpu.id() >= TR_PPCp6)
+         self()->comp()->target().cpu.id() >= TR_PPCp6)
       )
       {
       int32_t prefetchOffset = comp()->findPrefetchInfo(node);
@@ -443,7 +443,7 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
             deps->addPostCondition(tempReg, TR::RealRegister::NoReg);
             TR::addDependency(deps, condReg, TR::RealRegister::NoReg, TR_CCR, self());
 
-            if (TR::Compiler->target.is64Bit() && !comp()->useCompressedPointers())
+            if (self()->comp()->target().is64Bit() && !comp()->useCompressedPointers())
                {
                TR::MemoryReference *tempMR = new (self()->trHeapMemory()) TR::MemoryReference(targetRegister, prefetchOffset, 8, self());
                generateTrg1MemInstruction(self(), TR::InstOpCode::ld, node, tempReg, tempMR);
@@ -483,7 +483,7 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
          if (!disableHotFieldNextElementPrefetch)
             {
             // 32bit
-            if (TR::Compiler->target.is32Bit())
+            if (self()->comp()->target().is32Bit())
                {
                if (!(firstChild->getOpCodeValue() == TR::aiadd &&
                      firstChild->getFirstChild() &&
@@ -524,7 +524,7 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
                   }
                }
             // 64bit CR
-            else if (TR::Compiler->target.is64Bit() && comp()->useCompressedPointers())
+            else if (self()->comp()->target().is64Bit() && comp()->useCompressedPointers())
                {
                if (!(firstChild->getOpCodeValue() == TR::iu2l &&
                      firstChild->getFirstChild() &&
@@ -557,7 +557,7 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
                {
                TR::Register *temp3Reg = self()->allocateRegister();
                static bool prefetch2Ahead = (feGetEnv("TR_Prefetch2Ahead") != NULL);
-               if (TR::Compiler->target.is64Bit() && !comp()->useCompressedPointers())
+               if (self()->comp()->target().is64Bit() && !comp()->useCompressedPointers())
                   {
                   if (!prefetch2Ahead)
                      generateTrg1MemInstruction(self(), TR::InstOpCode::ld, node, temp3Reg, new (self()->trHeapMemory()) TR::MemoryReference(pointerReg, (int32_t)TR::Compiler->om.sizeofReferenceField(), 8, self()));
@@ -574,13 +574,13 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
 
                if (comp()->getOptions()->getHeapBase() != NULL)
                   {
-                  loadAddressConstant(self(), node, (intptrj_t)(comp()->getOptions()->getHeapBase()), tempReg);
+                  loadAddressConstant(self(), comp()->compileRelocatableCode(), node, (intptr_t)(comp()->getOptions()->getHeapBase()), tempReg);
                   generateTrg1Src2Instruction(self(), TR::InstOpCode::cmpl4, node, condReg, temp3Reg, tempReg);
                   generateConditionalBranchInstruction(self(), TR::InstOpCode::blt, node, endCtrlFlowLabel, condReg);
                   }
                if (heapTop != 0xFFFFFFFF)
                   {
-                  loadAddressConstant(self(), node, (intptrj_t)(heapTop-prefetchOffset), tempReg);
+                  loadAddressConstant(self(), comp()->compileRelocatableCode(), node, (intptr_t)(heapTop-prefetchOffset), tempReg);
                   generateTrg1Src2Instruction(self(), TR::InstOpCode::cmpl4, node, condReg, temp3Reg, tempReg);
                   generateConditionalBranchInstruction(self(), TR::InstOpCode::bgt, node, endCtrlFlowLabel, condReg);
                   }
@@ -620,7 +620,7 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
       }
 
    if (node->getOpCodeValue() == TR::aloadi ||
-         (TR::Compiler->target.is64Bit() &&
+         (self()->comp()->target().is64Bit() &&
           comp()->useCompressedPointers() &&
           (node->getOpCodeValue() == TR::iloadi || node->getOpCodeValue() == TR::irdbari) &&
           comp()->getMethodHotness() >= hot))
@@ -630,7 +630,7 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
       if (!disableIteratorPrefetch)
          {
          // 32bit
-         if (TR::Compiler->target.is32Bit())
+         if (self()->comp()->target().is32Bit())
             {
             if (!(firstChild &&
                 firstChild->getOpCodeValue() == TR::aiadd &&
@@ -643,7 +643,7 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
                }
             }
          // 64bit cr
-         else if (TR::Compiler->target.is64Bit() && comp()->useCompressedPointers())
+         else if (self()->comp()->target().is64Bit() && comp()->useCompressedPointers())
             {
             if (!(firstChild &&
                 firstChild->getOpCodeValue() == TR::aladd &&
@@ -708,7 +708,7 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
             {
             TR::Register *tempReg = self()->allocateRegister();
             generateTrg1Src1ImmInstruction(self(), TR::InstOpCode::addi, node, tempReg, indexReg, (int32_t)(prefetchElementStride * TR::Compiler->om.sizeofReferenceField()));
-            if (TR::Compiler->target.is64Bit() && !comp()->useCompressedPointers())
+            if (self()->comp()->target().is64Bit() && !comp()->useCompressedPointers())
                {
                TR::MemoryReference *targetMR = new (self()->trHeapMemory()) TR::MemoryReference(baseReg, tempReg, 8, self());
                generateTrg1MemInstruction(self(), TR::InstOpCode::ld, node, tempReg, targetMR);
@@ -732,9 +732,9 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
       }
    else if (node->getOpCodeValue() == TR::awrtbari &&
             comp()->getMethodHotness() >= scorching &&
-            TR::Compiler->target.cpu.id() >= TR_PPCp6 &&
-              (TR::Compiler->target.is32Bit() ||
-                (TR::Compiler->target.is64Bit() &&
+            self()->comp()->target().cpu.id() >= TR_PPCp6 &&
+              (self()->comp()->target().is32Bit() ||
+                (self()->comp()->target().is64Bit() &&
                  comp()->useCompressedPointers() &&
                  TR::Compiler->om.compressedReferenceShiftOffset() == 0
                 )
@@ -752,3 +752,20 @@ J9::Power::CodeGenerator::insertPrefetchIfNecessary(TR::Node *node, TR::Register
       }
    }
 
+TR::Linkage *
+J9::Power::CodeGenerator::deriveCallingLinkage(TR::Node *node, bool isIndirect)
+   {
+   TR::SymbolReference *symRef    = node->getSymbolReference();
+   TR::MethodSymbol    *callee    = symRef->getSymbol()->castToMethodSymbol();
+   TR_J9VMBase         *fej9      = (TR_J9VMBase *)(self()->fe());
+
+   static char * disableDirectNativeCall = feGetEnv("TR_DisableDirectNativeCall");
+
+   // Clean-up: the fej9 checking seemed unnecessary
+   if (!isIndirect && callee->isJNI() && fej9->canRelocateDirectNativeCalls() &&
+       (node->isPreparedForDirectJNI() ||
+        (disableDirectNativeCall == NULL && callee->getResolvedMethodSymbol()->canDirectNativeCall())))
+      return self()->getLinkage(TR_J9JNILinkage);
+
+   return self()->getLinkage(callee->getLinkageConvention());
+   }

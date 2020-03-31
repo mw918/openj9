@@ -1,5 +1,5 @@
 <#--
-Copyright (c) 1998, 2019 IBM Corp. and others
+Copyright (c) 1998, 2020 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,6 +26,10 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
   OBJCOPY := $(OPENJ9_CC_PREFIX)-objcopy
 <#elseif uma.spec.processor.aarch64>
   OBJCOPY := $(OPENJ9_CC_PREFIX)-objcopy
+<#elseif uma.spec.processor.riscv64 && uma.spec.flags.env_crossbuild.enabled>
+  AR := riscv64-unknown-linux-gnu-ar
+  AS := riscv64-unknown-linux-gnu-as
+  OBJCOPY := riscv64-unknown-linux-gnu-objcopy
 <#else>
   OBJCOPY := objcopy
 </#if>
@@ -38,13 +42,13 @@ $(UMA_LIBTARGET) : $(UMA_OBJECTS)
 <#assign dll_target_rule>
 $(UMA_DLLTARGET) : $(UMA_OBJECTS) $(UMA_TARGET_LIBRARIES)
 	$(UMA_DLL_LD) $(UMA_DLL_LINK_FLAGS) \
-		$(VMLINK) $(UMA_LINK_PATH) -o $(UMA_DLLTARGET) \
+		$(VMLINK) $(UMA_LINK_PATH) -o $@ \
 		$(UMA_OBJECTS) \
 		$(UMA_DLL_LINK_POSTFLAGS)
 ifdef j9vm_uma_gnuDebugSymbols
-	$(OBJCOPY) --only-keep-debug $(UMA_DLLTARGET) $(UMA_DLLTARGET).dbg
-	$(OBJCOPY) --strip-debug $(UMA_DLLTARGET)
-	$(OBJCOPY) --add-gnu-debuglink=$(UMA_DLLTARGET).dbg $(UMA_DLLTARGET)
+	$(OBJCOPY) --only-keep-debug $@ $(@:$(UMA_DOT_DLL)=.debuginfo)
+	$(OBJCOPY) --strip-debug $@
+	$(OBJCOPY) --add-gnu-debuglink=$(@:$(UMA_DOT_DLL)=.debuginfo) $@
 endif
 </#assign>
 
@@ -57,6 +61,11 @@ $(UMA_EXETARGET) : $(UMA_OBJECTS) $(UMA_TARGET_LIBRARIES)
 		$(UMA_END_DASH_L) \
 		$(UMA_LINK_SHARED_LIBRARIES) \
 		-o $@ $(UMA_EXE_POSTFIX_FLAGS)
+ifdef j9vm_uma_gnuDebugSymbols
+	$(OBJCOPY) --only-keep-debug $@ $(@:$(UMA_DOT_EXE)=.debuginfo)
+	$(OBJCOPY) --strip-debug $@
+	$(OBJCOPY) --add-gnu-debuglink=$(@:$(UMA_DOT_EXE)=.debuginfo) $@
+endif
 </#assign>
 
 <#if uma.spec.processor.s390>
@@ -86,7 +95,7 @@ $(UMA_EXETARGET) : $(UMA_OBJECTS) $(UMA_TARGET_LIBRARIES)
 
 UMA_EXE_POSTFIX_FLAGS += -lm -lrt -lpthread -lc -ldl -lutil -Wl,-z,origin,-rpath,\$$ORIGIN,--disable-new-dtags,-rpath-link,$(UMA_PATH_TO_ROOT)
 
-<#if uma.spec.processor.amd64>
+<#if uma.spec.processor.amd64 || uma.spec.processor.riscv64>
   UMA_MASM2GAS_FLAGS += --64
 </#if>
 
@@ -100,7 +109,7 @@ ifndef UMA_DO_NOT_OPTIMIZE_CCODE
   <#if uma.spec.properties.uma_optimization_cflags.defined>
     UMA_OPTIMIZATION_CFLAGS += ${uma.spec.properties.uma_optimization_cflags.value}
   <#else>
-    <#if uma.spec.processor.amd64>
+    <#if uma.spec.processor.amd64 || uma.spec.processor.riscv64>
       UMA_OPTIMIZATION_CFLAGS += -O3 -fno-strict-aliasing
     <#elseif uma.spec.processor.x86>
       UMA_OPTIMIZATION_CFLAGS += -O3 -fno-strict-aliasing -march=pentium4 -mtune=prescott -mpreferred-stack-boundary=4
@@ -126,7 +135,7 @@ ifndef UMA_DO_NOT_OPTIMIZE_CCODE
   <#if uma.spec.properties.uma_optimization_cxxflags.defined>
     UMA_OPTIMIZATION_CXXFLAGS += ${uma.spec.properties.uma_optimization_cxxflags.value}
   <#else>
-    <#if uma.spec.processor.amd64>
+    <#if uma.spec.processor.amd64 || uma.spec.processor.riscv64>
       UMA_OPTIMIZATION_CXXFLAGS += -O3 -fno-strict-aliasing
     <#elseif uma.spec.processor.x86>
       UMA_OPTIMIZATION_CXXFLAGS += -O3 -fno-strict-aliasing -march=pentium4 -mtune=prescott -mpreferred-stack-boundary=4
@@ -167,7 +176,7 @@ to allow compilation with newer GCC versions.
 Reference - https://gcc.gnu.org/gcc-5/porting_to.html.
 -->
 <#if uma.spec.flags.env_gcc.enabled || !uma.spec.processor.ppc>
-# If $(CC) doesn't accept the '-dumpversion' option, assume it's not GCC versions 5 or newer. 
+# If $(CC) doesn't accept the '-dumpversion' option, assume it's not GCC versions 5 or newer.
 GCC_MAJOR_VERSION := $(shell ($(CC) -dumpversion 2>/dev/null || echo 1) | cut -d. -f1)
 
 ifeq (,$(findstring $(GCC_MAJOR_VERSION),1 2 3 4))
@@ -246,7 +255,7 @@ ifdef j9vm_uma_gnuDebugSymbols
   </#if>
 endif
 
-<#if uma.spec.processor.x86 || uma.spec.processor.amd64>
+<#if uma.spec.processor.x86 || uma.spec.processor.amd64 || uma.spec.processor.riscv64>
   <#-- GCC compilers support dependency generation -->
   CFLAGS += -MMD
   CPPFLAGS += -MMD
@@ -263,7 +272,7 @@ CPPFLAGS += -DLINUX -D_REENTRANT
 </#if>
 
 <#-- Add Position Independent compile flag -->
-<#if uma.spec.processor.amd64 || uma.spec.processor.arm || uma.spec.processor.s390>
+<#if uma.spec.processor.amd64 || uma.spec.processor.arm || uma.spec.processor.s390 || uma.spec.processor.riscv64>
   CFLAGS += -fPIC
   CXXFLAGS += -fPIC
 <#elseif uma.spec.processor.ppc>
@@ -297,15 +306,15 @@ endif
 <#if uma.spec.processor.amd64>
   CFLAGS += -DJ9HAMMER -m64 -fstack-protector
   CXXFLAGS += -DJ9HAMMER -m64 -fstack-protector
-  CPPFLAGS += -DJ9HAMMER -m64 -fstack-protector
+  CPPFLAGS += -DJ9HAMMER -m64
 <#elseif uma.spec.processor.arm>
   CFLAGS += -DJ9ARM -DARMGNU -DARM -DFIXUP_UNALIGNED -I$(XCOMP_TOOLCHAIN_BASEDIR)/arm-bcm2708/arm-bcm2708hardfp-linux-gnueabi/arm-bcm2708hardfp-linux-gnueabi/include -fstack-protector
   CXXFLAGS += -DJ9ARM -DARMGNU -DARM -DFIXUP_UNALIGNED -I$(XCOMP_TOOLCHAIN_BASEDIR)/arm-bcm2708/arm-bcm2708hardfp-linux-gnueabi/arm-bcm2708hardfp-linux-gnueabi/include -fno-threadsafe-statics -fstack-protector
-  CPPFLAGS += -DJ9ARM -DARMGNU -DARM -DFIXUP_UNALIGNED-I$(XCOMP_TOOLCHAIN_BASEDIR)/arm-bcm2708/arm-bcm2708hardfp-linux-gnueabi/arm-bcm2708hardfp-linux-gnueabi/include -fstack-protector
+  CPPFLAGS += -DJ9ARM -DARMGNU -DARM -DFIXUP_UNALIGNED-I$(XCOMP_TOOLCHAIN_BASEDIR)/arm-bcm2708/arm-bcm2708hardfp-linux-gnueabi/arm-bcm2708hardfp-linux-gnueabi/include
 <#elseif uma.spec.processor.aarch64>
   CFLAGS += -DJ9AARCH64 -fstack-protector
   CXXFLAGS += -DJ9AARCH64 -fstack-protector
-  CPPFLAGS += -DJ9AARCH64 -fstack-protector
+  CPPFLAGS += -DJ9AARCH64
 <#elseif uma.spec.processor.ppc>
   CFLAGS += -DLINUXPPC
   CXXFLAGS += -DLINUXPPC
@@ -314,11 +323,11 @@ endif
     ifdef j9vm_env_data64
       CFLAGS += -m64 -DLINUXPPC64 -DPPC64 -fstack-protector
       CXXFLAGS += -m64 -DLINUXPPC64 -DPPC64 -fstack-protector
-      CPPFLAGS += -m64 -DLINUXPPC64 -DPPC64 -fstack-protector
+      CPPFLAGS += -m64 -DLINUXPPC64 -DPPC64
     else
       CFLAGS += -m32 -fstack-protector
       CXXFLAGS += -m32 -fstack-protector
-      CPPFLAGS += -m32 -fstack-protector
+      CPPFLAGS += -m32
     endif
   <#else>
     CFLAGS += -qalias=noansi -qxflag=LTOL:LTOL0 -qxflag=selinux
@@ -348,6 +357,15 @@ endif
       PPC_GCC_CXXFLAGS += -DLINUXPPC -m32 -fstack-protector
     endif
   endif
+<#elseif uma.spec.processor.riscv64>
+  CFLAGS   += -DRISCV64
+  CXXFLAGS += -DRISCV64
+  CPPFLAGS += -DRISCV64
+  <#if uma.spec.flags.env_crossbuild.enabled>
+     CFLAGS   += $(SYSROOT_CFLAGS)
+     CXXFLAGS += $(SYSROOT_CFLAGS)
+     CPPFLAGS += $(SYSROOT_CFLAGS)
+  </#if>
 <#elseif uma.spec.processor.s390>
   CFLAGS += $(J9M31) -DS390 -D_LONG_LONG -DJ9VM_TIERED_CODE_CACHE -fno-strict-aliasing
   CXXFLAGS += $(J9M31) -DS390 -D_LONG_LONG -DJ9VM_TIERED_CODE_CACHE -fno-strict-aliasing
@@ -360,7 +378,7 @@ endif
 <#elseif uma.spec.processor.x86>
   CFLAGS += -DJ9X86 -m32 -msse2 -fstack-protector
   CXXFLAGS += -DJ9X86 -m32 -msse2 -I/usr/include/nptl -fno-threadsafe-statics -fstack-protector
-  CPPFLAGS += -DJ9X86 -m32 -msse2 -I/usr/include/nptl -fstack-protector
+  CPPFLAGS += -DJ9X86 -m32 -msse2 -I/usr/include/nptl
 </#if>
 
 <#if uma.spec.processor.ppc && !uma.spec.flags.env_gcc.enabled>
@@ -421,12 +439,6 @@ endif
     UMA_DLL_LINK_POSTFLAGS += -Xlinker -rpath -Xlinker \$$ORIGIN -Xlinker --disable-new-dtags
     UMA_DLL_LINK_POSTFLAGS += -Xlinker -rpath-link -Xlinker $(UMA_PATH_TO_ROOT)
   </#if>
-</#if>
-
-<#if uma.spec.processor.s390>
-  ifdef j9vm_jit_32bitUses64bitRegisters
-    UMA_M4_FLAGS += -DJ9VM_JIT_32BIT_USES64BIT_REGISTERS
-  endif
 </#if>
 
 <#if uma.spec.processor.arm>
@@ -517,7 +529,7 @@ MHInterpreter$(UMA_DOT_O) : MHInterpreter.cpp
 
 endif
 </#if>
-<#if uma.spec.processor.amd64>
+<#if uma.spec.processor.amd64 || uma.spec.processor.riscv64>
 # Special handling for unused result warnings.
 closures$(UMA_DOT_O) : closures.c
 	$(CC) $(CFLAGS) -Wno-unused-result -c -o $@ $<

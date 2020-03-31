@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -26,7 +26,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "codegen/CodeGenerator.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/SymbolReferenceTable.hpp"
 #include "control/Options.hpp"
@@ -43,12 +43,12 @@
 #include "il/ILOps.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "infra/Assert.hpp"
 #include "infra/BitVector.hpp"
 #include "infra/Cfg.hpp"
@@ -140,7 +140,7 @@ int32_t TR_ProfileGenerator::perform()
                   firstChild->incReferenceCount();
                   node->getFirstChild()->recursivelyDecReferenceCount();
                   node->setFirst(firstChild);
-                  
+
                   TR::Node::recreate(node, TR::treetop);
                   }
                else if (node->getOpCode().isStore())
@@ -604,13 +604,13 @@ void TR_ProfileGenerator::createProfiledMethod()
             blockO1c->getExit()->join(blockO1a->getEntry());
 
             // assign pointer     freqPtr = &frequencyArray[0]
-            TR::Node *addrNode = TR::Node::aconst(node, (uintptrj_t)profileInfo->getProfilingFrequencyArray());
+            TR::Node *addrNode = TR::Node::aconst(node, (uintptr_t)profileInfo->getProfilingFrequencyArray());
 
             newNode = TR::Node::createWithSymRef(TR::astore, 1, 1, addrNode, freqPtrSymRef);
             treeTop = TR::TreeTop::create(comp(), treeTop, newNode);
 
             // assign pointer     cntrPtr = &cntrArray[0]
-            addrNode = TR::Node::aconst(node, (uintptrj_t)profileInfo->getProfilingCountArray());
+            addrNode = TR::Node::aconst(node, (uintptr_t)profileInfo->getProfilingCountArray());
 
             newNode = TR::Node::createWithSymRef(TR::astore, 1, 1, addrNode, cntrPtrSymRef);
             treeTop = TR::TreeTop::create(comp(), treeTop, newNode);
@@ -677,7 +677,7 @@ void TR_ProfileGenerator::createProfiledMethod()
             // freqArray and cntrArray (defined in TR_PersistentProfileInfo);
             // If the type of these arrays changes the future, this code will need to be adjusted
             TR::ILOpCodes opCode = TR::aiadd;
-            if (TR::Compiler->target.is64Bit())
+            if (comp()->target().is64Bit())
                {
                offsetNode = TR::Node::create(TR::i2l, 1, offsetNode);
                opCode = TR::aladd;

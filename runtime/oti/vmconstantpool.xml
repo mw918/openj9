@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Copyright (c) 2006, 2019 IBM Corp. and others
+Copyright (c) 2006, 2020 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -62,6 +62,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	<classref name="java/lang/LayerInstantiationException" flags="opt_module" versions="9-"/>
 	<classref name="java/lang/reflect/Method" flags="opt_reflect"/>
 	<classref name="java/lang/reflect/Field" flags="opt_reflect"/>
+	<classref name="java/lang/reflect/RecordComponent" flags="opt_reflect" versions="14-"/>
 	<classref name="java/lang/LinkageError"/>
 	<classref name="java/lang/Byte" flags="opt_reflect"/>
 	<classref name="java/lang/Short" flags="opt_reflect"/>
@@ -129,6 +130,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	<classref name="java/lang/Module" flags="opt_module" versions="9-"/>
 	<classref name="java/lang/invoke/VarHandle" versions="9-"/>
 	<classref name="java/lang/invoke/VarHandleInvokeHandle" versions="9-"/>
+	<classref name="java/lang/invoke/FieldVarHandle" versions="9-"/>
 
 	<fieldref class="java/lang/ClassLoader" name="parent" signature="Ljava/lang/ClassLoader;"/>
 	<fieldref class="java/lang/ClassLoader" name="vmRef" signature="J" cast="struct J9ClassLoader *"/>
@@ -141,6 +143,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	<fieldref class="java/lang/Class" name="initializationLock" signature="Ljava/lang/J9VMInternals$ClassInitializationLock;"/>
 	<fieldref class="java/lang/Class" name="protectionDomain" signature="Ljava/security/ProtectionDomain;"/>
 	<fieldref class="java/lang/Class" name="classNameString" signature="Ljava/lang/String;"/>
+	<fieldref class="java/lang/Class" name="fileNameString" signature="Ljava/lang/String;"/>
 	<fieldref class="java/lang/Class" name="annotationCache" signature="Ljava/lang/Class$AnnotationCache;"/>
 	<fieldref class="java/lang/Class" name="module" signature="Ljava/lang/Module;" flags="opt_module" versions="9-"/>
 	<fieldref class="java/lang/Class" name="methodHandleCache" signature="Ljava/lang/Object;" flags="opt_methodHandle"/>
@@ -190,7 +193,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	<fieldref class="java/lang/Throwable" name="detailMessage" signature="Ljava/lang/String;"/>
 	<fieldref class="java/lang/Throwable" name="walkback" signature="Ljava/lang/Object;"/>
 	<fieldref class="java/lang/Throwable" name="stackTrace" signature="[Ljava/lang/StackTraceElement;"/>
-	<fieldref class="java/lang/Throwable" name="enableWritableStackTrace" signature="Z"/>
+	<fieldref class="java/lang/Throwable" name="disableWritableStackTrace" signature="Z"/>
 	<fieldref class="java/lang/ExceptionInInitializerError" name="exception" signature="Ljava/lang/Throwable;" versions="8-11"/>
 	<fieldref class="java/lang/Boolean" name="value" signature="Z"/>
 	<fieldref class="java/lang/Byte" name="value" signature="B"/>
@@ -238,6 +241,13 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	<fieldref class="java/lang/reflect/Constructor" name="declaringClass" signature="Ljava/lang/Class;">
 		<fieldalias name="clazz"/>
 	</fieldref>
+	<fieldref class="java/lang/reflect/RecordComponent" name="clazz" signature="Ljava/lang/Class;" versions="14-"/>
+	<fieldref class="java/lang/reflect/RecordComponent" name="name" signature="Ljava/lang/String;" versions="14-"/>
+	<fieldref class="java/lang/reflect/RecordComponent" name="type" signature="Ljava/lang/Class;" versions="14-"/>
+	<fieldref class="java/lang/reflect/RecordComponent" name="accessor" signature="Ljava/lang/reflect/Method;" versions="14-"/>
+	<fieldref class="java/lang/reflect/RecordComponent" name="signature" signature="Ljava/lang/String;" versions="14-"/>
+	<fieldref class="java/lang/reflect/RecordComponent" name="annotations" signature="[B" versions="14-"/>
+	<fieldref class="java/lang/reflect/RecordComponent" name="typeAnnotations" signature="[B" versions="14-"/>
 	<fieldref class="java/lang/ThreadGroup" name="name" signature="Ljava/lang/String;"/>
 	<fieldref class="java/lang/ThreadGroup" name="maxPriority" signature="I"/>
 	<fieldref class="java/lang/ThreadGroup" name="parent" signature="Ljava/lang/ThreadGroup;"/>
@@ -318,6 +328,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	<fieldref class="java/lang/invoke/MethodHandleCache" name="directHandlesHead" signature="Lcom/ibm/oti/util/WeakReferenceNode;" flags="opt_methodHandle"/>
 	<fieldref class="java/lang/invoke/VarHandleInvokeHandle" name="operation" signature="I" versions="9-"/>
 	<fieldref class="java/lang/invoke/VarHandleInvokeHandle" name="accessModeType" signature="Ljava/lang/invoke/MethodType;" versions="9-"/>
+	<fieldref class="java/lang/invoke/FieldVarHandle" name="definingClass" signature="Ljava/lang/Class;" versions="9-"/>
 
 	<fieldref class="java/lang/Module" name="loader" signature="Ljava/lang/ClassLoader;" flags="opt_module" versions="9-"/>
 	<fieldref class="java/lang/Module" name="name" signature="Ljava/lang/String;" flags="opt_module" versions="9-"/>
@@ -384,6 +395,8 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	<staticfieldref class="com/ibm/oti/vm/VM" name="J9CLASS_INSTANCESIZE_OFFSET" signature="I"/>
 	<staticfieldref class="com/ibm/oti/vm/VM" name="J9CLASS_INSTANCE_DESCRIPTION_OFFSET" signature="I"/>
 	<staticfieldref class="com/ibm/oti/vm/VM" name="J9CLASS_LOCK_OFFSET_OFFSET" signature="I"/>
+	<staticfieldref class="com/ibm/oti/vm/VM" name="J9CLASS_LOCK_RESERVATION_HISTORY_RESERVED_COUNTER_OFFSET" signature="I"/>
+	<staticfieldref class="com/ibm/oti/vm/VM" name="J9CLASS_LOCK_RESERVATION_HISTORY_CANCEL_COUNTER_OFFSET" signature="I"/>
 
 	<staticfieldref class="com/ibm/oti/vm/VM" name="J9CLASS_INITIALIZE_STATUS_OFFSET" signature="I"/>
 	<staticfieldref class="com/ibm/oti/vm/VM" name="OBJECT_HEADER_SIZE" signature="I"/>
@@ -410,4 +423,11 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 
 	<staticfieldref class="com/ibm/oti/vm/VM" name="J9CLASS_RESERVABLE_LOCK_WORD_INIT" signature="I"/>
 	<staticfieldref class="com/ibm/oti/vm/VM" name="OBJECT_HEADER_LOCK_RESERVED" signature="I"/>
+	<staticfieldref class="com/ibm/oti/vm/VM" name="OBJECT_HEADER_LOCK_LEARNING" signature="I"/>
+
+	<staticfieldref class="com/ibm/oti/vm/VM" name="GLR_ENABLE_GLOBAL_LOCK_RESERVATION" signature="I"/>
+	<staticfieldref class="com/ibm/oti/vm/VM" name="GLR_RESERVED_ABSOLUTE_THRESHOLD" signature="I"/>
+	<staticfieldref class="com/ibm/oti/vm/VM" name="GLR_MINIMUM_RESERVED_RATIO" signature="I"/>
+	<staticfieldref class="com/ibm/oti/vm/VM" name="GLR_CANCEL_ABSOLUTE_THRESHOLD" signature="I"/>
+	<staticfieldref class="com/ibm/oti/vm/VM" name="GLR_MINIMUM_LEARNING_RATIO" signature="I"/>
 </vmconstantpool>

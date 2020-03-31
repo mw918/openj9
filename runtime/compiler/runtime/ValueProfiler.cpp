@@ -24,7 +24,7 @@
 #include <math.h>
 #include <stdint.h>
 #include "j9.h"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/ResolvedMethod.hpp"
 #include "env/jittypes.h"
@@ -219,17 +219,26 @@ TR_AbstractHashTableProfilerInfo::lock()
 bool
 TR_AbstractHashTableProfilerInfo::tryLock(bool disableJITAccess)
    {
+   // Current state must be unlocked
+   MetaData unlocked;
+   unlocked.rawData = *(volatile uint32_t*)&_metaData.rawData;
+   unlocked.lock = 0;
+
    // Set lock and, if desired, clear high bit in other index
-   MetaData locked = _metaData;
+   MetaData locked = unlocked;
    if (disableJITAccess && locked.otherIndex < 0)
       locked.otherIndex = ~locked.otherIndex;
    locked.lock = 1;
 
-   // Current state must be unlocked
-   MetaData unlocked = _metaData;
-   unlocked.lock = 0;
-
-   return unlocked.rawData == VM_AtomicSupport::lockCompareExchangeU32((uint32_t*) &_metaData, unlocked.rawData, locked.rawData);
+   if (unlocked.rawData == VM_AtomicSupport::lockCompareExchangeU32(&_metaData.rawData, unlocked.rawData, locked.rawData))
+      {
+      VM_AtomicSupport::readBarrier();
+      return true;
+      }
+   else
+      {
+      return false;
+      }
    }
 
 /**
@@ -242,6 +251,8 @@ TR_AbstractHashTableProfilerInfo::unlock(bool enableJITAccess)
    {
    MetaData locked = _metaData;
    MetaData unlocked = _metaData;
+
+   VM_AtomicSupport::writeBarrier();
 
    do {
       locked.rawData = _metaData.rawData;
@@ -262,8 +273,8 @@ JIT_HELPER(_jitProfileBigDecimalValue);
 JIT_HELPER(_jitProfileStringValue);
 JIT_HELPER(_jitProfileAddress);
 JIT_HELPER(_jitProfileWarmCompilePICAddress);
-JIT_HELPER(_jProfile32BitValue);
-JIT_HELPER(_jProfile64BitValue);
+JIT_HELPER(jProfile32BitValue);
+JIT_HELPER(jProfile64BitValue);
 
 void PPCinitializeValueProfiler()
    {
@@ -274,7 +285,7 @@ void PPCinitializeValueProfiler()
    SET(TR_jitProfileLongValue,             (void *) _jitProfileLongValue,             TR_Helper);
    SET(TR_jitProfileBigDecimalValue,       (void *) _jitProfileBigDecimalValue,       TR_Helper);
    SET(TR_jitProfileStringValue,           (void *) _jitProfileStringValue,           TR_Helper);
-   SET(TR_jProfile32BitValue,              (void *) _jProfile32BitValue,              TR_Helper);
-   SET(TR_jProfile64BitValue,              (void *) _jProfile64BitValue,              TR_Helper);
+   SET(TR_jProfile32BitValue,              (void *) jProfile32BitValue,               TR_Helper);
+   SET(TR_jProfile64BitValue,              (void *) jProfile64BitValue,               TR_Helper);
    }
 #endif

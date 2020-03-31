@@ -1,5 +1,5 @@
 ###############################################################################
-# Copyright (c) 2016, 2018 IBM Corp. and others
+# Copyright (c) 2016, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -31,7 +31,8 @@ CONFIGURE_ARGS += \
 	--enable-OMRTHREAD_LIB_UNIX \
 	--enable-OMR_ARCH_S390 \
 	--enable-OMR_ENV_DATA64 \
-	--enable-OMR_GC_CONCURRENT_SCAVENGER
+	--enable-OMR_GC_CONCURRENT_SCAVENGER \
+	OMR_GC_POINTER_MODE=full
 
 
 CONFIGURE_ARGS += libprefix=lib exeext= solibext=.so arlibext=.a objext=.o

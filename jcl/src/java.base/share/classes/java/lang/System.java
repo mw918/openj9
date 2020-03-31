@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar16]*/
+/*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -177,7 +177,7 @@ public final class System {
 		/*[ELSE]*/
 		StringCoding.encode(new char[1], 0, 1);
 		/*[ENDIF]*/
-		/*[IF Sidecar18-SE-OpenJ9|Sidecar19-SE]*/
+		/*[IF (Sidecar18-SE-OpenJ9|Sidecar19-SE)&!(PLATFORM-mz31|PLATFORM-mz64)]*/
 		setErr(new PrintStream(new BufferedOutputStream(new FileOutputStream(FileDescriptor.err)), true));
 		setOut(new PrintStream(new BufferedOutputStream(new FileOutputStream(FileDescriptor.out)), true));
 		/*[IF Sidecar19-SE_RAWPLUSJ9]*/
@@ -220,7 +220,7 @@ static void completeInitialization() {
 	}
 	/*[ENDIF]*/ // Sidecar18-SE-OpenJ9
 	
-	/*[IF Sidecar18-SE-OpenJ9|Sidecar19-SE]*/
+	/*[IF (Sidecar18-SE-OpenJ9|Sidecar19-SE)&!(PLATFORM-mz31|PLATFORM-mz64)]*/
 	setIn(new BufferedInputStream(new FileInputStream(FileDescriptor.in)));
 	/*[ELSE]*/
 	/*[PR 100718] Initialize System.in after the main thread*/
@@ -493,6 +493,9 @@ private static void ensureProperties(boolean isInitialization) {
 /*[ELSE]
 	systemProperties = initializedProperties;
 /*[ENDIF] Java12 */
+	
+	/* Preload system property jdk.serialFilter to prevent later modification */
+	jdk.internal.util.StaticProperty.jdkSerialFilter();
 }
 
 /* Converts a Map<String, String> to a properties object.
@@ -860,13 +863,11 @@ public static void setSecurityManager(final SecurityManager s) {
 						// also load security sensitive classes 
 						com.ibm.oti.util.Msg.getString("K002c"); //$NON-NLS-1$
 					}
-					ProtectionDomain oldDomain = currentSecurity == null ?
-						System.class.getPDImpl() : currentSecurity.getClass().getPDImpl();
-					ProtectionDomain newDomain = s.getClass().getPDImpl();
-					if (oldDomain != newDomain) {
+					ProtectionDomain pd = s.getClass().getPDImpl();
+					if (pd != null) {
 						// initialize the protection domain, which may include preloading the
 						// dynamic permissions from the policy before installing
-						newDomain.implies(new AllPermission());
+						pd.implies(sun.security.util.SecurityConstants.ALL_PERMISSION);
 					}
 					return null;
 				}});

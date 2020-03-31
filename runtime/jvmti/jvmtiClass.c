@@ -1181,11 +1181,6 @@ redefineClassesCommon(jvmtiEnv* env,
 				/* Fix resolved constant pool references to point to new methods. */
 				fixConstantPoolsForFastHCR(currentThread, classPairs, methodPairs);
 
-#ifdef J9VM_OPT_SIDECAR
-				/* Fix return bytecodes in unsafe classes */
-				fixReturnsInUnsafeMethods(currentThread, classPairs);
-#endif
-
 				/* Flush the reflect method cache */
 				flushClassLoaderReflectCache(currentThread, classPairs);
 
@@ -1239,11 +1234,6 @@ redefineClassesCommon(jvmtiEnv* env,
 				if (!extensionsUsed) {
 					fixVTables_forNormalRedefine(currentThread, classPairs, methodPairs, FALSE, &methodEquivalences);
 				}
-
-#ifdef J9VM_OPT_SIDECAR
-				/* Fix return bytecodes in unsafe classes */
-				fixReturnsInUnsafeMethods(currentThread, classPairs);
-#endif
 
 				/* Restore breakpoints in the implicitly replaced classes */
 				restoreBreakpointsInClasses(currentThread, classPairs);
@@ -2617,7 +2607,7 @@ jvmtiGetConstantPool_addMethodHandle(jvmtiGcp_translation *translation, UDATA cp
 	entry.key = (void *) cpIndex;
 	entry.cpType = cpType;
 	entry.sunCpIndex = *sunCpIndex;
-	entry.type.methodHandle.methodOrFieldRefIndex = 0;
+	entry.type.methodHandle.methodOrFieldRefIndex = (*sunCpIndex) + 1;
 	entry.type.methodHandle.handleType = ref->handleTypeAndCpType >> J9DescriptionCpTypeShift;
 	if (NULL == (htEntry = hashTableAdd(translation->ht, &entry))) {
 		return JVMTI_ERROR_OUT_OF_MEMORY;

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -21,9 +21,10 @@
  *******************************************************************************/
 
 #include "ClientStream.hpp"
+#include "control/CompilationRuntime.hpp"
 #include "control/Options.hpp"
 #include "env/VerboseLog.hpp"
-#include "net/SSLProtobufStream.hpp"
+#include "net/LoadSSLLibs.hpp"
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -35,10 +36,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h> /// gethostname, read, write
-#if defined(JITSERVER_ENABLE_SSL)
 #include <openssl/err.h>
-#include "control/CompilationRuntime.hpp"
-#endif
 
 namespace JITServer
 {
@@ -55,24 +53,23 @@ const int ClientStream::INCOMPATIBILITY_COUNT_LIMIT = 5;
 // This is called during startup from rossa.cpp
 int ClientStream::static_init(TR::PersistentInfo *info)
    {
-#if defined(JITSERVER_ENABLE_SSL)
    if (!CommunicationStream::useSSL())
       return 0;
 
    CommunicationStream::initSSL();
 
-   SSL_CTX *ctx = SSL_CTX_new(SSLv23_client_method());
+   SSL_CTX *ctx = (*OSSL_CTX_new)((*OSSLv23_client_method)());
    if (!ctx)
       {
       perror("can't create SSL context");
-      ERR_print_errors_fp(stderr);
+      (*OERR_print_errors_fp)(stderr);
       return -1;
       }
 
-   if (SSL_CTX_set_ecdh_auto(ctx, 1) != 1)
+   if ((*OSSL_CTX_set_ecdh_auto)(ctx, 1) != 1)
       {
       perror("failed to configure SSL ecdh");
-      ERR_print_errors_fp(stderr);
+      (*OERR_print_errors_fp)(stderr);
       return -1;
       }
 
@@ -86,52 +83,50 @@ int ClientStream::static_init(TR::PersistentInfo *info)
    TR_ASSERT_FATAL(sslKeys.size() == 0 && sslCerts.size() == 0, "client keypairs are not yet supported, use a root cert chain instead");
 
    // Parse and set certificate chain
-   BIO *certMem = BIO_new_mem_buf(&sslRootCerts[0], sslRootCerts.size());
+   BIO *certMem = (*OBIO_new_mem_buf)(&sslRootCerts[0], sslRootCerts.size());
    if (!certMem)
       {
       perror("cannot create memory buffer for cert (OOM?)");
-      ERR_print_errors_fp(stderr);
+      (*OERR_print_errors_fp)(stderr);
       return -1;
       }
-   STACK_OF(X509_INFO) *certificates = PEM_X509_INFO_read_bio(certMem, NULL, NULL, NULL);
+   STACK_OF(X509_INFO) *certificates = (*OPEM_X509_INFO_read_bio)(certMem, NULL, NULL, NULL);
    if (!certificates)
       {
       perror("cannot parse cert");
-      ERR_print_errors_fp(stderr);
+      (*OERR_print_errors_fp)(stderr);
       return -1;
       }
-   X509_STORE *certStore = SSL_CTX_get_cert_store(ctx);
+   X509_STORE *certStore = (*OSSL_CTX_get_cert_store)(ctx);
    if (!certStore)
       {
       perror("cannot get cert store");
-      ERR_print_errors_fp(stderr);
+      (*OERR_print_errors_fp)(stderr);
       return -1;
       }
+
    // add all certificates in the chain to the cert store
-   for (size_t i = 0; i < sk_X509_INFO_num(certificates); i++)
+   for (size_t i = 0; i < (*Osk_X509_INFO_num)(certificates); i++)
       {
-      X509_INFO *certInfo = sk_X509_INFO_value(certificates, i);
+      X509_INFO *certInfo = (*Osk_X509_INFO_value)(certificates, i);
       if (certInfo->x509)
-         X509_STORE_add_cert(certStore, certInfo->x509);
+         (*OX509_STORE_add_cert)(certStore, certInfo->x509);
       if (certInfo->crl)
-         X509_STORE_add_crl(certStore, certInfo->crl);
+         (*OX509_STORE_add_crl)(certStore, certInfo->crl);
       }
-   sk_X509_INFO_pop_free(certificates, X509_INFO_free);
+   (*Osk_X509_INFO_pop_free)(certificates, (*OX509_INFO_free));
 
    // verify server identity using standard method
-   SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+   (*OSSL_CTX_set_verify)(ctx, SSL_VERIFY_PEER, NULL);
 
    _sslCtx = ctx;
 
    if (TR::Options::getVerboseOption(TR_VerboseJITServer))
-      TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Successfully initialized SSL context: OPENSSL_VERSION_NUMBER 0x%lx\n", OPENSSL_VERSION_NUMBER);
-#endif
+      TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Successfully initialized SSL context (%s) \n", (*OOpenSSL_version)(0));
    return 0;
    }
 
-#if defined(JITSERVER_ENABLE_SSL)
 SSL_CTX *ClientStream::_sslCtx = NULL;
-#endif
 
 int openConnection(const std::string &address, uint32_t port, uint32_t timeoutMs)
    {
@@ -192,68 +187,68 @@ int openConnection(const std::string &address, uint32_t port, uint32_t timeoutMs
    return sockfd;
    }
 
-#if defined(JITSERVER_ENABLE_SSL)
 BIO *openSSLConnection(SSL_CTX *ctx, int connfd)
    {
    if (!ctx)
       return NULL;
 
-   SSL *ssl = SSL_new(ctx);
+   SSL *ssl = (*OSSL_new)(ctx);
    if (!ssl)
       {
-      ERR_print_errors_fp(stderr);
+      (*OERR_print_errors_fp)(stderr);
       throw JITServer::StreamFailure("Failed to create new SSL connection");
       }
 
-   SSL_set_connect_state(ssl);
+   (*OSSL_set_connect_state)(ssl);
 
-   if (SSL_set_fd(ssl, connfd) != 1)
+   if ((*OSSL_set_fd)(ssl, connfd) != 1)
       {
-      ERR_print_errors_fp(stderr);
-      SSL_free(ssl);
+      (*OERR_print_errors_fp)(stderr);
+      (*OSSL_free)(ssl);
       throw JITServer::StreamFailure("Cannot set file descriptor for SSL");
       }
-   if (SSL_connect(ssl) != 1)
+   if ((*OSSL_connect)(ssl) != 1)
       {
-      ERR_print_errors_fp(stderr);
-      SSL_free(ssl);
+      (*OERR_print_errors_fp)(stderr);
+      (*OSSL_free)(ssl);
       throw JITServer::StreamFailure("Failed to SSL_connect");
       }
 
-   X509* cert = SSL_get_peer_certificate(ssl);
+   X509* cert = (*OSSL_get_peer_certificate)(ssl);
    if (!cert)
       {
-      ERR_print_errors_fp(stderr);
-      SSL_free(ssl);
+      (*OERR_print_errors_fp)(stderr);
+      (*OSSL_free)(ssl);
       throw JITServer::StreamFailure("Server certificate unspecified");
       }
-   X509_free(cert);
+   (*OX509_free)(cert);
 
-   if (X509_V_OK != SSL_get_verify_result(ssl))
+   if (X509_V_OK != (*OSSL_get_verify_result)(ssl))
       {
-      ERR_print_errors_fp(stderr);
-      SSL_free(ssl);
+      (*OERR_print_errors_fp)(stderr);
+      (*OSSL_free)(ssl);
       throw JITServer::StreamFailure("Server certificate verification failed");
       }
 
-   BIO *bio = BIO_new_ssl(ctx, true);
+   BIO *bio = (*OBIO_new_ssl)(ctx, true);
    if (!bio)
       {
-      ERR_print_errors_fp(stderr);
-      SSL_free(ssl);
+      (*OERR_print_errors_fp)(stderr);
+      (*OSSL_free)(ssl);
       throw JITServer::StreamFailure("Failed to make new BIO");
       }
-   if (BIO_set_ssl(bio, ssl, true) != 1)
+
+   if ((*OBIO_ctrl)(bio, BIO_C_SET_SSL, true, (char *)ssl) != 1) // BIO_set_ssl(bio, ssl, true)
       {
-      ERR_print_errors_fp(stderr);
-      BIO_free_all(bio);
-      SSL_free(ssl);
+      (*OERR_print_errors_fp)(stderr);
+      (*OBIO_free_all)(bio);
+      (*OSSL_free)(ssl);
       throw JITServer::StreamFailure("Failed to set BIO SSL");
       }
 
    if (TR::Options::getVerboseOption(TR_VerboseJITServer))
       TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "SSL connection on socket 0x%x, Version: %s, Cipher: %s\n",
-                                                      connfd, SSL_get_version(ssl), SSL_get_cipher(ssl));
+                                                      connfd, (*OSSL_get_version)(ssl), (*OSSL_get_cipher)(ssl));
    return bio;
    }
 
@@ -265,14 +260,4 @@ ClientStream::ClientStream(TR::PersistentInfo *info)
    initStream(connfd, ssl);
    _numConnectionsOpened++;
    }
-#else // JITSERVER_ENABLE_SSL
-ClientStream::ClientStream(TR::PersistentInfo *info)
-   : CommunicationStream(), _versionCheckStatus(NOT_DONE)
-   {
-   int connfd = openConnection(info->getJITServerAddress(), info->getJITServerPort(), info->getSocketTimeout());
-   initStream(connfd);
-   _numConnectionsOpened++;
-   }
-#endif
-
 };

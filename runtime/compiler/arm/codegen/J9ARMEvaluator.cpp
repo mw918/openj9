@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,7 +20,6 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
-#ifdef TR_TARGET_ARM
 #include <stdint.h>
 #include "j9.h"
 #include "j9cfg.h"
@@ -119,7 +118,7 @@ static int32_t numberOfRegisterCandidate(TR::Node *depNode, TR_RegisterKinds kin
 TR::Instruction *OMR::ARM::TreeEvaluator::generateVFTMaskInstruction(TR::CodeGenerator *cg, TR::Node *node, TR::Register *dstReg, TR::Register *srcReg, TR::Instruction *prev)
    {
    TR_J9VMBase *fej9 = (TR_J9VMBase *) (cg->fe());
-   uintptrj_t mask = TR::Compiler->om.maskOfObjectVftField();
+   uintptr_t mask = TR::Compiler->om.maskOfObjectVftField();
 #ifdef OMR_GC_COMPRESSED_POINTERS
    bool isCompressed = true;
 #else
@@ -864,7 +863,7 @@ TR::Register *OMR::ARM::TreeEvaluator::VMmonexitEvaluator(TR::Node *node, TR::Co
 
    if (comp->getOption(TR_OptimizeForSpace) ||
        (comp->getOption(TR_FullSpeedDebug) /*&& !comp->getOption(TR_EnableLiveMonitorMetadata)*/) ||
-       comp->getOption(TR_DisableInlineMonEnt) ||
+       comp->getOption(TR_DisableInlineMonExit) ||
        lwOffset <= 0)
       {
       TR::ILOpCodes opCode = node->getOpCodeValue();
@@ -892,9 +891,9 @@ TR::Register *OMR::ARM::TreeEvaluator::VMmonexitEvaluator(TR::Node *node, TR::Co
    TR::Instruction *instr = generateTrg1ImmInstruction(cg, ARMOp_mov, node, flagReg, 0, 0);
    instr->setConditionCode(ARMConditionCodeEQ);
 
-   if (TR::Compiler->target.isSMP() && TR::Compiler->target.cpu.id() != TR_DefaultARMProcessor)
+   if (cg->comp()->target().isSMP() && cg->comp()->target().cpu.id() != TR_DefaultARMProcessor)
       {
-      //instr = generateInstruction(cg, (TR::Compiler->target.cpu.id() == TR_ARMv6) ? ARMOp_dmb_v6 : ARMOp_dmb, node);
+      //instr = generateInstruction(cg, (cg->comp()->target().cpu.id() == TR_ARMv6) ? ARMOp_dmb_v6 : ARMOp_dmb, node);
       instr = generateInstruction(cg, ARMOp_dmb_v6 , node); // v7 version is unconditional
       instr->setConditionCode(ARMConditionCodeEQ);
       }
@@ -933,7 +932,7 @@ static void genHeapAlloc(TR::CodeGenerator  *cg,
                          TR::LabelSymbol     *callLabel,
                          int32_t            allocSize)
    {
-   if (TR::Options::getCmdLineOptions()->realTimeGC())
+   if (cg->comp()->getOptions()->realTimeGC())
       {
       TR_ASSERT(0, "genHeapAlloc() not supported for RT");
       return;
@@ -1213,10 +1212,15 @@ TR::Register *OMR::ARM::TreeEvaluator::VMnewEvaluator(TR::Node *node, TR::CodeGe
 
    // AOT does not support inline allocates - cannot currently guarantee totalInstanceSize
 
+   // If the helper symbol set on the node is TR_newValue, we are (expecting to be)
+   // dealing with a value type. Since we do not fully support value types yet, always
+   // call the JIT helper to do the allocation.
+
    TR::ILOpCodes opCode        = node->getOpCodeValue();
    int32_t      objectSize    = cg->comp()->canAllocateInlineOnStack(node, (TR_OpaqueClassBlock *&) clazz);
    bool         isVariableLen = (objectSize == 0);
-   if (objectSize < 0 || comp->compileRelocatableCode() || comp->suppressAllocationInlining())
+   if (objectSize < 0 || comp->compileRelocatableCode() || comp->suppressAllocationInlining() ||
+       (TR::Compiler->om.areValueTypesEnabled() && node->getSymbolReference() == comp->getSymRefTab()->findOrCreateNewValueSymbolRef(comp->getMethodSymbol())))
       {
       TR::Node::recreate(node, TR::acall);
       callResult = directCallEvaluator(node, cg);
@@ -1243,12 +1247,12 @@ TR::Register *OMR::ARM::TreeEvaluator::VMnewEvaluator(TR::Node *node, TR::CodeGe
          iCursor = generateTrg1Src1Instruction(cg, ARMOp_mov, node, copyReg, classReg, iCursor);
          classReg = copyReg;
          }
-      dataBegin = sizeof(J9Object);
+      dataBegin = TR::Compiler->om.objectHeaderSizeInBytes();
       }
    else
       {
       isArray = true;
-      dataBegin = sizeof(J9IndexableObjectContiguous);
+      dataBegin = TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
       secondChild = node->getSecondChild();
 #ifndef J9VM_GC_ALIGN_OBJECTS
       if (opCode == TR::newarray)
@@ -1480,9 +1484,9 @@ OMR::ARM::TreeEvaluator::VMmonentEvaluator(TR::Node *node, TR::CodeGenerator *cg
    generateSrc1ImmInstruction(cg, ARMOp_cmp, node, tempReg, 0, 0);
    generateConditionalBranchInstruction(cg, node, ARMConditionCodeNE, loopLabel);
 
-   if (TR::Compiler->target.isSMP() && TR::Compiler->target.cpu.id() != TR_DefaultARMProcessor)
+   if (cg->comp()->target().isSMP() && cg->comp()->target().cpu.id() != TR_DefaultARMProcessor)
       {
-      generateInstruction(cg, (TR::Compiler->target.cpu.id() == TR_ARMv6) ? ARMOp_dmb_v6 : ARMOp_dmb, node);
+      generateInstruction(cg, (cg->comp()->target().cpu.id() == TR_ARMv6) ? ARMOp_dmb_v6 : ARMOp_dmb, node);
       }
 
    generateLabelInstruction(cg, ARMOp_label, node, doneLabel, deps);
@@ -1711,11 +1715,3 @@ void VMgenerateCatchBlockBBStartPrologue(TR::Node *node, TR::Instruction *fenceI
    {
    /* @@ not implemented @@ */
    }
-
-#else /* TR_TARGET_ARM   */
-// the following is to force an export to keep ilib happy
-int J9ARMEvaluator=0;
-#endif /* TR_TARGET_ARM   */
-
-
-

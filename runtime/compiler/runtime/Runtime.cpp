@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -37,8 +37,9 @@
 #include "jitprotos.h"
 #include "rommeth.h"
 #include "emfloat.h"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "codegen/PreprologueConst.hpp"
+#include "codegen/PrivateLinkage.hpp"
 #include "control/Recompilation.hpp"
 #include "control/RecompilationInfo.hpp"
 #include "env/jittypes.h"
@@ -54,23 +55,12 @@ extern "C" int32_t _getnumRTHelpers();  /* 390 asm stub */
 
 extern TR_PersistentMemory * trPersistentMemory;
 
-void TR_LinkageInfo::setHasBeenRecompiled()
-   {
-   TR_ASSERT((_word & HasFailedRecompilation)==0, "Cannot setHasBeenRecompiled because method has failed recompilation");
-   _word |= HasBeenRecompiled;
-   }
-void TR_LinkageInfo::setHasFailedRecompilation()
-   {
-   TR_ASSERT((_word & HasBeenRecompiled) == 0, "Cannot setHasFailedRecompilation because method has been recompiled");
-   _word |= HasFailedRecompilation;
-   }
-
 extern "C" {
 TR_UnloadedClassPicSite *createClassUnloadPicSite(void *classPointer, void *addressToBePatched, uint32_t size,
                                                   OMR::RuntimeAssumption **sentinel)
    {
    TR_FrontEnd * fe = (TR_FrontEnd*)jitConfig->compilationInfo; // ugly, but codert cannot include VMJ9.h
-   return TR_UnloadedClassPicSite::make(fe, trPersistentMemory, (uintptrj_t) classPointer,
+   return TR_UnloadedClassPicSite::make(fe, trPersistentMemory, (uintptr_t) classPointer,
       (uint8_t*)addressToBePatched, size, RuntimeAssumptionOnClassRedefinitionPIC, sentinel);
    }
 
@@ -80,11 +70,11 @@ void jitAddPicToPatchOnClassUnload(void *classPointer, void *addressToBePatched)
       J9VMThread          *vmContext = vm->internalVMFunctions->currentVMThread(vm);
       J9JITExceptionTable *metaData  = jitConfig->jitGetExceptionTableFromPC(vmContext, (UDATA)addressToBePatched);
 
-      if (!createClassUnloadPicSite(classPointer, addressToBePatched, sizeof(uintptrj_t),
+      if (!createClassUnloadPicSite(classPointer, addressToBePatched, sizeof(uintptr_t),
                                     (OMR::RuntimeAssumption**)(&metaData->runtimeAssumptionList))
          || debug("failToRegisterPicSitesForClassUnloading"))
          {
-         *(uintptrj_t*)addressToBePatched = 0x0101dead;
+         *(uintptr_t*)addressToBePatched = 0x0101dead;
          }
 
    }
@@ -93,7 +83,7 @@ void createJNICallSite(void *ramMethod, void *addressToBePatched, OMR::RuntimeAs
    {
    TR_FrontEnd * fe = (TR_FrontEnd*)jitConfig->compilationInfo; // ugly, but codert cannot include VMJ9.h
 
-   TR_PatchJNICallSite::make(fe, trPersistentMemory, (uintptrj_t) ramMethod, (uint8_t *) addressToBePatched, sentinel);
+   TR_PatchJNICallSite::make(fe, trPersistentMemory, (uintptr_t) ramMethod, (uint8_t *) addressToBePatched, sentinel);
 
    }
 
@@ -119,12 +109,12 @@ void createClassRedefinitionPicSite(void *classPointer, void *addressToBePatched
    TR_FrontEnd * fe = (TR_FrontEnd*)jitConfig->compilationInfo; // ugly, but codert cannot include VMJ9.h
    if (unresolved)
       {
-      TR_RedefinedClassUPicSite::make(fe, trPersistentMemory, (uintptrj_t) classPointer,
+      TR_RedefinedClassUPicSite::make(fe, trPersistentMemory, (uintptr_t) classPointer,
                                       (uint8_t*)addressToBePatched, size, sentinel);
       }
    else
       {
-      TR_RedefinedClassRPicSite::make(fe, trPersistentMemory, (uintptrj_t) classPointer,
+      TR_RedefinedClassRPicSite::make(fe, trPersistentMemory, (uintptr_t) classPointer,
                                      (uint8_t*)addressToBePatched, size, sentinel);
       }
    }
@@ -134,7 +124,7 @@ void jitAddPicToPatchOnClassRedefinition(void *classPointer, void *addressToBePa
    J9JavaVM            *vm        = jitConfig->javaVM;
    J9VMThread          *vmThread  = vm->internalVMFunctions->currentVMThread(vm);
    J9JITExceptionTable *metaData  = jitConfig->jitGetExceptionTableFromPC(vmThread, (UDATA)addressToBePatched);
-   createClassRedefinitionPicSite(classPointer, addressToBePatched, sizeof(uintptrj_t), unresolved,
+   createClassRedefinitionPicSite(classPointer, addressToBePatched, sizeof(uintptr_t), unresolved,
                                   (OMR::RuntimeAssumption**)(&metaData->runtimeAssumptionList));
    }
 
@@ -216,18 +206,6 @@ JIT_HELPER(icallVMprJavaSendInvokeExactD);
 JIT_HELPER(icallVMprJavaSendInvokeWithArgumentsHelperL);
 JIT_HELPER(initialInvokeExactThunk_unwrapper);
 
-JIT_HELPER(MTUnresolvedInt32Load);
-JIT_HELPER(MTUnresolvedInt64Load);
-JIT_HELPER(MTUnresolvedFloatLoad);
-JIT_HELPER(MTUnresolvedDoubleLoad);
-JIT_HELPER(MTUnresolvedAddressLoad);
-
-JIT_HELPER(MTUnresolvedInt32Store);
-JIT_HELPER(MTUnresolvedInt64Store);
-JIT_HELPER(MTUnresolvedFloatStore);
-JIT_HELPER(MTUnresolvedDoubleStore);
-JIT_HELPER(MTUnresolvedAddressStore);
-
 JIT_HELPER(estimateGPU);
 JIT_HELPER(regionEntryGPU);
 JIT_HELPER(regionExitGPU);
@@ -293,8 +271,14 @@ JIT_HELPER(interpreterUnresolvedSpecialGlue);
 JIT_HELPER(interpreterUnresolvedStaticGlue);
 
 #ifdef J9VM_OPT_JAVA_CRYPTO_ACCELERATION
-JIT_HELPER(doAESInHardwareJit);
-JIT_HELPER(expandAESKeyInHardwareJit);
+#if defined(OMR_GC_FULL_POINTERS)
+JIT_HELPER(doAESInHardwareJitFull);
+JIT_HELPER(expandAESKeyInHardwareJitFull);
+#endif /* defined(OMR_GC_FULL_POINTERS) */
+#if defined(OMR_GC_COMPRESSED_POINTERS)
+JIT_HELPER(doAESInHardwareJitCompressed);
+JIT_HELPER(expandAESKeyInHardwareJitCompressed);
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
 #endif
 
 JIT_HELPER(jitMonitorEnterReserved);
@@ -311,8 +295,6 @@ JIT_HELPER(jitMethodMonitorExitReservedPrimitive);
 JIT_HELPER(jitMethodMonitorExitReserved);
 JIT_HELPER(prefetchTLH);
 JIT_HELPER(newPrefetchTLH);
-JIT_HELPER(outlinedNewObject);
-JIT_HELPER(outlinedNewArray);
 
 JIT_HELPER(arrayTranslateTRTO);
 JIT_HELPER(arrayTranslateTROTNoBreak);
@@ -457,9 +439,6 @@ JIT_HELPER(ECP256addNoMod_PPC);
 JIT_HELPER(ECP256subNoMod_PPC);
 #endif
 
-#ifdef ENABLE_SIMD_LIB
-JIT_HELPER(__logd2);
-#endif
 #ifndef LINUX
 JIT_HELPER(__compressString);
 JIT_HELPER(__compressStringNoCheck);
@@ -467,7 +446,6 @@ JIT_HELPER(__compressStringJ);
 JIT_HELPER(__compressStringNoCheckJ);
 JIT_HELPER(__andORString);
 #endif
-JIT_HELPER(__arrayTranslateTRTOSimpleVMX);
 JIT_HELPER(__arrayTranslateTRTO);
 JIT_HELPER(__arrayTranslateTRTO255);
 JIT_HELPER(__arrayTranslateTROT255);
@@ -563,6 +541,11 @@ JIT_HELPER(_interpreterUnresolvedDirectVirtualGlue);
 JIT_HELPER(_interpreterUnresolvedClassGlue);
 JIT_HELPER(_interpreterUnresolvedClassGlue2);
 JIT_HELPER(_interpreterUnresolvedStringGlue);
+JIT_HELPER(_interpreterUnresolvedConstantDynamicGlue);
+JIT_HELPER(_interpreterUnresolvedMethodTypeGlue);
+JIT_HELPER(_interpreterUnresolvedMethodHandleGlue);
+JIT_HELPER(_interpreterUnresolvedCallSiteTableEntryGlue);
+JIT_HELPER(_interpreterUnresolvedMethodTypeTableEntryGlue);
 JIT_HELPER(_interpreterUnresolvedStaticDataGlue);
 JIT_HELPER(_interpreterUnresolvedStaticDataStoreGlue);
 JIT_HELPER(_interpreterUnresolvedInstanceDataGlue);
@@ -588,8 +571,6 @@ JIT_HELPER(_nativeStaticHelper);
 JIT_HELPER(_interfaceDispatch);
 
 #elif defined(TR_HOST_S390)
-JIT_HELPER(outlinedNewObject);
-JIT_HELPER(outlinedNewArray);
 JIT_HELPER(__double2Long);
 JIT_HELPER(__doubleRemainder);
 JIT_HELPER(__floatRemainder);
@@ -1027,22 +1008,27 @@ void initializeCodeRuntimeHelperTable(J9JITConfig *jitConfig, char isSMP)
 
 #if (defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390)) && defined(J9VM_JIT_NEW_DUAL_HELPERS)
    SET(TR_newObject,                  (void *)jitNewObject,              TR_CHelper);
+   SET(TR_newValue,                   (void *)jitNewValue,              TR_CHelper);
    SET(TR_newArray,                   (void *)jitNewArray,               TR_CHelper);
    SET(TR_aNewArray,                  (void *)jitANewArray,              TR_CHelper);
 
    SET(TR_newObjectNoZeroInit,        (void *)jitNewObjectNoZeroInit, TR_CHelper);
+   SET(TR_newValueNoZeroInit,        (void *)jitNewValueNoZeroInit, TR_CHelper);
    SET(TR_newArrayNoZeroInit,         (void *)jitNewArrayNoZeroInit,  TR_CHelper);
    SET(TR_aNewArrayNoZeroInit,        (void *)jitANewArrayNoZeroInit, TR_CHelper);
 #else
    SET(TR_newObject,                  (void *)jitNewObject,              TR_Helper);
+   SET(TR_newValue,                  (void *)jitNewValue,              TR_Helper);
    SET(TR_newArray,                   (void *)jitNewArray,               TR_Helper);
    SET(TR_aNewArray,                  (void *)jitANewArray,              TR_Helper);
 
    SET(TR_newObjectNoZeroInit,        (void *)jitNewObjectNoZeroInit, TR_Helper);
+   SET(TR_newValueNoZeroInit,        (void *)jitNewValueNoZeroInit, TR_Helper);
    SET(TR_newArrayNoZeroInit,         (void *)jitNewArrayNoZeroInit,  TR_Helper);
    SET(TR_aNewArrayNoZeroInit,        (void *)jitANewArrayNoZeroInit, TR_Helper);
 #endif
 
+   SET(TR_acmpHelper,                  (void *)jitAcmpHelper, TR_Helper);
    SET(TR_multiANewArray,             (void *)jitAMultiNewArray, TR_Helper);
    SET(TR_aThrow,                     (void *)jitThrowException, TR_Helper);
 
@@ -1104,8 +1090,20 @@ void initializeCodeRuntimeHelperTable(J9JITConfig *jitConfig, char isSMP)
    //
 #if defined (TR_HOST_X86)
    SET(TR_isAESSupportedByHardware,    (void *) 0,                         TR_Helper);
-   SET(TR_doAESInHardwareInner,        (void *) doAESInHardwareJit,        TR_Helper);
-   SET(TR_expandAESKeyInHardwareInner, (void *) expandAESKeyInHardwareJit, TR_Helper);
+#if defined(OMR_GC_COMPRESSED_POINTERS)
+   if (TR::Compiler->om.compressObjectReferences())
+      {
+      SET(TR_doAESInHardwareInner,        (void *) doAESInHardwareJitCompressed,        TR_Helper);
+      SET(TR_expandAESKeyInHardwareInner, (void *) expandAESKeyInHardwareJitCompressed, TR_Helper);
+      }
+   else
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
+      {
+#if defined(OMR_GC_FULL_POINTERS)
+      SET(TR_doAESInHardwareInner,        (void *) doAESInHardwareJitFull,        TR_Helper);
+      SET(TR_expandAESKeyInHardwareInner, (void *) expandAESKeyInHardwareJitFull, TR_Helper);
+#endif /* defined(OMR_GC_FULL_POINTERS) */
+      }
 #elif defined (TR_HOST_POWER)
    SET(TR_PPCAESKeyExpansion, (void *) AESKeyExpansion_PPC, TR_Helper);
    SET(TR_PPCAESEncryptVMX,   (void *) AESEncryptVMX_PPC,   TR_Helper);
@@ -1341,17 +1339,12 @@ void initializeCodeRuntimeHelperTable(J9JITConfig *jitConfig, char isSMP)
 #endif
    SET(TR_PPCreferenceArrayCopy,           (void *) __referenceArrayCopy,           TR_Helper);
    SET(TR_PPCgeneralArrayCopy,             (void *) __generalArrayCopy,             TR_Helper);
-#ifdef ENABLE_SIMD_LIB
-   SET(TR_PPCVectorLogDouble,              (void *) __logd2,                        TR_Helper);
-#endif
 #if 1
-   SET(TR_PPCarrayTranslateTRTOSimpleVMX, (void *) 0, TR_Helper);
    SET(TR_PPCarrayCmpVMX,                 (void *) 0, TR_Helper);
    SET(TR_PPCarrayCmpLenVMX,              (void *) 0, TR_Helper);
    SET(TR_PPCarrayCmpScalar,              (void *) 0, TR_Helper);
    SET(TR_PPCarrayCmpLenScalar,           (void *) 0, TR_Helper);
 #else
-   SET(TR_PPCarrayTranslateTRTOSimpleVMX, (void *) __arrayTranslateTRTOSimpleVMX, TR_Helper);
    SET(TR_PPCarrayCmpVMX,                 (void *) __arrayCmpVMX,                 TR_Helper);
    SET(TR_PPCarrayCmpLenVMX,              (void *) __arrayCmpLenVMX,              TR_Helper);
    SET(TR_PPCarrayCmpScalar,              (void *) __arrayCmpScalar,              TR_Helper);
@@ -1512,6 +1505,11 @@ void initializeCodeRuntimeHelperTable(J9JITConfig *jitConfig, char isSMP)
    SET(TR_ARM64interpreterUnresolvedClassGlue,             (void *) _interpreterUnresolvedClassGlue,                TR_Helper);
    SET(TR_ARM64interpreterUnresolvedClassGlue2,            (void *) _interpreterUnresolvedClassGlue2,               TR_Helper);
    SET(TR_ARM64interpreterUnresolvedStringGlue,            (void *) _interpreterUnresolvedStringGlue,               TR_Helper);
+   SET(TR_ARM64interpreterUnresolvedConstantDynamicGlue,   (void *) _interpreterUnresolvedConstantDynamicGlue,      TR_Helper);
+   SET(TR_interpreterUnresolvedMethodTypeGlue,             (void *) _interpreterUnresolvedMethodTypeGlue,           TR_Helper);
+   SET(TR_interpreterUnresolvedMethodHandleGlue,           (void *) _interpreterUnresolvedMethodHandleGlue,         TR_Helper);
+   SET(TR_interpreterUnresolvedCallSiteTableEntryGlue,     (void *) _interpreterUnresolvedCallSiteTableEntryGlue,   TR_Helper);
+   SET(TR_interpreterUnresolvedMethodTypeTableEntryGlue,   (void *) _interpreterUnresolvedMethodTypeTableEntryGlue, TR_Helper);
    SET(TR_ARM64interpreterUnresolvedStaticDataGlue,        (void *) _interpreterUnresolvedStaticDataGlue,           TR_Helper);
    SET(TR_ARM64interpreterUnresolvedStaticDataStoreGlue,   (void *) _interpreterUnresolvedStaticDataStoreGlue,      TR_Helper);
    SET(TR_ARM64interpreterUnresolvedInstanceDataGlue,      (void *) _interpreterUnresolvedInstanceDataGlue,         TR_Helper);
@@ -1535,6 +1533,9 @@ void initializeCodeRuntimeHelperTable(J9JITConfig *jitConfig, char isSMP)
    SET(TR_ARM64interpreterSyncDoubleStaticGlue,   (void *) _interpreterSyncDoubleStaticGlue, TR_Helper);
    SET(TR_ARM64nativeStaticHelper,                (void *) _nativeStaticHelper,              TR_Helper);
    SET(TR_ARM64interfaceDispatch,                 (void *) _interfaceDispatch,               TR_Helper);
+   SET(TR_ARM64floatRemainder,                    (void *) helperCFloatRemainderFloat,       TR_Helper);
+   SET(TR_ARM64doubleRemainder,                   (void *) helperCDoubleRemainderDouble,     TR_Helper);
+   SET(TR_ARM64jitCollapseJNIReferenceFrame,      (void *) jitCollapseJNIReferenceFrame,     TR_Helper);
 
 #elif defined(TR_HOST_S390)
    SET(TR_S390double2Long,                                (void *) 0,                                              TR_Helper);
@@ -1622,8 +1623,6 @@ void initializeCodeRuntimeHelperTable(J9JITConfig *jitConfig, char isSMP)
    SET(TR_S390jitPreJNICallOffloadCheck,              (void *) jitPreJNICallOffloadCheck,        TR_Helper);
    SET(TR_S390jitPostJNICallOffloadCheck,             (void *) jitPostJNICallOffloadCheck,       TR_Helper);
    SET(TR_S390jitCallCFunction,                       (void *) jitCallCFunction,                 TR_Helper);
-   SET(TR_S390OutlinedNew,                            (void *) outlinedNewObject,                TR_Helper);
-   SET(TR_S390OutlinedNewArray,                       (void *) outlinedNewArray,                 TR_Helper);
    /* required so can be called from Picbuilder/Recompilation asm routines for MCC */
    SET(TR_S390mcc_reservationAdjustment_unwrapper,    (void *) mcc_reservationAdjustment_unwrapper,  TR_Helper);
    SET(TR_S390mcc_callPointPatching_unwrapper,        (void *) mcc_callPointPatching_unwrapper,      TR_Helper);
@@ -1715,10 +1714,10 @@ void replaceFirstTwoBytesWithData(void *startPC, int32_t startPCToData)
 
 extern "C"
    {
-   // The patching offset is not fixed due to recompilation  
+   // The patching offset is not fixed due to recompilation
    int32_t adjustPatchingOffset(void *startPC)
       {
-      TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get(startPC);
+      J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
       return (linkageInfo->isSamplingMethodBody()? -SAMPLING_CALL_SIZE: 0) + (linkageInfo->isRecompMethodBody()? -JITTED_BODY_INFO_SIZE: 0);
       }
 
@@ -1779,7 +1778,7 @@ extern "C"
    {
    void _fsdSwitchToInterpPatchEntry(void* intEP)
       {
-      TR_LinkageInfo* linkageInfo = TR_LinkageInfo::get(intEP);
+      J9::PrivateLinkage::LinkageInfo* linkageInfo = J9::PrivateLinkage::LinkageInfo::get(intEP);
 
       uint8_t* jitEP = (uint8_t*)intEP + linkageInfo->getJitEntryOffset();
 
@@ -1793,7 +1792,7 @@ extern "C"
 
    void _fsdRestoreToJITPatchEntry(void* intEP)
       {
-      TR_LinkageInfo* linkageInfo = TR_LinkageInfo::get(intEP);
+      J9::PrivateLinkage::LinkageInfo* linkageInfo = J9::PrivateLinkage::LinkageInfo::get(intEP);
 
       uint8_t* jitEP = (uint8_t*)intEP + linkageInfo->getReservedWord();
 
@@ -1809,7 +1808,7 @@ void saveFirstInstruction(void *startPC, int32_t startPCToSaveArea)
    {
    // Save the first instruction of the method
    // Calculate entry point
-   TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get(startPC);
+   J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
    char *startByte = (char *) startPC + getJitEntryOffset(linkageInfo);
 
    uint32_t* address = (uint32_t*)((uint8_t*)startPC + startPCToSaveArea +
@@ -1823,7 +1822,7 @@ void replaceFirstInstructionWithJump(void *startPC, int32_t startPCToTarget)
    int32_t distance;
 
    // common with Recomp.cpp
-   TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get(startPC);
+   J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
    char *startByte = (char *) startPC + getJitEntryOffset(linkageInfo);
 
    distance = startPCToTarget - 2*getJitEntryOffset(linkageInfo);
@@ -1841,7 +1840,7 @@ void restoreFirstInstruction(void *startPC, int32_t startPCToData)
    {
    // Restore the original instructions
    // Calculate entry point
-   TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get(startPC);
+   J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
    char *startByte = (char *) startPC + getJitEntryOffset(linkageInfo);
 
    uint32_t* address = (uint32_t*)((uint8_t*)startPC + startPCToData +
@@ -1857,14 +1856,14 @@ extern "C"
    {
    void _fsdSwitchToInterpPatchEntry(void *startPC)
       {
-      TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get(startPC);
+      J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
       saveFirstInstruction(startPC, OFFSET_REVERT_INTP_PRESERVED_FSD);
       replaceFirstInstructionWithJump(startPC, OFFSET_REVERT_INTP_FIXED_PORTION);
       }
 
    void _fsdRestoreToJITPatchEntry(void *startPC)
       {
-      TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get(startPC);
+      J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get(startPC);
       restoreFirstInstruction(startPC, OFFSET_REVERT_INTP_PRESERVED_FSD);
       }
    }
@@ -1903,7 +1902,7 @@ char * feGetEnv2(const char * s, const void * vm)
             // failed to read the env: either mis-sized buffer or no env set
             j9mem_free_memory(envSpace);
             envSpace = NULL;
-            } 
+            }
           else
             {
             int32_t res = j9sysinfo_get_env("TR_silentEnv", NULL, 0);
@@ -1969,7 +1968,7 @@ extern "C" void jitReportDynamicCodeLoadEvents(J9VMThread *currentThread)
 
                   if (ccMethodHeader && (metaData->bodyInfo != NULL))
                      {
-                     TR_LinkageInfo *linkageInfo = TR_LinkageInfo::get((void *)metaData->startPC);
+                     J9::PrivateLinkage::LinkageInfo *linkageInfo = J9::PrivateLinkage::LinkageInfo::get((void *)metaData->startPC);
                      if (linkageInfo->isRecompMethodBody())
                         {
                         ALWAYS_TRIGGER_J9HOOK_VM_DYNAMIC_CODE_LOAD(vm->hookInterface, currentThread, metaData->ramMethod, (void *)((char*)ccMethodHeader->_eyeCatcher+4), metaData->startPC - (UDATA)((char*)ccMethodHeader->_eyeCatcher+4), "JIT method header", metaData);

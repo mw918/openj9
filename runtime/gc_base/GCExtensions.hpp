@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -78,6 +78,8 @@ class MM_IdleGCManager;
  * @ingroup GC_Base
  */
 class MM_GCExtensions : public MM_GCExtensionsBase {
+private:
+	MM_OwnableSynchronizerObjectList* ownableSynchronizerObjectLists; /**< The global linked list of ownable synchronizer object lists. */
 public:
 	MM_StringTable* stringTable; /**< top level String Table structure (internally organized as a set of hash sub-tables */
 
@@ -150,8 +152,7 @@ public:
 
 
 	MM_UnfinalizedObjectList* unfinalizedObjectLists; /**< The global linked list of unfinalized object lists. */
-	MM_OwnableSynchronizerObjectList* ownableSynchronizerObjectLists; /**< The global linked list of ownable synchronizer object lists. */
-
+	
 	UDATA objectListFragmentCount; /**< the size of Local Object Buffer(per gc thread), used by referenceObjectBuffer, UnfinalizedObjectBuffer and OwnableSynchronizerObjectBuffer */
 
 	MM_Wildcard* numaCommonThreadClassNamePatterns; /**< A linked list of thread class names which should be associated with the common context */
@@ -191,11 +192,12 @@ private:
 protected:
 	virtual bool initialize(MM_EnvironmentBase* env);
 	virtual void tearDown(MM_EnvironmentBase* env);
-	virtual void computeDefaultMaxHeap(MM_EnvironmentBase* env);
 
 public:
 	static MM_GCExtensions* newInstance(MM_EnvironmentBase* env);
 	virtual void kill(MM_EnvironmentBase* env);
+
+	void computeDefaultMaxHeapForJava(bool enableOriginalJDK8HeapSizeCompatibilityOption);
 
 	MMINLINE J9HookInterface** getHookInterface() { return J9_HOOK_INTERFACE(hookInterface); };
 
@@ -261,12 +263,23 @@ public:
 	static MM_GCExtensions* getExtensions(MM_EnvironmentBase* env) { return getExtensions(env->getExtensions()); }
 
 	MMINLINE J9JavaVM* getJavaVM() {return static_cast<J9JavaVM*>(_omrVM->_language_vm);}
+	
+	/**
+	 * Return ownable synchronizer object lists by first ensuring that the lists are in a consistent state (e.g., during concurrent gc).
+	 * This should be used by any external consumer (non-GC consuming the list)     
+	 * @param vmThread The current J9VMThread thread (used to invoke j9gc apis if required)
+	 * @return Linked list of ownable synchronizer objects
+	 */
+	MM_OwnableSynchronizerObjectList* getOwnableSynchronizerObjectListsExternal(J9VMThread *vmThread);
+	MMINLINE MM_OwnableSynchronizerObjectList* getOwnableSynchronizerObjectLists() { return ownableSynchronizerObjectLists; }
+	MMINLINE void setOwnableSynchronizerObjectLists(MM_OwnableSynchronizerObjectList* newOwnableSynchronizerObjectLists) { ownableSynchronizerObjectLists = newOwnableSynchronizerObjectLists; }
 
 	/**
 	 * Create a GCExtensions object
 	 */
 	MM_GCExtensions()
 		: MM_GCExtensionsBase()
+		, ownableSynchronizerObjectLists(NULL)
 		, stringTable(NULL)
 		, gcchkExtensions(NULL)
 		, tgcExtensions(NULL)
@@ -288,11 +301,11 @@ public:
 		, finalizeMasterPriority(J9THREAD_PRIORITY_NORMAL)
 		, finalizeSlavePriority(J9THREAD_PRIORITY_NORMAL)
 #endif /* J9VM_GC_FINALIZATION */
+		, classLoaderManager(NULL)
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 		, deadClassLoaderCacheSize(1024 * 1024) /* default is one MiB */
 #endif /* defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING) */
 		, unfinalizedObjectLists(NULL)
-		, ownableSynchronizerObjectLists(NULL)
 		, objectListFragmentCount(0)
 		, numaCommonThreadClassNamePatterns(NULL)
 		, stringDedupPolicy(J9_JIT_STRING_DEDUP_POLICY_UNDEFINED)

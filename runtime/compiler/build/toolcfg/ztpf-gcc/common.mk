@@ -1,4 +1,4 @@
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -37,6 +37,7 @@ SOSUFF=.so
 EXESUFF=
 LIBPREFIX=lib
 DEPSUFF=.depend.mk
+DBGSUFF=.debuginfo
 
 #
 # Paths for default programs on the platform
@@ -52,6 +53,7 @@ endif
 M4?=m4
 SED?=sed
 PERL?=perl
+OBJCOPY?=objcopy
 
 #
 # z/Architecture arch and tune level
@@ -88,7 +90,7 @@ TPF_INCLUDES += $(foreach d,$(TPF_ROOT),-isystem $d/noship/include)
 TPF_INCLUDES += $(foreach d,$(TPF_ROOT),-isystem $d)
 
 TPF_FLAGS += -fexec-charset=ISO-8859-1 -fmessage-length=0 -funsigned-char -fverbose-asm -fno-builtin-abort -fno-builtin-exit -ffloat-store -gdwarf-2 -Wno-format-extra-args -Wno-int-to-pointer-cast -Wno-unused-but-set-variable -Wno-write-strings -fno-delete-null-pointer-checks -fno-tree-dse -fno-lifetime-dse -fno-optimize-strlen
- 
+
 
 #
 # First setup C and C++ compilers.
@@ -199,18 +201,8 @@ ifeq ($(HOST_ARCH),z)
     M4_INCLUDES=$(PRODUCT_INCLUDES)
 
     M4_DEFINES+=$(HOST_DEFINES) $(TARGET_DEFINES)
-    M4_DEFINES+=J9VM_TIERED_CODE_CACHE
     M4_DEFINES+=OMRZTPF
     M4_DEFINES+=J9ZTPF
-
-    ifeq ($(HOST_BITS),64)
-        ifneq (,$(shell grep 'define J9VM_INTERP_COMPRESSED_OBJECT_HEADER' $(J9SRC)/include/j9cfg.h))
-            M4_DEFINES+=J9VM_INTERP_COMPRESSED_OBJECT_HEADER
-        endif
-        ifneq (,$(shell grep 'define J9VM_GC_COMPRESSED_POINTERS' $(J9SRC)/include/j9cfg.h))
-            M4_DEFINES+=OMR_GC_COMPRESSED_POINTERS
-        endif
-    endif
 
     ifeq ($(BUILD_CONFIG),debug)
         M4_DEFINES+=$(M4_DEFINES_DEBUG)
@@ -230,9 +222,6 @@ endif
 # Finally setup the linker
 #
 SOLINK_CMD?=$(CXX)
-
-SOLINK_FLAGS+=
-SOLINK_FLAGS_PROD+=-Wl,-S
 
 SOLINK_LIBPATH+=$(PRODUCT_LIBPATH)
 SOLINK_SLINK+=$(PRODUCT_SLINK) j9thr$(J9_VERSION) j9hookable$(J9_VERSION)

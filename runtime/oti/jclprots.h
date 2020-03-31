@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -140,8 +140,8 @@ extern J9_CFUNC jlong JNICALL
 Java_com_ibm_lang_management_internal_ExtendedOperatingSystemMXBeanImpl_getProcessPrivateMemorySizeImpl (JNIEnv *env, jobject instance);
 extern J9_CFUNC jlong JNICALL
 Java_com_ibm_lang_management_internal_ExtendedOperatingSystemMXBeanImpl_getProcessPhysicalMemorySizeImpl (JNIEnv *env, jobject instance);
-extern J9_CFUNC jobject JNICALL
-Java_com_ibm_lang_management_internal_SysinfoCpuTime_getCpuUtilizationImpl (JNIEnv *env, jclass clazz);
+extern J9_CFUNC jdouble JNICALL
+Java_com_ibm_lang_management_internal_ExtendedOperatingSystemMXBeanImpl_getSystemCpuLoadImpl (JNIEnv *env, jobject instance);
 
 /* BBresmanNativesCommonMemorySpace*/
 jboolean JNICALL Java_com_ibm_oti_vm_MemorySpace_isObjectInMemorySpace (JNIEnv * env, jobject memorySpace, jlong memorySpaceAddress, jobject anObject);
@@ -331,15 +331,15 @@ void JNICALL Java_java_net_PlainMulticastSocketImpl_createMulticastSocketImpl (
 
 /* J9SourceManagementClassLoading*/
 extern J9_CFUNC jlong JNICALL
-Java_com_ibm_java_lang_management_internal_ClassLoadingMXBeanImpl_getUnloadedClassCountImpl (JNIEnv *env, jobject beanInstance);
+Java_openj9_internal_management_ClassLoaderInfoBaseImpl_getUnloadedClassCountImpl (JNIEnv *env, jobject beanInstance);
 extern J9_CFUNC void JNICALL
 Java_com_ibm_java_lang_management_internal_ClassLoadingMXBeanImpl_setVerboseImpl (JNIEnv *env, jobject beanInstance, jboolean value);
 extern J9_CFUNC jlong JNICALL
 Java_com_ibm_java_lang_management_internal_ClassLoadingMXBeanImpl_getTotalLoadedClassCountImpl (JNIEnv *env, jobject beanInstance);
 extern J9_CFUNC jboolean JNICALL
 Java_com_ibm_java_lang_management_internal_ClassLoadingMXBeanImpl_isVerboseImpl (JNIEnv *env, jobject beanInstance);
-extern J9_CFUNC jint JNICALL
-Java_com_ibm_java_lang_management_internal_ClassLoadingMXBeanImpl_getLoadedClassCountImpl (JNIEnv *env, jobject beanInstance);
+extern J9_CFUNC jlong JNICALL
+Java_openj9_internal_management_ClassLoaderInfoBaseImpl_getLoadedClassCountImpl (JNIEnv *env, jobject beanInstance);
 
 /* J9SourceManagementGarbageCollector*/
 extern J9_CFUNC jlong JNICALL
@@ -423,8 +423,6 @@ Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getCurrentGCThreadsI
 
 /* J9SourceJclSidecarInit*/
 extern J9_CFUNC IDATA J9VMDllMain (J9JavaVM* vm, IDATA stage, void* reserved);
-extern J9_CFUNC void
-fixCPShapeDescription (J9Class * clazz, UDATA cpIndex);
 extern J9_CFUNC jint JNICALL JVM_OnLoad (JavaVM * jvm, char *options, void *reserved);
 
 /* dump.c */
@@ -572,47 +570,47 @@ jlong JNICALL Java_com_ibm_jvm_Trace_getMicros(JNIEnv *env, jobject recv);
 
 /* attach API */
 jint JNICALL
-Java_com_ibm_tools_attach_target_IPC_cancelNotify(JNIEnv *env, jclass clazz, jstring ctrlDirName, jstring semaName, jint numberOfDecrements, jboolean global);
+Java_openj9_internal_tools_attach_target_IPC_cancelNotify(JNIEnv *env, jclass clazz, jstring ctrlDirName, jstring semaName, jint numberOfDecrements, jboolean global);
 jint JNICALL
-Java_com_ibm_tools_attach_target_IPC_chownFileToTargetUid(JNIEnv *env, jclass clazz, jstring path, jlong uid);
+Java_openj9_internal_tools_attach_target_IPC_chownFileToTargetUid(JNIEnv *env, jclass clazz, jstring path, jlong uid);
 jlong JNICALL
-Java_com_ibm_tools_attach_target_CommonDirectory_getFileOwner(JNIEnv *env, jclass clazz, jstring path);
+Java_openj9_internal_tools_attach_target_CommonDirectory_getFileOwner(JNIEnv *env, jclass clazz, jstring path);
 jlong JNICALL
-Java_com_ibm_tools_attach_target_IPC_getUid(JNIEnv *env, jclass clazz);
+Java_openj9_internal_tools_attach_target_IPC_getUid(JNIEnv *env, jclass clazz);
 jbyteArray JNICALL
-Java_com_ibm_tools_attach_target_IPC_getTmpDirImpl(JNIEnv *env, jclass clazz);
+Java_openj9_internal_tools_attach_target_IPC_getTmpDirImpl(JNIEnv *env, jclass clazz);
 jstring JNICALL
-Java_com_ibm_tools_attach_target_IPC_getTempDirImpl(JNIEnv *env, jclass clazz);
+Java_openj9_internal_tools_attach_target_IPC_getTempDirImpl(JNIEnv *env, jclass clazz);
 jboolean JNICALL
-Java_com_ibm_tools_attach_target_IPC_isUsingDefaultUid(JNIEnv *env, jclass clazz);
+Java_openj9_internal_tools_attach_target_IPC_isUsingDefaultUid(JNIEnv *env, jclass clazz);
 jint JNICALL
-Java_com_ibm_tools_attach_target_IPC_mkdirWithPermissionsImpl(JNIEnv *env, jclass clazz, jstring absolutePath, jint cdPerms);
+Java_openj9_internal_tools_attach_target_IPC_mkdirWithPermissionsImpl(JNIEnv *env, jclass clazz, jstring absolutePath, jint cdPerms);
 jint JNICALL
-Java_com_ibm_tools_attach_target_IPC_createFileWithPermissionsImpl(JNIEnv *env, jclass clazz, jstring path, jint mode);
+Java_openj9_internal_tools_attach_target_IPC_createFileWithPermissionsImpl(JNIEnv *env, jclass clazz, jstring path, jint mode);
 jint JNICALL
-Java_com_ibm_tools_attach_target_IPC_setupSemaphore(JNIEnv *env, jclass clazz, jstring ctrlDirName);
+Java_openj9_internal_tools_attach_target_IPC_setupSemaphore(JNIEnv *env, jclass clazz, jstring ctrlDirName);
 jint JNICALL
-Java_com_ibm_tools_attach_target_IPC_openSemaphore(JNIEnv *env, jclass clazz, jstring ctrlDirName, jstring semaName);
+Java_openj9_internal_tools_attach_target_IPC_openSemaphore(JNIEnv *env, jclass clazz, jstring ctrlDirName, jstring semaName);
 jint JNICALL
-Java_com_ibm_tools_attach_target_IPC_notifyVm(JNIEnv *env, jclass clazz, jstring ctrlDirName, jstring semaName, jint numberOfPosts, jboolean global);
+Java_openj9_internal_tools_attach_target_IPC_notifyVm(JNIEnv *env, jclass clazz, jstring ctrlDirName, jstring semaName, jint numberOfPosts, jboolean global);
 jint JNICALL
-Java_com_ibm_tools_attach_target_IPC_waitSemaphore(JNIEnv *env, jclass clazz);
+Java_openj9_internal_tools_attach_target_IPC_waitSemaphore(JNIEnv *env, jclass clazz);
 void JNICALL
-Java_com_ibm_tools_attach_target_IPC_closeSemaphore(JNIEnv *env, jclass clazz);
+Java_openj9_internal_tools_attach_target_IPC_closeSemaphore(JNIEnv *env, jclass clazz);
 jint JNICALL
-Java_com_ibm_tools_attach_target_IPC_destroySemaphore(JNIEnv *env, jclass clazz);
+Java_openj9_internal_tools_attach_target_IPC_destroySemaphore(JNIEnv *env, jclass clazz);
 jlong JNICALL
-Java_com_ibm_tools_attach_target_IPC_getProcessId(JNIEnv *env, jclass clazz);
+Java_openj9_internal_tools_attach_target_IPC_getProcessId(JNIEnv *env, jclass clazz);
 jint JNICALL
-Java_com_ibm_tools_attach_target_IPC_chmod(JNIEnv *env, jclass clazz, jstring path, jint mode);
+Java_openj9_internal_tools_attach_target_IPC_chmod(JNIEnv *env, jclass clazz, jstring path, jint mode);
 jint JNICALL
-Java_com_ibm_tools_attach_target_IPC_processExistsImpl(JNIEnv *env, jclass clazz, jlong pid);
+Java_openj9_internal_tools_attach_target_IPC_processExistsImpl(JNIEnv *env, jclass clazz, jlong pid);
 jlong JNICALL
-Java_com_ibm_tools_attach_target_FileLock_lockFileImpl(JNIEnv *env, jclass clazz, jstring path, jint mode, jboolean blocking);
+Java_openj9_internal_tools_attach_target_FileLock_lockFileImpl(JNIEnv *env, jclass clazz, jstring path, jint mode, jboolean blocking);
 jint JNICALL
-Java_com_ibm_tools_attach_target_FileLock_unlockFileImpl(JNIEnv *env, jclass clazz, jlong fd);
+Java_openj9_internal_tools_attach_target_FileLock_unlockFileImpl(JNIEnv *env, jclass clazz, jlong fd);
 void JNICALL
-Java_com_ibm_tools_attach_target_IPC_tracepoint(JNIEnv *env, jclass clazz, jint statusCode, jstring message);
+Java_openj9_internal_tools_attach_target_IPC_tracepoint(JNIEnv *env, jclass clazz, jint statusCode, jstring message);
 
 /* J9SourceJclExceptionSupport*/
 extern J9_CFUNC j9array_t  
@@ -697,10 +695,10 @@ Java_com_ibm_oti_vm_VM_setDaemonThreadImpl (JNIEnv *env, jobject recv, jobject a
 void JNICALL Java_com_ibm_oti_vm_VM_dumpString(JNIEnv * env, jclass clazz, jstring str);
 jboolean JNICALL Java_com_ibm_oti_vm_VM_appendToCPNativeImpl(JNIEnv * env, jclass clazz, jstring classPathAdditions, jstring newClassPath);
 jboolean JNICALL Java_com_ibm_oti_vm_VM_isApplicationClassLoaderPresent(JNIEnv * env, jclass clazz);
-jstring JNICALL Java_openj9_tools_attach_diagnostics_base_DiagnosticUtils_getHeapClassStatisticsImpl(JNIEnv * env, jclass unused);
-jobjectArray JNICALL Java_openj9_tools_attach_diagnostics_base_DiagnosticUtils_dumpAllThreadsImpl(JNIEnv *env, jobject beanInstance,
+jstring JNICALL Java_openj9_internal_tools_attach_target_DiagnosticUtils_getHeapClassStatisticsImpl(JNIEnv * env, jclass unused);
+jobjectArray JNICALL Java_openj9_internal_tools_attach_target_DiagnosticUtils_dumpAllThreadsImpl(JNIEnv *env, jobject beanInstance,
 	jboolean getLockedMonitors, jboolean getLockedSynchronizers, jint maxDepth);
-jstring JNICALL Java_openj9_tools_attach_diagnostics_base_DiagnosticUtils_triggerDumpsImpl(JNIEnv *env, jclass clazz, jstring opts, jstring event);
+jstring JNICALL Java_openj9_internal_tools_attach_target_DiagnosticUtils_triggerDumpsImpl(JNIEnv *env, jclass clazz, jstring opts, jstring event);
 
 /* J9SourceJclCommonInit*/
 jint computeFullVersionString (J9JavaVM* vm);
@@ -710,7 +708,7 @@ UDATA initializeRequiredClasses(J9VMThread *vmThread, char* libName);
 /* J9SourceJclDefineClass*/
 extern J9_CFUNC jclass 
 defineClassCommon (JNIEnv *env, jobject classLoaderObject,
-	jstring className, jbyteArray classRep, jint offset, jint length, jobject protectionDomain, UDATA options, J9Class *hostClass);
+	jstring className, jbyteArray classRep, jint offset, jint length, jobject protectionDomain, UDATA options, J9Class *hostClass, J9ClassPatchMap *patchMap);
 
 /* BBjclNativesCommonAccessController*/
 jboolean JNICALL Java_java_security_AccessController_initializeInternal (JNIEnv *env, jclass thisClz);
@@ -813,7 +811,7 @@ jint JNICALL Java_com_ibm_jit_JITHelpers_classIsPrimitiveFlag(JNIEnv *env, jclas
 jint JNICALL Java_com_ibm_jit_JITHelpers_j9ClassSuperclassesOffset(JNIEnv *env, jclass ignored);
 jint JNICALL Java_com_ibm_jit_JITHelpers_j9ClassClassDepthAndFlagsOffset(JNIEnv *env, jclass ignored);
 jint JNICALL Java_com_ibm_jit_JITHelpers_classDepthMask(JNIEnv *env, jclass ignored);
-jboolean JNICALL Java_com_ibm_jit_JITHelpers_isPlatformLittleEndian(JNIEnv *env, jclass ignored);
+jboolean JNICALL Java_com_ibm_jit_JITHelpers_isBigEndian(JNIEnv *env, jclass ignored);
 jboolean JNICALL Java_com_ibm_jit_JITHelpers_is32Bit(JNIEnv *env, jobject rcv);
 jint JNICALL Java_com_ibm_jit_JITHelpers_getNumBitsInReferenceField(JNIEnv *env, jobject rcv);
 jint JNICALL Java_com_ibm_jit_JITHelpers_getNumBytesInReferenceField(JNIEnv *env, jobject rcv);

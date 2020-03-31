@@ -24,7 +24,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "codegen/CodeGenerator.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/ResolvedMethod.hpp"
 #include "compile/SymbolReferenceTable.hpp"
@@ -36,14 +36,14 @@
 #include "env/j9method.h"
 #include "il/ILOpCodes.hpp"
 #include "il/ILOps.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
 #include "infra/Assert.hpp"
 #include "infra/Checklist.hpp"
 #include "optimizer/Optimization.hpp"
@@ -64,7 +64,7 @@ void TR_StaticFinalFieldFolding::visitNode(TR::TreeTop * currentTree, TR::Node *
          {
          TR_ASSERT_FATAL(childCount == 0, "Direct load node for static final field should have no child");
          J9::TransformUtil::attemptGenericStaticFinalFieldFolding(this, currentTree, node);
-         }      
+         }
       }
    }
 

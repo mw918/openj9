@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -990,7 +990,6 @@ extern J9_CFUNC UDATA  dispatchBigJNICall (J9VMThread *vmThread, void *functionA
 extern J9_CFUNC UDATA  internalCreateBaseTypePrimitiveAndArrayClasses (J9VMThread *currentThread);
 extern J9_CFUNC struct J9Class*  internalFindClassUTF8 (J9VMThread *currentThread, U_8 *className, UDATA classNameLength, J9ClassLoader *classLoader, UDATA options);
 extern J9_CFUNC struct J9Class*  internalFindKnownClass (J9VMThread *currentThread, UDATA index, UDATA flags);
-extern J9_CFUNC void  fixUnsafeMethods (J9VMThread* vmThread, jclass clazz);
 #endif /* _J9VMCLASSSUPPORT_ */
 
 /* J9SourceJvmriSupport*/
@@ -1117,7 +1116,7 @@ extern J9_CFUNC struct J9UTF8* jitGetConstantDynamicTypeFromCP(J9VMThread *curre
 extern J9_CFUNC void*  jitGetCountingSendTarget (J9VMThread *vmThread, J9Method *ramMethod);
 extern J9_CFUNC void  jitResetAllMethodsAtStartup (J9VMThread *vmContext);
 extern J9_CFUNC struct J9Class*  jitGetInterfaceITableIndexFromCP (J9VMThread *vmThread, J9ConstantPool *constantPool, UDATA cpIndex, UDATA* pITableIndex);
-extern J9_CFUNC struct J9Method*  jitGetImproperInterfaceMethodFromCP (J9VMThread *vmThread, J9ConstantPool *constantPool, UDATA cpIndex);
+extern J9_CFUNC struct J9Method*  jitGetImproperInterfaceMethodFromCP (J9VMThread *vmThread, J9ConstantPool *constantPool, UDATA cpIndex, UDATA* nonFinalObjectMethodVTableOffset);
 extern J9_CFUNC void  jitAcquireClassTableMutex (J9VMThread *vmThread);
 extern J9_CFUNC void*  jitCTResolveStaticFieldRefWithMethod (J9VMThread *vmStruct, J9Method *method, UDATA fieldIndex, UDATA resolveFlags, J9ROMFieldShape **resolvedField);
 extern J9_CFUNC void  jitReleaseClassTableMutex (J9VMThread *vmThread);
@@ -1231,7 +1230,6 @@ extern J9_CFUNC UDATA  romImageLoad (J9VMThread *currentThread, void *segmentPoi
 /* J9VMStringSupport*/
 #ifndef _J9VMSTRINGSUPPORT_
 #define _J9VMSTRINGSUPPORT_
-extern J9_CFUNC void  copyUTF8ToUnicode (J9VMThread * vmThread, U_8 * data, UDATA length, UDATA stringFlags, j9object_t charArray, UDATA startIndex);
 extern J9_CFUNC j9object_t  catUtfToString4 (J9VMThread * vmThread, const U_8 *data1, UDATA length1, const U_8 *data2, UDATA length2, const U_8 *data3, UDATA length3, const U_8 *data4, UDATA length4);
 extern J9_CFUNC j9object_t  methodToString (J9VMThread * vmThread, J9Method* method);
 #endif /* _J9VMSTRINGSUPPORT_ */
@@ -1239,9 +1237,10 @@ extern J9_CFUNC j9object_t  methodToString (J9VMThread * vmThread, J9Method* met
 /* J9VMTasukiMonitor*/
 #ifndef _J9VMTASUKIMONITOR_
 #define _J9VMTASUKIMONITOR_
-extern J9_CFUNC IDATA  objectMonitorEnterBlocking (J9VMThread *currentThread);
-extern J9_CFUNC IDATA  objectMonitorEnterNonBlocking (J9VMThread *currentThread, j9object_t object);
-extern J9_CFUNC void  clearLockWord (J9VMThread *currentThread, j9objectmonitor_t *lockWord);
+extern J9_CFUNC UDATA  objectMonitorEnterBlocking (J9VMThread *currentThread);
+extern J9_CFUNC UDATA  objectMonitorEnterNonBlocking (J9VMThread *currentThread, j9object_t object);
+extern J9_CFUNC void  monitorExitWriteBarrier ();
+extern J9_CFUNC void  incrementCancelCounter (J9Class *clazz);
 #endif /* _J9VMTASUKIMONITOR_ */
 
 /* J9VMUTF8Support*/

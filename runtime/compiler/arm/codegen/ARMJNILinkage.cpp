@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2016, 2019 IBM Corp. and others
+ * Copyright (c) 2016, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,7 +20,7 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
-#include "arm/codegen/ARMJNILinkage.hpp"
+#include "codegen/ARMJNILinkage.hpp"
 
 #include "arm/codegen/ARMInstruction.hpp"
 #include "codegen/CallSnippet.hpp"
@@ -39,16 +39,16 @@
 #include "env/J2IThunk.hpp"
 #include "env/VMJ9.h"
 #include "env/jittypes.h"
+#include "il/LabelSymbol.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/RegisterMappedSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/LabelSymbol.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/RegisterMappedSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 
 #define LOCK_R14
 
@@ -73,8 +73,8 @@ static TR::RealRegister::RegNum _singleArgumentRegisters[] =
    TR::RealRegister::fs15
    };
 
-TR::ARMJNILinkage::ARMJNILinkage(TR::CodeGenerator *cg)
-   :TR::ARMPrivateLinkage(cg)
+J9::ARM::JNILinkage::JNILinkage(TR::CodeGenerator *cg)
+   : J9::ARM::PrivateLinkage(cg)
    {
    //Copy out SystemLinkage properties. Assumes no objects in TR::ARMLinkageProperties.
    TR::Linkage *sysLinkage = cg->getLinkage(TR_System);
@@ -90,37 +90,37 @@ TR::ARMJNILinkage::ARMJNILinkage(TR::CodeGenerator *cg)
 
    }
 
-int32_t TR::ARMJNILinkage::buildArgs(TR::Node *callNode,
+int32_t J9::ARM::JNILinkage::buildArgs(TR::Node *callNode,
                              TR::RegisterDependencyConditions *dependencies,
                              TR::Register* &vftReg,
                              bool                                isVirtual)
    {
-   TR_ASSERT(0, "Should call TR::ARMJNILinkage::buildJNIArgs instead.");
+   TR_ASSERT(0, "Should call J9::ARM::JNILinkage::buildJNIArgs instead.");
    return 0;
    }
 
-TR::Register *TR::ARMJNILinkage::buildIndirectDispatch(TR::Node  *callNode)
+TR::Register *J9::ARM::JNILinkage::buildIndirectDispatch(TR::Node  *callNode)
    {
-   TR_ASSERT(0, "Calling TR::ARMJNILinkage::buildIndirectDispatch does not make sense.");
+   TR_ASSERT(0, "Calling J9::ARM::JNILinkage::buildIndirectDispatch does not make sense.");
    return NULL;
    }
 
-void         TR::ARMJNILinkage::buildVirtualDispatch(TR::Node   *callNode,
+void         J9::ARM::JNILinkage::buildVirtualDispatch(TR::Node   *callNode,
                                                     TR::RegisterDependencyConditions *dependencies,
                                                     TR::RegisterDependencyConditions *postDeps,
                                                     TR::Register                        *vftReg,
                                                     uint32_t                           sizeOfArguments)
    {
-   TR_ASSERT(0, "Calling TR::ARMJNILinkage::buildVirtualDispatch does not make sense.");
+   TR_ASSERT(0, "Calling J9::ARM::JNILinkage::buildVirtualDispatch does not make sense.");
    }
 
-TR::ARMLinkageProperties& TR::ARMJNILinkage::getProperties()
+TR::ARMLinkageProperties& J9::ARM::JNILinkage::getProperties()
    {
    return _properties;
    }
 
 #if defined(__VFP_FP__) && !defined(__SOFTFP__)
-TR::Register *TR::ARMJNILinkage::pushFloatArgForJNI(TR::Node *child)
+TR::Register *J9::ARM::JNILinkage::pushFloatArgForJNI(TR::Node *child)
    {
    // if (isSmall()) return 0;
 
@@ -137,7 +137,7 @@ TR::Register *TR::ARMJNILinkage::pushFloatArgForJNI(TR::Node *child)
    return pushRegister;
    }
 
-TR::Register *TR::ARMJNILinkage::pushDoubleArgForJNI(TR::Node *child)
+TR::Register *J9::ARM::JNILinkage::pushDoubleArgForJNI(TR::Node *child)
    {
    // if (isSmall()) return 0;
 
@@ -155,7 +155,7 @@ TR::Register *TR::ARMJNILinkage::pushDoubleArgForJNI(TR::Node *child)
    }
 #endif
 
-TR::MemoryReference *TR::ARMJNILinkage::getOutgoingArgumentMemRef(int32_t               totalSize,
+TR::MemoryReference *J9::ARM::JNILinkage::getOutgoingArgumentMemRef(int32_t               totalSize,
                                                                        int32_t               offset,
                                                                        TR::Register          *argReg,
                                                                        TR_ARMOpCodes         opCode,
@@ -175,18 +175,18 @@ printf("JNI: offset %d\n", offset); fflush(stdout);
    return result;
    }
 
-int32_t TR::ARMJNILinkage::buildJNIArgs(TR::Node *callNode,
+int32_t J9::ARM::JNILinkage::buildJNIArgs(TR::Node *callNode,
                           TR::RegisterDependencyConditions *dependencies,
                           TR::Register* &vftReg,
                           bool passReceiver,
                           bool passEnvArg)
    {
-   TR::Compilation *comp = TR::comp();
    TR::CodeGenerator  *codeGen      = cg();
+   TR::Compilation *comp = codeGen->comp();
    TR::ARMMemoryArgument *pushToMemory = NULL;
    const TR::ARMLinkageProperties &jniLinkageProperties = getProperties();
 
-   bool bigEndian = TR::Compiler->target.cpu.isBigEndian();
+   bool bigEndian = comp->target().cpu.isBigEndian();
    int32_t   i;
    uint32_t  numIntegerArgRegIndex = 0;
    uint32_t  numFloatArgRegIndex = 0;
@@ -196,7 +196,7 @@ int32_t TR::ARMJNILinkage::buildJNIArgs(TR::Node *callNode,
    uint32_t  stackOffset = 0;
    uint32_t  numIntArgRegs = jniLinkageProperties.getNumIntArgRegs();
    uint32_t  numFloatArgRegs = jniLinkageProperties.getNumFloatArgRegs();
-   bool      isEABI = TR::Compiler->target.isEABI();
+   bool      isEABI = comp->target().isEABI();
    uint32_t  firstArgumentChild = callNode->getFirstArgumentIndex();
    TR::DataType callNodeDataType = callNode->getDataType();
    TR::DataType resType = callNode->getType();
@@ -703,7 +703,7 @@ printf("done\n"); fflush(stdout);
    }
 
 
-TR::Register *TR::ARMJNILinkage::buildDirectDispatch(TR::Node *callNode)
+TR::Register *J9::ARM::JNILinkage::buildDirectDispatch(TR::Node *callNode)
    {
    TR::CodeGenerator           *codeGen    = cg();
    const TR::ARMLinkageProperties &jniLinkageProperties = getProperties();
@@ -779,7 +779,7 @@ TR::Register *TR::ARMJNILinkage::buildDirectDispatch(TR::Node *callNode)
       case TR::dcall:
 #endif
          {
-         if(TR::Compiler->target.cpu.isBigEndian())
+         if(codeGen->comp()->target().cpu.isBigEndian())
             {
             if (!gr0Reg)
                {
@@ -870,13 +870,13 @@ TR::Register *TR::ARMJNILinkage::buildDirectDispatch(TR::Node *callNode)
 
    // push tag bits (savedA0 slot)
    // if the current method is simply a wrapper for the JNI call, hide the call-out stack frame
-   uintptrj_t tagBits = fej9->constJNICallOutFrameSpecialTag();
+   uintptr_t tagBits = fej9->constJNICallOutFrameSpecialTag();
    if (resolvedMethod == comp()->getCurrentMethod())
       {
       tagBits |= fej9->constJNICallOutFrameInvisibleTag();
       }
    armLoadConstant(callNode, tagBits, gr4Reg, codeGen);
-   tempMR = new (trHeapMemory()) TR::MemoryReference(stackPtr, -((int)sizeof(uintptrj_t)), codeGen);
+   tempMR = new (trHeapMemory()) TR::MemoryReference(stackPtr, -((int)sizeof(uintptr_t)), codeGen);
    tempMR->setImmediatePreIndexed();
    generateMemSrc1Instruction(codeGen, ARMOp_str, callNode, tempMR, gr4Reg);
 
@@ -884,7 +884,7 @@ TR::Register *TR::ARMJNILinkage::buildDirectDispatch(TR::Node *callNode)
    //
    TR::LabelSymbol *returnAddrLabel               = generateLabelSymbol(codeGen);
    generateLabelInstruction(codeGen, ARMOp_add, callNode, returnAddrLabel, NULL, gr4Reg, instrPtr);
-   tempMR = new (trHeapMemory()) TR::MemoryReference(stackPtr, -2 * ((int)sizeof(uintptrj_t)), codeGen);
+   tempMR = new (trHeapMemory()) TR::MemoryReference(stackPtr, -2 * ((int)sizeof(uintptr_t)), codeGen);
    tempMR->setImmediatePreIndexed();
    generateMemSrc1Instruction(codeGen, ARMOp_str, callNode, tempMR, gr4Reg);
 
@@ -946,7 +946,7 @@ TR::Register *TR::ARMJNILinkage::buildDirectDispatch(TR::Node *callNode)
    deps->setNumPostConditions(0, trMemory());
    postDeps->setNumPreConditions(0, trMemory());
    // get the target method address and dispatch JNI method directly
-   uintptrj_t methodAddress = (uintptrj_t)resolvedMethod->startAddressForJNIMethod(comp());
+   uintptr_t methodAddress = (uintptr_t)resolvedMethod->startAddressForJNIMethod(comp());
    //AOT relocation is handled in TR::ARMImmSymInstruction::generateBinaryEncoding()
    gcPoint = generateImmSymInstruction(codeGen, ARMOp_bl, callNode, methodAddress, deps, callSymRef);
    codeGen->getJNICallSites().push_front(new (trHeapMemory()) TR_Pair<TR_ResolvedMethod, TR::Instruction>(calleeSym->getResolvedMethod(), gcPoint));
@@ -1004,7 +1004,7 @@ TR::Register *TR::ARMJNILinkage::buildDirectDispatch(TR::Node *callNode)
             TR_ASSERT(fej9->thisThreadGetFloatTemp2Offset() - fej9->thisThreadGetFloatTemp1Offset() == 4,"floatTemp1 and floatTemp2 not contiguous");
             tempMR = new (trHeapMemory()) TR::MemoryReference(metaReg, fej9->thisThreadGetFloatTemp1Offset(), codeGen);
             generateMemSrc1Instruction(codeGen, ARMOp_fstd, callNode, tempMR, fdReg);
-            bool bigEndian = TR::Compiler->target.cpu.isBigEndian();
+            bool bigEndian = codeGen->comp()->target().cpu.isBigEndian();
             generateTrg1MemInstruction(codeGen, ARMOp_ldr, callNode, bigEndian ? returnRegister->getHighOrder() : returnRegister->getLowOrder(), tempMR);
             tempMR = new (trHeapMemory()) TR::MemoryReference(metaReg, fej9->thisThreadGetFloatTemp2Offset(), codeGen);
             generateTrg1MemInstruction(codeGen, ARMOp_ldr, callNode, bigEndian ? returnRegister->getLowOrder() : returnRegister->getHighOrder(), tempMR);

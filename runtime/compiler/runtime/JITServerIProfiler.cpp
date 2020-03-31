@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,6 +23,7 @@
 #include "runtime/JITServerIProfiler.hpp"
 #include "control/CompilationRuntime.hpp"
 #include "control/JITServerCompilationThread.hpp"
+#include "env/j9methodServer.hpp"
 #include "runtime/JITClientSession.hpp"
 #include "infra/CriticalSection.hpp" // for OMR::CriticalSection
 #include "ilgen/J9ByteCode.hpp"
@@ -59,10 +60,7 @@ JITServerIProfiler::deserializeMethodEntry(TR_ContiguousIPMethodHashTableEntry *
       entry->_method = serialEntry->_method;
       entry->_otherBucket = serialEntry->_otherBucket;
 
-      size_t callerCount = 0;
-      for (; callerCount < TR_IPMethodHashTableEntry::MAX_IPMETHOD_CALLERS; callerCount++)
-         if (serialEntry->_callers[callerCount]._method == NULL)
-            break;
+      size_t callerCount = serialEntry->_callerCount;
 
       TR_IPMethodData *callerStore = (TR_IPMethodData*) trMemory->allocateHeapMemory(callerCount * sizeof(TR_IPMethodData));
       if (callerStore)
@@ -90,30 +88,28 @@ JITServerIProfiler::deserializeMethodEntry(TR_ContiguousIPMethodHashTableEntry *
    return entry;
    }
 
-TR_ContiguousIPMethodHashTableEntry
-TR_ContiguousIPMethodHashTableEntry::serialize(TR_IPMethodHashTableEntry *entry)
+void
+TR_ContiguousIPMethodHashTableEntry::serialize(TR_IPMethodHashTableEntry *entry, TR_ContiguousIPMethodHashTableEntry *serialEntry)
    {
-   TR_ContiguousIPMethodHashTableEntry serialEntry;
-   memset(&serialEntry, 0, sizeof(TR_ContiguousIPMethodHashTableEntry));
-   serialEntry._method = entry->_method;
-   serialEntry._otherBucket = entry->_otherBucket;
+   serialEntry->_method = entry->_method;
+   serialEntry->_otherBucket = entry->_otherBucket;
 
    size_t callerIdx = 0;
    for (TR_IPMethodData *caller = &entry->_caller; caller; caller = caller->next)
       {
       if (callerIdx >= TR_IPMethodHashTableEntry::MAX_IPMETHOD_CALLERS)
          break;
-      auto &serialCaller = serialEntry._callers[callerIdx];
+      auto &serialCaller = serialEntry->_callers[callerIdx];
       serialCaller._method = caller->getMethod();
       serialCaller._pcIndex = caller->getPCIndex();
       serialCaller._weight = caller->getWeight();
       callerIdx++;
       }
-   return serialEntry;
+   serialEntry->_callerCount = callerIdx;
    }
 
 TR_IPBytecodeHashTableEntry*
-JITServerIProfiler::ipBytecodeHashTableEntryFactory(TR_IPBCDataStorageHeader *storage, uintptrj_t pc, TR_Memory* mem, TR_AllocationKind allocKind)
+JITServerIProfiler::ipBytecodeHashTableEntryFactory(TR_IPBCDataStorageHeader *storage, uintptr_t pc, TR_Memory* mem, TR_AllocationKind allocKind)
    {
    TR_IPBytecodeHashTableEntry *entry =  NULL;
    uint32_t entryType = storage->ID;
@@ -162,7 +158,7 @@ JITServerIProfiler::searchForMethodSample(TR_OpaqueMethodBlock *omb, int32_t buc
 
 // This method is used to search only the hash table
 TR_IPBytecodeHashTableEntry*
-JITServerIProfiler::profilingSample(uintptrj_t pc, uintptrj_t data, bool addIt, bool isRIData, uint32_t freq)
+JITServerIProfiler::profilingSample(uintptr_t pc, uintptr_t data, bool addIt, bool isRIData, uint32_t freq)
    {
    if (addIt)
       return NULL; // Server should not create any samples
@@ -174,7 +170,7 @@ JITServerIProfiler::profilingSample(uintptrj_t pc, uintptrj_t data, bool addIt, 
 // This method is used to search the hash table first, then the shared cache
 TR_IPBytecodeHashTableEntry*
 JITServerIProfiler::profilingSample(TR_OpaqueMethodBlock *method, uint32_t byteCodeIndex,
-                                  TR::Compilation *comp, uintptrj_t data, bool addIt)
+                                  TR::Compilation *comp, uintptr_t data, bool addIt)
    {
    if (addIt)
       return NULL; // Server should not create any samples
@@ -204,13 +200,13 @@ JITServerIProfiler::profilingSample(TR_OpaqueMethodBlock *method, uint32_t byteC
          // sanity check
          // Ask the client again and see if the two sources of information match
          auto stream = TR::CompilationInfo::getStream();
-         stream->write(JITServer::MessageType::IProfiler_profilingSample, method, byteCodeIndex, (uintptrj_t)1);
+         stream->write(JITServer::MessageType::IProfiler_profilingSample, method, byteCodeIndex, (uintptr_t)1);
          auto recv = stream->read<std::string, bool, bool>();
          const std::string ipdata = std::get<0>(recv);
          bool wholeMethod = std::get<1>(recv); // indicates whether the client has sent info for entire method
          bool usePersistentCache = std::get<2>(recv);
          TR_ASSERT(!wholeMethod, "Client should not have sent whole method info");
-         uintptrj_t methodStart = TR::Compiler->mtd.bytecodeStart(method);
+         uintptr_t methodStart = TR::Compiler->mtd.bytecodeStart(method);
          TR_IPBCDataStorageHeader *clientData = ipdata.empty() ? NULL : (TR_IPBCDataStorageHeader *) &ipdata[0];
          bool isMethodBeingCompiled = (method == comp->getMethodBeingCompiled()->getPersistentIdentifier());
 
@@ -240,7 +236,7 @@ JITServerIProfiler::profilingSample(TR_OpaqueMethodBlock *method, uint32_t byteC
    // Now ask the client
    //
    auto stream = TR::CompilationInfo::getStream();
-   stream->write(JITServer::MessageType::IProfiler_profilingSample, method, byteCodeIndex, (uintptrj_t)(_useCaching ? 0 : 1));
+   stream->write(JITServer::MessageType::IProfiler_profilingSample, method, byteCodeIndex, (uintptr_t)(_useCaching ? 0 : 1));
    auto recv = stream->read<std::string, bool, bool>();
    const std::string ipdata = std::get<0>(recv);
    bool wholeMethod = std::get<1>(recv); // indicates whether the client sent info for entire method
@@ -266,7 +262,7 @@ JITServerIProfiler::profilingSample(TR_OpaqueMethodBlock *method, uint32_t byteC
       return NULL;
       }
    
-   uintptrj_t methodStart = TR::Compiler->mtd.bytecodeStart(method);
+   uintptr_t methodStart = TR::Compiler->mtd.bytecodeStart(method);
 
    if (doCache)
       {
@@ -411,7 +407,7 @@ JITServerIProfiler::invalidateEntryIfInconsistent(TR_IPBytecodeHashTableEntry *e
    }
 
 void
-JITServerIProfiler::validateCachedIPEntry(TR_IPBytecodeHashTableEntry *entry, TR_IPBCDataStorageHeader *clientData, uintptrj_t methodStart, bool isMethodBeingCompiled, TR_OpaqueMethodBlock *method, bool fromPerCompilationCache, bool isCompiledWhenProfiling)
+JITServerIProfiler::validateCachedIPEntry(TR_IPBytecodeHashTableEntry *entry, TR_IPBCDataStorageHeader *clientData, uintptr_t methodStart, bool isMethodBeingCompiled, TR_OpaqueMethodBlock *method, bool fromPerCompilationCache, bool isCompiledWhenProfiling)
    {
    if (clientData) // client sent us some data
       {
@@ -426,7 +422,7 @@ JITServerIProfiler::validateCachedIPEntry(TR_IPBytecodeHashTableEntry *entry, TR
       else // we have data from 2 sources
          {
          // Do the bytecodes match?
-         uintptrj_t clientPC = clientData->pc + methodStart;
+         uintptr_t clientPC = clientData->pc + methodStart;
          TR_ASSERT(clientPC == entry->getPC(), "Missmatch for bci: clientPC: (%u + %p)=%p   cachedPC: %p\n", clientData->pc, (void*)methodStart, (void*)clientPC, entry->getPC());
          // Do the type of entries match?
          switch (clientData->ID)
@@ -468,8 +464,8 @@ JITServerIProfiler::validateCachedIPEntry(TR_IPBytecodeHashTableEntry *entry, TR
               
                int32_t sumW;
                int32_t maxW;
-               uintptrj_t domClazzClient = csInfoClient->getDominantClass(sumW, maxW);
-               uintptrj_t domClazzServer = csInfoServer->getDominantClass(sumW, maxW);
+               uintptr_t domClazzClient = csInfoClient->getDominantClass(sumW, maxW);
+               uintptr_t domClazzServer = csInfoServer->getDominantClass(sumW, maxW);
                
                   if(!fromPerCompilationCache && isCompiledWhenProfiling)
                      TR_ASSERT(domClazzClient == domClazzServer, "Missmatch dominant class client=%p server=%p", (void*)domClazzClient, (void*)domClazzServer);            
@@ -505,12 +501,13 @@ JITServerIProfiler::setCallCount(TR_OpaqueMethodBlock *method, int32_t bcIndex, 
       {
       OMR::CriticalSection getRemoteROMClass(clientData->getROMMapMonitor());
       auto & j9methodMap = clientData->getJ9MethodMap();
-      bool methodInfoPresentInPersistent = false, methodInfoPresentInHeap = false;
+      bool methodInfoPresentInPersistent = false;
+      bool methodInfoPresentInHeap = false;
       auto compInfoPT = (TR::CompilationInfoPerThreadRemote *) TR::compInfoPT;
       // Check persistent cache first, then per-compilation cache
       TR_IPBytecodeHashTableEntry *entry = clientData->getCachedIProfilerInfo(method, bcIndex, &methodInfoPresentInPersistent);
       if (!methodInfoPresentInPersistent)
-         compInfoPT->getCachedIProfilerInfo(method, bcIndex, &methodInfoPresentInHeap);
+         entry = compInfoPT->getCachedIProfilerInfo(method, bcIndex, &methodInfoPresentInHeap);
 
       // Note that methodInfoPresent means that a profiled method is in the map of (J9Method *) to (IPTable_t *),
       // it does not mean that an entry for a profiled bcIndex is cached.
@@ -536,15 +533,18 @@ JITServerIProfiler::setCallCount(TR_OpaqueMethodBlock *method, int32_t bcIndex, 
             {
             // Info for this bcIndex is missing. 
             // Create a new entry, add it to the cache and send a remote message as well
-            uintptrj_t methodStart = TR::Compiler->mtd.bytecodeStart(method);
-            TR_IPBCDataCallGraph *entry = new TR_IPBCDataCallGraph(methodStart + bcIndex);
-            CallSiteProfileInfo *csInfo = entry->getCGData();
+            uintptr_t methodStart = TR::Compiler->mtd.bytecodeStart(method);
+            TR_AllocationKind allocKind = methodInfoPresentInPersistent ? persistentAlloc : heapAlloc;
+            TR_IPBCDataCallGraph *cgEntry = (TR_IPBCDataCallGraph*)comp->trMemory()->allocateMemory(sizeof(TR_IPBCDataCallGraph), allocKind, TR_Memory::IPBCDataCallGraph);
+            cgEntry = new (cgEntry) TR_IPBCDataCallGraph(methodStart + bcIndex);
+
+            CallSiteProfileInfo *csInfo = cgEntry->getCGData();
             csInfo->_weight[0] = count;
             // TODO: we should probably add some class as well
             if (methodInfoPresentInPersistent)
-               clientData->cacheIProfilerInfo(method, bcIndex, entry);
+               clientData->cacheIProfilerInfo(method, bcIndex, cgEntry);
             else
-               compInfoPT->cacheIProfilerInfo(method, bcIndex, entry);
+               compInfoPT->cacheIProfilerInfo(method, bcIndex, cgEntry);
 
             sendRemoteMessage = true;
             }
@@ -577,10 +577,8 @@ JITServerIProfiler::persistIprofileInfo(TR::ResolvedMethodSymbol *methodSymbol, 
 
    if (clientSessionData->getOrCacheVMInfo(stream)->_elgibleForPersistIprofileInfo)
       {
-#if defined(JITSERVER_TODO)
       auto serverMethod = static_cast<TR_ResolvedJ9JITServerMethod *>(method);
       compInfoPT->cacheResolvedMirrorMethodsPersistIPInfo(serverMethod->getRemoteMirror());
-#endif
       }
    }
 
@@ -613,7 +611,7 @@ JITClientIProfiler::JITClientIProfiler(J9JITConfig *jitConfig)
  * @return Number of bytes needed to store all IProfiler entries of this method
  */
 uint32_t
-JITClientIProfiler::walkILTreeForIProfilingEntries(uintptrj_t *pcEntries, uint32_t &numEntries, TR_J9ByteCodeIterator *bcIterator,
+JITClientIProfiler::walkILTreeForIProfilingEntries(uintptr_t *pcEntries, uint32_t &numEntries, TR_J9ByteCodeIterator *bcIterator,
                                                        TR_OpaqueMethodBlock *method, TR_BitVector *BCvisit, bool &abort, TR::Compilation *comp)
    {
    abort = false; // optimistic
@@ -624,7 +622,7 @@ JITClientIProfiler::walkILTreeForIProfilingEntries(uintptrj_t *pcEntries, uint32
       uint32_t bci = bcIterator->bcIndex();
       if (bci < methodSize && !BCvisit->isSet(bci))
          {
-         uintptrj_t thisPC = getSearchPCFromMethodAndBCIndex(method, bci);
+         uintptr_t thisPC = getSearchPCFromMethodAndBCIndex(method, bci);
 
          TR_IPBytecodeHashTableEntry *entry = profilingSample(method, bci, comp);
          BCvisit->set(bci);
@@ -701,8 +699,8 @@ JITClientIProfiler::walkILTreeForIProfilingEntries(uintptrj_t *pcEntries, uint32
  * @return Total memory space used for serialization
  */
 uintptr_t
-JITClientIProfiler::serializeIProfilerMethodEntries(uintptrj_t *pcEntries, uint32_t numEntries,
-                                                        uintptr_t memChunk, uintptrj_t methodStartAddress)
+JITClientIProfiler::serializeIProfilerMethodEntries(uintptr_t *pcEntries, uint32_t numEntries,
+                                                        uintptr_t memChunk, uintptr_t methodStartAddress)
    {
    uintptr_t crtAddr = memChunk;
    TR_IPBCDataStorageHeader * storage = NULL;
@@ -740,17 +738,17 @@ JITClientIProfiler::serializeAndSendIProfileInfoForMethod(TR_OpaqueMethodBlock *
    TR::StackMemoryRegion stackMemoryRegion(*comp->trMemory());
    uint32_t numEntries = 0;
    uint32_t bytesFootprint = 0;
-   uintptrj_t methodSize  = (uintptrj_t)TR::Compiler->mtd.bytecodeSize(method);
-   uintptrj_t methodStart = (uintptrj_t)TR::Compiler->mtd.bytecodeStart(method);
+   uintptr_t methodSize  = (uintptr_t)TR::Compiler->mtd.bytecodeSize(method);
+   uintptr_t methodStart = (uintptr_t)TR::Compiler->mtd.bytecodeStart(method);
 
-   uintptrj_t * pcEntries = NULL;
+   uintptr_t * pcEntries = NULL;
    bool abort = false;
    try {
       TR_ResolvedJ9Method resolvedj9method = TR_ResolvedJ9Method(method, comp->fej9(), comp->trMemory());
       TR_J9ByteCodeIterator bci(NULL, &resolvedj9method, static_cast<TR_J9VMBase *> (comp->fej9()), comp);
       // Allocate memory for every possible node in this method
       TR_BitVector *BCvisit = new (comp->trStackMemory()) TR_BitVector(methodSize, comp->trMemory(), stackAlloc);
-      pcEntries = (uintptrj_t *)comp->trMemory()->allocateMemory(sizeof(uintptrj_t) * methodSize, stackAlloc);
+      pcEntries = (uintptr_t *)comp->trMemory()->allocateMemory(sizeof(uintptr_t) * methodSize, stackAlloc);
 
       // Walk all bytecodes and populate the sorted array of interesting PCs (pcEntries)
       // numEntries will indicate how many entries have been populated
@@ -761,7 +759,7 @@ JITClientIProfiler::serializeAndSendIProfileInfoForMethod(TR_OpaqueMethodBlock *
          {
          // Serialize the entries
          std::string buffer(bytesFootprint, '\0');
-         intptrj_t writtenBytes = serializeIProfilerMethodEntries(pcEntries, numEntries, (uintptr_t)&buffer[0], methodStart);
+         intptr_t writtenBytes = serializeIProfilerMethodEntries(pcEntries, numEntries, (uintptr_t)&buffer[0], methodStart);
          TR_ASSERT(writtenBytes == bytesFootprint, "BST doesn't match expected footprint");
          // send the information to the server
          client->write(JITServer::MessageType::IProfiler_profilingSample, buffer, true, usePersistentCache);
@@ -800,8 +798,10 @@ JITClientIProfiler::serializeIProfilerMethodEntry(TR_OpaqueMethodBlock *omb)
    auto entry = findOrCreateMethodEntry(NULL, (J9Method *) omb, false);
    if (entry)
       {
-      auto serialEntry = TR_ContiguousIPMethodHashTableEntry::serialize(entry);
-      std::string entryStr((char *) &serialEntry, sizeof(TR_ContiguousIPMethodHashTableEntry));
+      std::string entryStr(sizeof(TR_ContiguousIPMethodHashTableEntry), 0);
+      TR_ContiguousIPMethodHashTableEntry::serialize(
+         entry,
+         reinterpret_cast<TR_ContiguousIPMethodHashTableEntry *>(&entryStr[0]));
       return entryStr;
       }
    else

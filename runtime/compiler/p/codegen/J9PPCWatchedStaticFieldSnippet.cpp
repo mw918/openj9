@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -39,17 +39,17 @@ uint8_t* TR::J9PPCWatchedStaticFieldSnippet::emitSnippetBody()
 
    // Insert the Snippet Address into TOC or patch the materalisation instructions
    // Insert into TOC 
-   if (TR::Compiler->target.is64Bit() && getTOCOffset() != PTOC_FULL_INDEX)
+   if (cg()->comp()->target().is64Bit() && getTOCOffset() != PTOC_FULL_INDEX)
       {
-      TR_PPCTableOfConstants::setTOCSlot(getTOCOffset(), reinterpret_cast<uintptrj_t>(snippetLocation));
+      TR_PPCTableOfConstants::setTOCSlot(getTOCOffset(), reinterpret_cast<uintptr_t>(snippetLocation));
       }
    else if (getLowerInstruction() != NULL)
       {
       // Handle Nibbles - Generation of instructions to materialise address
       int32_t *patchAddr = reinterpret_cast<int32_t *>(getLowerInstruction()->getBinaryEncoding());
-      intptrj_t addrValue = reinterpret_cast<intptrj_t>(snippetLocation);
+      intptr_t addrValue = reinterpret_cast<intptr_t>(snippetLocation);
 
-      if (TR::Compiler->target.is64Bit())
+      if (cg()->comp()->target().is64Bit())
          {
          *patchAddr |= LO_VALUE(addrValue) & 0x0000ffff;
          addrValue = cg()->hiValue(addrValue);
@@ -60,9 +60,9 @@ uint8_t* TR::J9PPCWatchedStaticFieldSnippet::emitSnippetBody()
       else
          {
       	int32_t *patchAddress1 = reinterpret_cast<int32_t *>(getUpperInstruction()->getBinaryEncoding());
-         *patchAddress1 |= cg()->hiValue(static_cast<int32_t>(reinterpret_cast<intptrj_t>(snippetLocation))) & 0x0000ffff;
+         *patchAddress1 |= cg()->hiValue(static_cast<int32_t>(reinterpret_cast<intptr_t>(snippetLocation))) & 0x0000ffff;
          int32_t *patchAddress2 = reinterpret_cast<int32_t *>(getLowerInstruction()->getBinaryEncoding());
-         *patchAddress2 |= static_cast<int32_t>(reinterpret_cast<intptrj_t>(snippetLocation)) & 0x0000ffff;
+         *patchAddress2 |= static_cast<int32_t>(reinterpret_cast<intptr_t>(snippetLocation)) & 0x0000ffff;
          }
       }
 

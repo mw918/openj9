@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Copyright (c) 2006, 2019 IBM Corp. and others
+Copyright (c) 2006, 2020 IBM Corp. and others
  
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -28,6 +28,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<precludes>
 			<preclude flag="arch_arm"/>
 			<preclude flag="arch_power"/>
+			<preclude flag="arch_riscv"/>
 			<preclude flag="arch_s390"/>
 			<preclude flag="arch_x86"/>
 		</precludes>
@@ -38,6 +39,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<precludes>
 			<preclude flag="arch_aarch64"/>
 			<preclude flag="arch_power"/>
+			<preclude flag="arch_riscv"/>
 			<preclude flag="arch_s390"/>
 			<preclude flag="arch_x86"/>
 		</precludes>
@@ -48,6 +50,18 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<precludes>
 			<preclude flag="arch_aarch64"/>
 			<preclude flag="arch_arm"/>
+			<preclude flag="arch_riscv"/>
+			<preclude flag="arch_s390"/>
+			<preclude flag="arch_x86"/>
+		</precludes>
+	</flag>
+	<flag id="arch_riscv">
+		<description>This spec targets RISC-V processors.</description>
+		<ifRemoved></ifRemoved>
+		<precludes>
+			<preclude flag="arch_aarch64"/>
+			<preclude flag="arch_arm"/>
+			<preclude flag="arch_power"/>
 			<preclude flag="arch_s390"/>
 			<preclude flag="arch_x86"/>
 		</precludes>
@@ -59,6 +73,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<preclude flag="arch_aarch64"/>
 			<preclude flag="arch_arm"/>
 			<preclude flag="arch_power"/>
+			<preclude flag="arch_riscv"/>
 			<preclude flag="arch_x86"/>
 		</precludes>
 	</flag>
@@ -69,6 +84,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<preclude flag="arch_aarch64"/>
 			<preclude flag="arch_arm"/>
 			<preclude flag="arch_power"/>
+			<preclude flag="arch_riscv"/>
 			<preclude flag="arch_s390"/>
 		</precludes>
 	</flag>
@@ -332,6 +348,17 @@ Currently only available on linux_x86 and win_x96 32 bit builds.</description>
 			<require flag="gc_heapCardTable"/>
 			<require flag="gc_modronStandard"/>
 			<require flag="gc_realtime"/>
+		</requires>
+	</flag>
+	<flag id="gc_enableDoubleMap">
+		<description>Set on double map. Allows LINUX systems to double map arrays that are stored as arraylets.
+When enabled, a contiguous block of memory is created for each array which data surpasses the size of a region. This contiguous block represents the array as
+if the data was stored in a contiguous region of memory. All of the array data will be stored at their own region (not with spine); hence, all arraylets
+become discontiguous whenever this flag is enabled. Since there won’t be any empty arraylet leaves, then arrayoid NULL pointers are no longer required since
+all data is stored in their own region. It additionaly reduces footprint, mainly for JNI primitive array critical.</description>
+		<ifRemoved></ifRemoved>
+		<requires>
+			<require flag="gc_vlhgc"/>
 		</requires>
 	</flag>
 	<flag id="gc_compressedPointerBarrier">
@@ -972,13 +999,13 @@ Currently only available on linux_x86 and win_x96 32 bit builds.</description>
 		<description>DEBUGGING FEATURE.  Determines if the interpreter produces debug information at every bytecode.</description>
 		<ifRemoved>No full trace available.</ifRemoved>
 	</flag>
-	<flag id="interp_updateVMCTracing">
-		<description>Debug mode for tracing uses of updateVMStruct</description>
-		<ifRemoved>No tracing of updateVMStruct helpers</ifRemoved>
-	</flag>
 	<flag id="interp_twoPassExclusive">
 		<description>Exclusive VM access - Set halt bit in one pass, count responders in another pass</description>
 		<ifRemoved>Set and count in a single pass</ifRemoved>
+	</flag>
+	<flag id="interp_updateVMCTracing">
+		<description>Debug mode for tracing uses of updateVMStruct</description>
+		<ifRemoved>No tracing of updateVMStruct helpers</ifRemoved>
 	</flag>
 	<flag id="interp_useUnsafeHelper">
 		<description>If set, use helper functions in UnsafeAPI to access native memory</description>
@@ -1255,6 +1282,10 @@ Only available on zOS</description>
 		<description>Enables compilation of the codegen_ppc module.</description>
 		<ifRemoved>The module will not be compiled.</ifRemoved>
 	</flag>
+	<flag id="module_codegen_riscv">
+		<description>Enables compilation of the codegen_riscv module.</description>
+		<ifRemoved>The module will not be compiled.</ifRemoved>
+	</flag>
 	<flag id="module_codegen_s390">
 		<description>Enables compilation of the codegen_s390 module.</description>
 		<ifRemoved>The module will not be compiled.</ifRemoved>
@@ -1285,6 +1316,10 @@ Only available on zOS</description>
 	</flag>
 	<flag id="module_codert_ppc">
 		<description>Enables compilation of the codert_ppc module.</description>
+		<ifRemoved>The module will not be compiled.</ifRemoved>
+	</flag>
+	<flag id="module_codert_riscv">
+		<description>Enables compilation of the codert_riscv module.</description>
 		<ifRemoved>The module will not be compiled.</ifRemoved>
 	</flag>
 	<flag id="module_codert_s390">
@@ -1485,6 +1520,14 @@ Only available on zOS</description>
 		<description>Enables compilation of the jit_ppcaot module.</description>
 		<ifRemoved>The module will not be compiled.</ifRemoved>
 	</flag>
+	<flag id="module_jit_riscv">
+		<description>Enables compilation of the jit_riscv module.</description>
+		<ifRemoved>The module will not be compiled.</ifRemoved>
+	</flag>
+	<flag id="module_jit_riscvaot">
+		<description>Enables compilation of the jit_riscvaot module.</description>
+		<ifRemoved>The module will not be compiled.</ifRemoved>
+	</flag>
 	<flag id="module_jit_s390">
 		<description>Enables compilation of the jit_s390 module.</description>
 		<ifRemoved>The module will not be compiled.</ifRemoved>
@@ -1515,6 +1558,10 @@ Only available on zOS</description>
 	</flag>
 	<flag id="module_jitrt_ppc">
 		<description>Enables compilation of the jitrt_ppc module.</description>
+		<ifRemoved>The module will not be compiled.</ifRemoved>
+	</flag>
+	<flag id="module_jitrt_riscv">
+		<description>Enables compilation of the jitrt_riscv module.</description>
 		<ifRemoved>The module will not be compiled.</ifRemoved>
 	</flag>
 	<flag id="module_jitrt_s390">
@@ -1704,18 +1751,6 @@ Only available on zOS</description>
 		<description>Transitional flag for the the GC during the switch to fragmented RAM class allocation</description>
 		<ifRemoved></ifRemoved>
 	</flag>
-	<flag id="opt_harmony">
-		<description>Support the Open Source Harmony project</description>
-		<ifRemoved>No Harmony support.</ifRemoved>
-	</flag>
-	<flag id="opt_icbuilderSupport">
-		<description>Determines if opposite-endian bytecode translation is included (required by JXELink).</description>
-		<ifRemoved>No JXELink support.</ifRemoved>
-	</flag>
-	<flag id="opt_infoServer">
-		<description>Determines if info server support is included.</description>
-		<ifRemoved>Info server DLL cannot be used.</ifRemoved>
-	</flag>
 	<flag id="opt_inlineJsrs">
 		<description>Turns on JSR inlining in the dynamic loader.</description>
 		<ifRemoved>Only pre-inlined classes supported.</ifRemoved>
@@ -1733,6 +1768,10 @@ Only available on zOS</description>
 		<requires>
 			<require flag="module_ifa"/>
 		</requires>
+	</flag>
+	<flag id="opt_jitserver">
+		<description>JITServer support is enabled in the buildspec.</description>
+		<ifRemoved></ifRemoved>
 	</flag>
 	<flag id="opt_jvmti">
 		<description>Support for the JVMTI interface</description>
@@ -1787,13 +1826,6 @@ Only available on zOS</description>
 	<flag id="opt_nrr">
 		<description>Enables New Reality Runtime (NRR) features.</description>
 		<ifRemoved></ifRemoved>
-	</flag>
-	<flag id="opt_paas">
-		<description></description>
-		<ifRemoved></ifRemoved>
-		<requires>
-			<require flag="opt_harmony"/>
-		</requires>
 	</flag>
 	<flag id="opt_packed">
 		<description>Enables support for @Packed types (Structs)</description>

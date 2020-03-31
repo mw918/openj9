@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,7 +25,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "codegen/CodeGenerator.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/CompilationTypes.hpp"
 #include "compile/ResolvedMethod.hpp"
@@ -41,13 +41,13 @@
 #include "il/ILOps.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/ParameterSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/ParameterSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "infra/Array.hpp"
 #include "infra/Assert.hpp"
 #include "infra/BitVector.hpp"
@@ -98,7 +98,7 @@ int32_t TR_NewInitialization::performAnalysis(bool doGlobalAnalysis)
    // to make int fields 4 bytes in size in a J9 object is made at the
    // FE side. Remember to allow new init opt if the target is 64 bit.
    //
-   if (TR::Compiler->target.is64Bit() && !comp()->useCompressedPointers())
+   if (comp()->target().is64Bit() && !comp()->useCompressedPointers())
       return 0;
 
    // When TLH is batch cleared, explicit initialization should be disabled.
@@ -1675,7 +1675,7 @@ void TR_NewInitialization::modifyReferences(Candidate *candidate, Candidate *sta
             {
             if (c != startCandidate && c->canBeMerged && child == c->node)
                {
-               if (((TR::Compiler->target.is64Bit()
+               if (((comp()->target().is64Bit()
                      ) ?
                   dumpOptDetails(comp(), "%s Changing child %d of node [%p] into a TR::aladd\n", OPT_DETAILS, i, node)
                   : dumpOptDetails(comp(), "%s Changing child %d of node [%p] into a TR::aiadd\n", OPT_DETAILS, i, node)))
@@ -1686,7 +1686,7 @@ void TR_NewInitialization::modifyReferences(Candidate *candidate, Candidate *sta
                   if (!c->offsetReference)
                      {
                      // build a TR::aladd node instead if required
-                     if (TR::Compiler->target.is64Bit())
+                     if (comp()->target().is64Bit())
                         {
                         TR::Node *offsetNode = TR::Node::create(child, TR::lconst, 0);
                         offsetNode->setLongInt((int64_t)c->startOffset);

@@ -23,7 +23,7 @@
 #ifndef ARM_JNILINKAGE_INCL
 #define ARM_JNILINKAGE_INCL
 
-#include "arm/codegen/ARMPrivateLinkage.hpp"
+#include "codegen/ARMPrivateLinkage.hpp"
 
 #include <stdint.h>
 #include "codegen/Linkage.hpp"
@@ -35,13 +35,17 @@ namespace TR { class Node; }
 namespace TR { class Register; }
 namespace TR { class RegisterDependencyConditions; }
 
-namespace TR {
+namespace J9
+{
 
-class ARMJNILinkage : public TR::ARMPrivateLinkage
+namespace ARM
+{
+
+class JNILinkage : public PrivateLinkage
    {
    public:
 
-   ARMJNILinkage(TR::CodeGenerator *codeGen);
+   JNILinkage(TR::CodeGenerator *codeGen);
 
    virtual TR::MemoryReference *getOutgoingArgumentMemRef(int32_t               totalParmAreaSize,
                                                             int32_t               argOffset,
@@ -78,6 +82,8 @@ class ARMJNILinkage : public TR::ARMPrivateLinkage
 private:
    TR::ARMLinkageProperties _properties;
    };
+
+}
 
 }
 

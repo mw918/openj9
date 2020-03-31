@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -35,14 +35,15 @@
 #include "env/IO.hpp"
 #include "env/jittypes.h"
 #include "env/VMJ9.h"
+#include "il/LabelSymbol.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/ParameterSymbol.hpp"
+#include "il/RegisterMappedSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
-#include "il/symbol/LabelSymbol.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/RegisterMappedSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "runtime/CodeCacheManager.hpp"
 
 uint8_t *storeArgumentItem(TR::InstOpCode::Mnemonic op, uint8_t *buffer, TR::RealRegister *reg, int32_t offset, TR::CodeGenerator *cg)
@@ -151,7 +152,7 @@ uint8_t *TR::PPCStackCheckFailureSnippet::emitSnippetBody()
 
    if (saveLR)
       {
-      if (TR::Compiler->target.is64Bit())
+      if (cg()->comp()->target().is64Bit())
         // std [gr14, 0], gr0
         *(int32_t *)buffer = 0xf80e0000;
       else
@@ -160,15 +161,15 @@ uint8_t *TR::PPCStackCheckFailureSnippet::emitSnippetBody()
       buffer += 4;
       }
 
-   intptrj_t helperAddress = (intptrj_t)sof->getMethodAddress();
-   if (cg()->directCallRequiresTrampoline(helperAddress, (intptrj_t)buffer))
+   intptr_t helperAddress = (intptr_t)sof->getMethodAddress();
+   if (cg()->directCallRequiresTrampoline(helperAddress, (intptr_t)buffer))
       {
       helperAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(sofRef->getReferenceNumber(), (void *)buffer);
-      TR_ASSERT_FATAL(TR::Compiler->target.cpu.isTargetWithinIFormBranchRange(helperAddress, (intptrj_t)buffer), "Helper address is out of range");
+      TR_ASSERT_FATAL(cg()->comp()->target().cpu.isTargetWithinIFormBranchRange(helperAddress, (intptr_t)buffer), "Helper address is out of range");
       }
 
    // bl distance
-   *(int32_t *)buffer = 0x48000001 | ((helperAddress - (intptrj_t)buffer) & 0x03ffffff);
+   *(int32_t *)buffer = 0x48000001 | ((helperAddress - (intptr_t)buffer) & 0x03ffffff);
    cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer,
                                                          (uint8_t *)sofRef,
                                                          TR_HelperAddress, cg()),
@@ -181,7 +182,7 @@ uint8_t *TR::PPCStackCheckFailureSnippet::emitSnippetBody()
       // For FSD, we have to reload the return address
       if (comp->getOption(TR_FullSpeedDebug))
 	 {
-         if (TR::Compiler->target.is64Bit())
+         if (cg()->comp()->target().is64Bit())
             // ld gr0, [gr14, 0]
             *(int32_t *)buffer = 0xe80e0000;
          else
@@ -228,7 +229,7 @@ uint8_t *TR::PPCStackCheckFailureSnippet::emitSnippetBody()
       }
 
    // b restartLabel  -- assuming it is less than 64MB away.
-   *(int32_t *)buffer = 0x48000000 | (((intptrj_t)getReStartLabel()->getCodeLocation() - (intptrj_t)buffer) & 0x03fffffc);
+   *(int32_t *)buffer = 0x48000000 | (((intptr_t)getReStartLabel()->getCodeLocation() - (intptr_t)buffer) & 0x03fffffc);
 
    TR::GCStackAtlas *atlas = cg()->getStackAtlas();
    if (atlas)
@@ -340,7 +341,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::PPCStackCheckFailureSnippet * snippet)
    if (saveLR)
       {
       printPrefix(pOutFile, NULL, cursor, 4);
-      if (TR::Compiler->target.is64Bit())
+      if (_comp->target().is64Bit())
          trfprintf(pOutFile, "std \t[gr14, 0], gr0");
       else
          trfprintf(pOutFile, "stw \t[gr14, 0], gr0");
@@ -355,7 +356,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::PPCStackCheckFailureSnippet * snippet)
    printPrefix(pOutFile, NULL, cursor, 4);
    distance = *((int32_t *) cursor) & 0x03fffffc;
    distance = (distance << 6) >> 6;     // sign extend
-   trfprintf(pOutFile, "bl \t" POINTER_PRINTF_FORMAT "\t\t;%s", (intptrj_t)cursor + distance, info);
+   trfprintf(pOutFile, "bl \t" POINTER_PRINTF_FORMAT "\t\t;%s", (intptr_t)cursor + distance, info);
    cursor += 4;
 
    if (saveLR)
@@ -402,7 +403,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::PPCStackCheckFailureSnippet * snippet)
    printPrefix(pOutFile, NULL, cursor, 4);
    distance = *((int32_t *) cursor) & 0x03fffffc;
    distance = (distance << 6) >> 6;     // sign extend
-   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t; Back to ", (intptrj_t)cursor + distance);
+   trfprintf(pOutFile, "b \t" POINTER_PRINTF_FORMAT "\t\t; Back to ", (intptr_t)cursor + distance);
    print(pOutFile, snippet->getReStartLabel());
    }
 

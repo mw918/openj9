@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 
 <!--
-  Copyright (c) 2010, 2018 IBM Corp. and others
+  Copyright (c) 2010, 2019 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -220,5 +220,104 @@
 	</exclude>
 	<exclude id="Test 55 Check default cache size on Java 9 and up" platform="8">
 		<reason>This test should not be run on Java 8</reason>
+	</exclude>
+	<exclude id="Test 61 clean-up" platform="8">
+		<reason>Exclude the extra clean-up since tests are not run in jdk8</reason>
+	</exclude>
+	<exclude id="Test 62-a: Store the Anonymous Class and the Unsafe Class in the cache" platform="8">
+		<reason>Only Java 11 and up use jdk.internal.misc.Unsafe </reason>
+	</exclude>
+	<exclude id="Test 62-b: Check whether they have been stored correctly" platform="8">
+		<reason>Only Java 11 and up use jdk.internal.misc.Unsafe  </reason>
+	</exclude>
+	<exclude id="Test 62-c: Make sure the classes are loaded from the cache and work properly" platform="8">
+		<reason>Only Java 11 and up use jdk.internal.misc.Unsafe  </reason>
+	</exclude>
+	<exclude id="Test 62-d: Check whether the classes are loaded correctly and work properly after the implementation has been modified" platform="8">
+		<reason>Only Java 11 and up use jdk.internal.misc.Unsafe  </reason>
+	</exclude>
+	<exclude id="Test 62 clean-up" platform="8">
+		<reason>Exclude the extra clean-up since tests are not run in jdk8</reason>
+	</exclude>
+	<exclude id="Test 63-a: Only store the Anonymous Class in the cache" platform="8">
+		<reason>Only Java 11 and up use jdk.internal.misc.Unsafe  </reason>
+	</exclude>
+	<exclude id="Test 63-b: Check whether the Anonymous Class has been stored correctly" platform="8">
+		<reason>Only Java 11 and up use jdk.internal.misc.Unsafe  </reason>
+	</exclude>
+	<exclude id="Test 63 clean-up" platform="8">
+		<reason>Exclude the extra clean-up since tests are not run in jdk8</reason>
+	</exclude>
+	<exclude id="Test 64-a: Only store the Unsafe Class in the cache" platform="8">
+		<reason>Only Java 11 and up use jdk.internal.misc.Unsafe  </reason>
+	</exclude>
+	<exclude id="Test 64-b: Check whether the Unsafe class has been stored correctly" platform="8">
+		<reason>Only Java 11 and up use jdk.internal.misc.Unsafe  </reason>
+	</exclude>
+	<exclude id="Test 64 clean-up" platform="8">
+		<reason>Exclude the extra clean-up since tests are not run in jdk8</reason>
+	</exclude>
+	<exclude id="Test 65-a: Do not store the Anonymous Class and the Unsafe Class in the cache" platform="8">
+		<reason>Only Java 11 and up use jdk.internal.misc.Unsafe  </reason>
+	</exclude>
+	<exclude id="Test 65-b: Make sure none of the classes has been stored in the cache" platform="8">
+		<reason>Only Java 11 and up use jdk.internal.misc.Unsafe  </reason>
+	</exclude>
+	<exclude id="Test 180: Setup for Tests from 181 - 196. Create the layer 0 cache" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 181: Test the sub-option createLayer" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 182: Test the sub-option Layer= with an incorrect layer number" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 183: Test the sub-option Layer= with a correct layer number and generate the javacore file" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 184: Verify that layer information is listed in the javacore" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 185: Check the number of Layers" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 186: Test -Xshareclasses:printtoplayerstats=help" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 187: Test -Xshareclasses:printtoplayerstats=morehelp" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 188: Check whether the total layer stats (printstats) shows up correctly" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 189: Test -Xshareclasses:printtoplayerstats=all" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 190: Test -Xshareclasses:printtoplayerstats=romclass" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 191: Test -Xshareclasses:printtoplayerstats=orphan+aotch" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 192: Try to load the cache and make sure classes are being found in the cache" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 193: Modify the middle layer (layer 1)" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 194: Try to load the cache again and expect to get a failure" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 195: Destroy the top layer" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 196: Check the number of Layers" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 197: After the invalid layer has been destroyed, try to create a new layer of the cache" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
+	</exclude>
+	<exclude id="Test 180 - 197 clean up with destroyAllLayers" platform=".*-3[12].*">
+		<reason> The multi-layer cache feature is only supported on 64-bit platforms </reason>
 	</exclude>
 </suite>

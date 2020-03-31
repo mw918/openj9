@@ -1,5 +1,5 @@
 <#--
-Copyright (c) 1998, 2019 IBM Corp. and others
+Copyright (c) 1998, 2020 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -28,15 +28,15 @@ $(UMA_LIBTARGET) : $(UMA_OBJECTS)
 
 <#assign dll_target_rule>
 $(UMA_DLLTARGET) : $(UMA_OBJECTS) $(UMA_TARGET_LIBRARIES)
-	-rm -f $(UMA_DLLTARGET)
+	-rm -f $@
 	$(UMA_DLL_LD) $(UMA_DLL_LINK_FLAGS) $(UMA_SYS_LINK_PATH) \
-		$(VMLINK) $(UMA_LINK_PATH) -o $(UMA_DLLTARGET) \
+		$(VMLINK) $(UMA_LINK_PATH) -o $@ \
 		$(UMA_OBJECTS) \
 		$(UMA_DLL_LINK_POSTFLAGS)
 ifdef j9vm_uma_gnuDebugSymbols
-	cp $(UMA_DLLTARGET) $(UMA_DLLTARGET).dbg
+	cp $@ $(@:$(UMA_DOT_DLL)=.debuginfo)
 endif
-	strip -X32_64 -t $(UMA_DLLTARGET)
+	strip -X32_64 -t $@
 </#assign>
 
 <#assign exe_target_rule>
@@ -46,6 +46,10 @@ $(UMA_EXETARGET) : $(UMA_OBJECTS) $(UMA_TARGET_LIBRARIES)
 		$(UMA_LINK_LIBRARIES) \
 		-o $@ -lm -lpthread -liconv -ldl \
 		$(UMA_EXE_LINK_POSTFLAGS)
+ifdef j9vm_uma_gnuDebugSymbols
+	cp $@ $(@:$(UMA_DOT_EXE)=.debuginfo)
+endif
+	strip -X32_64 -t $@
 </#assign>
 
 ifeq ($(j9vm_env_data64),1)
@@ -95,12 +99,12 @@ endif
 
 ifeq (,$(findstring xlclang,$(notdir $(CC))))
   # xlc options
-  CFLAGS += -q mbcs -qlanglvl=extended -qinfo=pro
+  CFLAGS += -q mbcs -qinfo=pro
 else
  # xlclang options
-  CFLAGS += -qlanglvl=extended0x -qxlcompatmacros
+  CFLAGS += -qxlcompatmacros
 endif
-CFLAGS += -qarch=ppc -qalias=noansi -qxflag=LTOL:LTOL0 -qsuppress=1506-1108
+CFLAGS += -qlanglvl=extended -qarch=ppc -qalias=noansi -qxflag=LTOL:LTOL0 -qsuppress=1506-1108
 CFLAGS += -D_XOPEN_SOURCE_EXTENDED=1 -D_ALL_SOURCE -DRS6000 -DAIXPPC -D_LARGE_FILES
 
 ifdef I5_VERSION
@@ -111,12 +115,12 @@ endif
 
 ifeq (,$(findstring xlclang++,$(notdir $(CXX))))
   # xlc++ options
-  CXXFLAGS += -q mbcs -qlanglvl=extended -qinfo=pro
+  CXXFLAGS += -q mbcs -qinfo=pro
 else
   # xlclang++ options
-  CXXFLAGS += -qlanglvl=extended0x -qxlcompatmacros -fno-rtti -fno-exceptions
+  CXXFLAGS += -qxlcompatmacros -fno-rtti -fno-exceptions
 endif
-CXXFLAGS += -qarch=ppc -qalias=noansi -qxflag=LTOL:LTOL0 -qsuppress=1506-1108
+CXXFLAGS += -qlanglvl=extended0x -qarch=ppc -qalias=noansi -qxflag=LTOL:LTOL0 -qsuppress=1506-1108
 CXXFLAGS += -D_XOPEN_SOURCE_EXTENDED=1 -D_ALL_SOURCE -DRS6000 -DAIXPPC -D_LARGE_FILES
 CPPFLAGS += -D_XOPEN_SOURCE_EXTENDED=1 -D_ALL_SOURCE -DRS6000 -DAIXPPC -D_LARGE_FILES
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -188,6 +188,7 @@ MM_RealtimeAccessBarrier::validateWriteBarrier(J9VMThread *vmThread, J9Object *d
 {
 	J9JavaVM *javaVM = vmThread->javaVM;
 	PORT_ACCESS_FROM_JAVAVM(javaVM);
+	bool const compressed = J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread);
 
 	switch(_extensions->objectModel.getScanType(dstObject)) {
 	case GC_ObjectModel::SCAN_MIXED_OBJECT_LINKED:
@@ -198,12 +199,12 @@ MM_RealtimeAccessBarrier::validateWriteBarrier(J9VMThread *vmThread, J9Object *d
 	case GC_ObjectModel::SCAN_CLASSLOADER_OBJECT:
 	case GC_ObjectModel::SCAN_REFERENCE_MIXED_OBJECT:
 	{
-		if (((fj9object_t *) dstAddress) - ((fj9object_t *) dstObject)) {
+		intptr_t slotIndex = GC_SlotObject::subtractSlotAddresses(dstAddress, (fj9object_t*)dstObject, compressed);
+		if (slotIndex < 0) {
 			j9tty_printf(PORTLIB, "validateWriteBarrier: slotIndex is negative dstAddress %d and dstObject %d\n", dstAddress, dstObject);
 		}
-		UDATA slotIndex = ((fj9object_t *) dstAddress) - ((fj9object_t *) dstObject);
 		UDATA dataSizeInSlots = MM_Bits::convertBytesToSlots(_extensions->objectModel.getSizeInBytesWithHeader(dstObject));
-		if (slotIndex >= dataSizeInSlots) {
+		if ((UDATA)slotIndex >= dataSizeInSlots) {
 			j9tty_printf(PORTLIB, "validateWriteBarrier: slotIndex (%d) >= object size in slots (%d)", slotIndex, dataSizeInSlots);
 			printClass(javaVM, J9GC_J9OBJECT_CLAZZ_VM(dstObject, javaVM));
 			j9tty_printf(PORTLIB, "\n");
@@ -282,7 +283,7 @@ MM_RealtimeAccessBarrier::validateWriteBarrier(J9VMThread *vmThread, J9Object *d
 
 	case GC_ObjectModel::SCAN_PRIMITIVE_ARRAY_OBJECT:
 		j9tty_printf(PORTLIB, "validateWriteBarrier: writeBarrier called on array of primitive\n");
-		j9tty_printf(PORTLIB, "value being overwritten is %d\n", *dstAddress);
+		j9tty_printf(PORTLIB, "value being overwritten is %d\n", GC_SlotObject::readSlot(dstAddress, compressed));
 		printClass(javaVM, J9GC_J9OBJECT_CLAZZ_VM(dstObject, javaVM));
 		j9tty_printf(PORTLIB, "\n");
 		break;
@@ -740,7 +741,8 @@ MM_RealtimeAccessBarrier::preObjectStoreInternal(J9VMThread *vmThread, J9Object 
 		
 			J9Object *oldObject = NULL;
 			protectIfVolatileBefore(vmThread, isVolatile, true, false);
-			oldObject = mmPointerFromToken(vmThread, *destAddress);
+			GC_SlotObject slotObject(vmThread->javaVM->omrVM, destAddress);
+			oldObject = slotObject.readReferenceFromSlot();
 			protectIfVolatileAfter(vmThread, isVolatile, true, false);
 			rememberObject(env, oldObject);
 		}
@@ -865,6 +867,7 @@ MM_RealtimeAccessBarrier::initializeForNewThread(MM_EnvironmentBase* env)
 void
 MM_RealtimeAccessBarrier::scanContiguousArray(MM_EnvironmentRealtime *env, J9IndexableObject *objectPtr)
 {
+	bool const compressed = env->compressObjectReferences();
 	J9JavaVM *vm = (J9JavaVM *)env->getLanguageVM();
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	if(_realtimeGC->getRealtimeDelegate()->isDynamicClassUnloadingEnabled()) {
@@ -874,14 +877,14 @@ MM_RealtimeAccessBarrier::scanContiguousArray(MM_EnvironmentRealtime *env, J9Ind
 
 	/* if NUA is enabled, separate path for contiguous arrays */
 	fj9object_t *scanPtr = (fj9object_t*) _extensions->indexableObjectModel.getDataPointerForContiguous(objectPtr);
-	fj9object_t *endScanPtr = scanPtr + _extensions->indexableObjectModel.getSizeInElements(objectPtr);
+	fj9object_t *endScanPtr = GC_SlotObject::addToSlotAddress(scanPtr, _extensions->indexableObjectModel.getSizeInElements(objectPtr), compressed);
 
 	while(scanPtr < endScanPtr) {
 		/* since this is done from an external thread, we do not markObject, but rememberObject */
 		GC_SlotObject slotObject(vm->omrVM, scanPtr);
 		J9Object *field = slotObject.readReferenceFromSlot();
 		rememberObject(env, field);
-		scanPtr++;
+		scanPtr = GC_SlotObject::addToSlotAddress(scanPtr, 1, compressed);
 	}
 	/* this method assumes the array is large enough to set scan bit */
 	_markingScheme->setScanAtomic((J9Object *)objectPtr);

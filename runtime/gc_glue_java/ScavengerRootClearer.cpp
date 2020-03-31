@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2019 IBM Corp. and others
+ * Copyright (c) 2015, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -48,6 +48,7 @@ MM_ScavengerRootClearer::processReferenceList(MM_EnvironmentStandard *env, MM_He
 	const uintptr_t maxObjects = region->getSize();
 	uintptr_t objectsVisited = 0;
 	GC_FinalizableReferenceBuffer buffer(_extensions);
+	bool const compressed = _extensions->compressObjectReferences();
 
 	omrobjectptr_t referenceObj = headOfList;
 	while (NULL != referenceObj) {
@@ -58,11 +59,11 @@ MM_ScavengerRootClearer::processReferenceList(MM_EnvironmentStandard *env, MM_He
 		Assert_GC_true_with_message(env, _scavenger->isObjectInNewSpace(referenceObj), "Scavenged reference object not in new space: %p\n", referenceObj);
 
 		omrobjectptr_t nextReferenceObj = _extensions->accessBarrier->getReferenceLink(referenceObj);
-		GC_SlotObject referentSlotObject(_extensions->getOmrVM(), &J9GC_J9VMJAVALANGREFERENCE_REFERENT(env, referenceObj));
+		GC_SlotObject referentSlotObject(_extensions->getOmrVM(), J9GC_J9VMJAVALANGREFERENCE_REFERENT_ADDRESS(env, referenceObj));
 		omrobjectptr_t referent = referentSlotObject.readReferenceFromSlot();
 		if (NULL != referent) {
 			/* update the referent if it's been forwarded */
-			MM_ForwardedHeader forwardedReferent(referent);
+			MM_ForwardedHeader forwardedReferent(referent, compressed);
 			if (forwardedReferent.isForwardedPointer()) {
 				referent = forwardedReferent.getForwardedObject();
 				referentSlotObject.writeReferenceToSlot(referent);
@@ -161,6 +162,7 @@ MM_ScavengerRootClearer::scavengeUnfinalizedObjects(MM_EnvironmentStandard *env)
 	MM_HeapRegionDescriptorStandard *region = NULL;
 	GC_HeapRegionIteratorStandard regionIterator(_extensions->heapRegionManager);
 	GC_Environment *gcEnv = env->getGCEnvironment();
+	bool const compressed = _extensions->compressObjectReferences();
 	while(NULL != (region = regionIterator.nextRegion())) {
 		if (MEMORY_TYPE_NEW == (region->getTypeFlags() & MEMORY_TYPE_NEW)) {
 			MM_HeapRegionDescriptorStandardExtension *regionExtension = MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
@@ -173,7 +175,7 @@ MM_ScavengerRootClearer::scavengeUnfinalizedObjects(MM_EnvironmentStandard *env)
 							omrobjectptr_t next = NULL;
 							gcEnv->_scavengerJavaStats._unfinalizedCandidates += 1;
 
-							MM_ForwardedHeader forwardedHeader(object);
+							MM_ForwardedHeader forwardedHeader(object, compressed);
 							if (!forwardedHeader.isForwardedPointer()) {
 								Assert_MM_true(_scavenger->isObjectInEvacuateMemory(object));
 								next = _extensions->accessBarrier->getFinalizeLink(object);

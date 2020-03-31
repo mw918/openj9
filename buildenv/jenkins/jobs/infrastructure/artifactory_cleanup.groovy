@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -21,16 +21,16 @@
 *******************************************************************************/
 
 /**
-* This script deletes old artifacts off the Artifactory server 
-* 
-* Parameters: 
-*   JOB_TYPE: Choice - Keep artifacts based on TIME or COUNT
-*   JOB_TO_CHECK: String – The folder to keep x amount of builds in 
-*   ARTIFACTORY_SERVER: String - The artifactory server to clean up
-*   ARTIFACTORY_REPO: String - The artifactory repo to clean up
-*   ARTIFACTORY_NUM_ARTIFACTS: String - How many artifacts to keep in artifactory
-*   ARTIFACTORY_DAYS_TO_KEEP_ARTIFACTS: String - Artifacts older than this will be deleted
-**/
+ * This script deletes old artifacts off the Artifactory server
+ *
+ * Parameters:
+ *   JOB_TYPE: Choice - Keep artifacts based on TIME or COUNT
+ *   JOB_TO_CHECK: String - The folder to keep x amount of builds in
+ *   ARTIFACTORY_SERVER: String - The artifactory server to clean up
+ *   ARTIFACTORY_REPO: String - The artifactory repo to clean up
+ *   ARTIFACTORY_NUM_ARTIFACTS: String - How many artifacts to keep in artifactory
+ *   ARTIFACTORY_DAYS_TO_KEEP_ARTIFACTS: String - Artifacts older than this will be deleted
+ */
 
 timestamps {
     LABEL = params.LABEL
@@ -50,38 +50,52 @@ timestamps {
         def artifactoryCreds = server.getCredentialsId()
         def ARTIFACTORY_NUM_ARTIFACTS = params.ARTIFACTORY_NUM_ARTIFACTS ? params.ARTIFACTORY_NUM_ARTIFACTS : env.ARTIFACTORY_NUM_ARTIFACTS
         def ARTIFACTORY_DAYS_TO_KEEP_ARTIFACTS = params.ARTIFACTORY_DAYS_TO_KEEP_ARTIFACTS ? params.ARTIFACTORY_DAYS_TO_KEEP_ARTIFACTS : env.ARTIFACTORY_DAYS_TO_KEEP_ARTIFACTS
-
-        switch(params.JOB_TYPE) {
-            case 'TIME':
-                cleanupTime(ARTIFACTORY_SERVER_URL, ARTIFACTORY_REPO, ARTIFACTORY_DAYS_TO_KEEP_ARTIFACTS, artifactoryCreds)
-            break
-            case 'COUNT':
-                if (params.JOB_TO_CHECK){
-                    cleanupBuilds(ARTIFACTORY_SERVER_URL, ARTIFACTORY_REPO, params.JOB_TO_CHECK, ARTIFACTORY_NUM_ARTIFACTS, artifactoryCreds)
+        ret = false
+        try {
+            retry(2) {
+                if (ret) {
+                    sleep time: 120, unit: 'SECONDS'
                 } else {
-                    error 'Please input a job to cleanup'
+                    ret = true
                 }
-            break
-            default:
-                error 'the JOB_TO_CHECK parameter is not properly defined. Please Enter TIME or COUNT'
-            break
+                switch(params.JOB_TYPE) {
+                    case 'TIME':
+                        cleanupTime(ARTIFACTORY_SERVER_URL, ARTIFACTORY_REPO, ARTIFACTORY_DAYS_TO_KEEP_ARTIFACTS, artifactoryCreds)
+                    break
+                    case 'COUNT':
+                        if (params.JOB_TO_CHECK) {
+                            cleanupBuilds(ARTIFACTORY_SERVER_URL, ARTIFACTORY_REPO, params.JOB_TO_CHECK, ARTIFACTORY_NUM_ARTIFACTS, artifactoryCreds)
+                        } else {
+                            error 'Please input a job to cleanup'
+                        }
+                    break
+                    default:
+                        error 'the JOB_TO_CHECK parameter is not properly defined. Please Enter TIME or COUNT'
+                    break
+                }
+            }
+        } catch (e) {
+            slackSend channel: '#jenkins-sandbox', color: 'danger', message: "Failed: ${JOB_NAME} #${BUILD_NUMBER} (<${BUILD_URL}|Open>)"
         }
     }
 }
 
-def cleanupBuilds(artifactory_server, artifactory_repo, jobToCheck, artifactory_num_artifacts, artifactoryCreds){
+def cleanupBuilds(artifactory_server, artifactory_repo, jobToCheck, artifactory_num_artifacts, artifactoryCreds) {
     // This parameter is originally a string and needs to be casted as an Integer
-    def artifactory_max_num_artifacts = artifactory_num_artifacts as Integer 
-
-    stage('Discover Stored Artifacts'){
+    def artifactory_max_num_artifacts = artifactory_num_artifacts as Integer
+    def testSubfolder = ''
+    if (jobToCheck.contains("Test")) {
+        testSubfolder = '/Test'
+    }
+    stage('Discover Stored Artifacts') {
         echo "Cleaning up ${jobToCheck}"
         echo "Keeping the latest ${artifactory_max_num_artifacts} builds"
         currentBuild.description = "Keeping ${artifactory_max_num_artifacts} builds of ${jobToCheck}"
 
-        def request = httpRequest authentication: artifactoryCreds, consoleLogResponseBody: true, validResponseCodes: '200,404', url: "${artifactory_server}/api/storage/${artifactory_repo}/${jobToCheck}" 
+        def request = httpRequest authentication: artifactoryCreds, consoleLogResponseBody: true, validResponseCodes: '200,404', url: "${artifactory_server}/api/storage/${artifactory_repo}${testSubfolder}/${jobToCheck}"
 
         requestStatus = request.getStatus()
-        if (requestStatus == 200){
+        if (requestStatus == 200) {
             data = readJSON text: request.getContent()
             numberOfArtifacts = data.children.size()
             echo "There are ${numberOfArtifacts} builds"
@@ -91,34 +105,38 @@ def cleanupBuilds(artifactory_server, artifactory_repo, jobToCheck, artifactory_
             return
         }
     }
-    if (requestStatus == 404){
+    if (requestStatus == 404) {
         return
     }
-    stage('Delete Old Artifacts'){
+    stage('Delete Old Artifacts') {
         def amount_deleted = numberOfArtifacts - artifactory_max_num_artifacts
-        if (amount_deleted > 0){
+        if (amount_deleted > 0) {
             def folderNames = getFolderNumbers(data.children.uri)
-            for(i=0; i  < amount_deleted; i++){
+            for (i = 0; i < amount_deleted; i++) {
                 echo "Deleting Build #${folderNames[i]}"
-                httpRequest authentication: artifactoryCreds, httpMode: 'DELETE', consoleLogResponseBody: true, url: "${artifactory_server}/${env.ARTIFACTORY_REPO}/${jobToCheck}/${folderNames[i]}"
+                httpRequest authentication: artifactoryCreds, httpMode: 'DELETE', consoleLogResponseBody: true, url: "${artifactory_server}/${env.ARTIFACTORY_REPO}${testSubfolder}/${jobToCheck}/${folderNames[i]}"
             }
         } else {
             echo 'There are no artifacts to delete'
             amount_deleted = 0
-        } 
+        }
+        if (artifactory_max_num_artifacts == 0) {
+            echo "Deleting Entire Build '${jobToCheck}'"
+            httpRequest authentication: artifactoryCreds, httpMode: 'DELETE', consoleLogResponseBody: true, url: "${artifactory_server}/${env.ARTIFACTORY_REPO}${testSubfolder}/${jobToCheck}"
+        }
         currentBuild.description += "<br>Deleted ${amount_deleted} artifacts"
     }
 }
 
-def getFolderNumbers(folderURI){
+def getFolderNumbers(folderURI) {
     def folderNumbers = []
-    folderURI.each{
+    folderURI.each {
         folderNumbers.add(it.minus('/') as int )
     }
     return folderNumbers.sort()
 }
 
-def cleanupTime(artifactory_server, artifactory_repo , artifactory_days_to_keep_artifacts, artifactoryCreds){
+def cleanupTime(artifactory_server, artifactory_repo , artifactory_days_to_keep_artifacts, artifactoryCreds) {
     stage('Discover Old Artifacts') {
         // This parameter is originally a string and needs to be casted as an Integer
         artifactory_days_to_keep_artifacts = artifactory_days_to_keep_artifacts as Integer
@@ -132,21 +150,21 @@ def cleanupTime(artifactory_server, artifactory_repo , artifactory_days_to_keep_
         data = readJSON text: request.getContent()
         requestStatus = request.getStatus()
     }
-    stage ('Delete Old Artifacts'){
-        if (requestStatus == 200){
+    stage ('Delete Old Artifacts') {
+        if (requestStatus == 200) {
             echo "There are ${data.results.size()} artifacts over ${artifactory_days_to_keep_artifacts} days old.\nCleaning them up"
 
             def artifacts_to_be_deleted = data.results.uri
-            artifacts_to_be_deleted.each() { uri -> 
+            artifacts_to_be_deleted.each() { uri ->
                 httpRequest authentication: artifactoryCreds, httpMode: 'DELETE', consoleLogResponseBody: true, url: uri.minus('/api/storage')
             }
             echo 'Deleted all the old artifacts'
             currentBuild.description += "<br>Deleted ${artifacts_to_be_deleted.size()} artifacts"
-        } else if (requestStatus == 404){
+        } else if (requestStatus == 404) {
             currentBuild.description += "<br>Deleted 0 artifacts"
-            if (data.errors.message.contains("No results found.")){
+            if (data.errors.message.contains("No results found.")) {
                 echo 'There are no artifacts to delete'
-            }else {
+            } else {
                 error 'HTTP 404 Not Found. Please check the logs'
             }
         } else {

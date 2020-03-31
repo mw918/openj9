@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -35,15 +35,19 @@ namespace TR { class Register; }
 namespace TR { class RegisterDependencyConditions; }
 namespace TR { class SystemLinkage; }
 
-namespace TR {
+namespace J9
+{
 
-class J9S390zOSSystemLinkage: public TR::S390zOSSystemLinkage
+namespace Z
+{
+
+class zOSSystemLinkage : public TR::S390zOSSystemLinkage
    {
 public:
-   J9S390zOSSystemLinkage(TR::CodeGenerator * cg);
+   zOSSystemLinkage(TR::CodeGenerator * cg);
 
    virtual void generateInstructionsForCall(TR::Node * callNode, TR::RegisterDependencyConditions * dependencies,
-         intptrj_t targetAddress, TR::Register * methodAddressReg, TR::Register * javaLitOffsetReg, TR::LabelSymbol * returnFromJNICallLabel,
+         intptr_t targetAddress, TR::Register * methodAddressReg, TR::Register * javaLitOffsetReg, TR::LabelSymbol * returnFromJNICallLabel,
          TR::S390JNICallDataSnippet * jniCallDataSnippet, bool isJNIGCPoint = true);
 
 
@@ -67,6 +71,8 @@ public:
    virtual int32_t storeExtraEnvRegForBuildArgs(TR::Node * callNode, TR::Linkage* linkage, TR::RegisterDependencyConditions * dependencies,
          bool isFastJNI, int32_t stackOffset, int8_t gprSize, uint32_t &numIntegerArgs);
    };
+
+}
 
 }
 

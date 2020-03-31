@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -137,6 +137,10 @@ private:
    TR::Node *    genInvokeWithVFTChild(TR::SymbolReference *);
    TR::Node *    getReceiverFor(TR::SymbolReference *);
    void          stashArgumentsForOSR(TR_J9ByteCode byteCode);
+   /** \brief
+    *    Tell if the current bytecode is at start of a basic block
+    */
+   bool          isAtBBStart(int32_t bcIndex);
 
    // Placeholder manipulation
    //
@@ -158,6 +162,7 @@ private:
    // GenLoadStore
    //
    void         loadInstance(int32_t);
+   void         loadInstance(TR::SymbolReference *, int32_t);
    void         loadStatic(int32_t);
    void         loadAuto(TR::DataType type, int32_t slot, bool isAdjunct = false);
    TR::Node     *loadSymbol(TR::ILOpCodes, TR::SymbolReference *);
@@ -179,6 +184,7 @@ private:
    void         loadMonitorArg();
 
    void         storeInstance(int32_t);
+   void         storeInstance(TR::SymbolReference *symRef);
    void         storeStatic(int32_t);
    void         storeAuto(TR::DataType type, int32_t slot, bool isAdjunct = false);
    void         storeArrayElement(TR::DataType dt){ storeArrayElement(dt, comp()->il.opCodeForIndirectArrayStore(dt)); }
@@ -192,7 +198,7 @@ private:
    //
    TR::TreeTop * genTreeTop(TR::Node *);
 
-   TR::Node    * loadConstantValueIfPossible(TR::Node *, uintptrj_t, TR::DataType type = TR::Int32, bool isArrayLength = true);
+   TR::Node    * loadConstantValueIfPossible(TR::Node *, uintptr_t, TR::DataType type = TR::Int32, bool isArrayLength = true);
 
    void         genArrayLength();
    void         genContiguousArrayLength(int32_t width);
@@ -221,6 +227,9 @@ private:
    int32_t      genAThrow();
    void         genMonitorEnter();
    void         genMonitorExit(bool);
+   TR_OpaqueClassBlock *loadValueClass(int32_t classCpIndex);
+   void         genDefaultValue(uint16_t classCpIndex);
+   void         genWithField(uint16_t fieldCpIndex);
    void         genFlush(int32_t nargs);
    void         genFullFence(TR::Node *node);
    void         handlePendingPushSaveSideEffects(TR::Node *, int32_t stackSize = -1);
@@ -247,25 +256,6 @@ private:
    void         genHWOptimizedStrProcessingAvailable();
    void         genJITIntrinsicsEnabled();
    void         genIsORBDeepCopyAvailable();
-
-   TR::SymbolReference *getVectorElementSymRef();
-   TR::Node            *genVectorUnaryOp(TR::Node *node, TR::ILOpCodes op1, TR::DataType dt1, TR::ILOpCodes op2, TR::DataType dt2);
-   TR::Node            *genVectorBinaryOp(TR::Node *node, TR::ILOpCodes op1, TR::DataType dt1, TR::ILOpCodes op2, TR::DataType dt2);
-   TR::Node            *genVectorBinaryOpNoTrg(TR::Node *node, TR::ILOpCodes op);
-   TR::Node            *genVectorTernaryOp(TR::Node *node, TR::ILOpCodes op);
-   TR::Node            *genVectorCompareBranchOp(TR::Node *node, TR::ILOpCodes op);
-   TR::Node            *genVectorLoadOp(TR::Node *node, TR::ILOpCodes loadOp, TR::ILOpCodes storeOp);
-   TR::Node            *genVectorStoreOp(TR::Node *node, TR::ILOpCodes loadOp, TR::ILOpCodes storeOp);
-   TR::Node            *handleVectorIntrinsicCall(TR::Node *node, TR::MethodSymbol *symbol);
-
-   TR::Node            *genVectorSplatsOp(TR::Node *node, TR::ILOpCodes loadOp, TR::DataType vectorType, TR::DataType scalarType);
-   TR::Node            *genVectorStore(TR::Node *node, TR::DataType dt, TR::DataType dt2);
-   TR::Node            *genVectorGetElementOp(TR::Node *node, TR::ILOpCodes loadOp);
-   TR::Node            *genVectorSetElementOp(TR::Node *node, TR::ILOpCodes loadOp);
-   TR::Node            *genVectorAddReduceDouble(TR::Node *node);
-   TR::Node            *genVectorLoadWithStrideDouble(TR::Node *node);
-   TR::Node            *genVectorLogDouble(TR::Node *node);
-   TR::Node            *genVectorAddress(TR::Node *node, TR::ILOpCodes op);
 
    TR::Node     *genNewInstanceImplCall(TR::Node *classNode);
    //TR::Node *  transformNewInstanceImplCall(TR::TreeTop *, TR::Node *);
@@ -356,7 +346,11 @@ private:
    bool replaceField(TR::Node* node, char* destClass, char* destFieldName, char* destFieldSignature, int ParmIndex);
    bool replaceStatic(TR::Node* node, char* dstClassName, char* staticName, char* type);
 
-   uintptrj_t walkReferenceChain(TR::Node *node, uintptrj_t receiver);
+   uintptr_t walkReferenceChain(TR::Node *node, uintptr_t receiver);
+#if defined(J9VM_OPT_JITSERVER)
+   void packReferenceChainOffsets(TR::Node *node, std::vector<uintptr_t>& listOfOffsets);
+#endif
+
    bool hasFPU();
 
    // data

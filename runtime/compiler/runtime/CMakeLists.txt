@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2019 IBM Corp. and others
+# Copyright (c) 2017, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -37,7 +37,6 @@ j9jit_files(
 	runtime/J9JitPersistentMemory.cpp
 	runtime/J9Profiler.cpp
 	runtime/JitRuntime.cpp
-	runtime/LMGuardedStorage.cpp
 	runtime/MetaData.cpp
 	runtime/MetaDataDebug.cpp
 	runtime/MethodMetaData.c
@@ -60,8 +59,9 @@ j9jit_files(
 	${omr_SOURCE_DIR}/compiler/runtime/OMRRuntimeAssumptions.cpp
 )
 
-if(JITSERVER_SUPPORT)
+if(J9VM_OPT_JITSERVER)
 	j9jit_files(
+		runtime/CompileService.cpp
 		runtime/JITClientSession.cpp
 		runtime/JITServerIProfiler.cpp
 		runtime/JITServerStatisticsThread.cpp

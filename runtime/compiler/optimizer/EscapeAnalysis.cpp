@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -25,13 +25,14 @@
 #endif
 
 #include "optimizer/EscapeAnalysis.hpp"
+#include "optimizer/EscapeAnalysisTools.hpp"
 
 #include <algorithm>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include "codegen/CodeGenerator.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "codegen/RecognizedMethods.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/CompilationTypes.hpp"
@@ -51,21 +52,21 @@
 #include "env/VMAccessCriticalSection.hpp"
 #include "env/VMJ9.h"
 #include "il/AliasSetInterface.hpp"
+#include "il/AutomaticSymbol.hpp"
 #include "il/Block.hpp"
 #include "il/DataTypes.hpp"
 #include "il/ILOpCodes.hpp"
 #include "il/ILOps.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/ParameterSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/SymbolReference.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/AutomaticSymbol.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/ParameterSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "infra/Array.hpp"
 #include "infra/Assert.hpp"
 #include "infra/BitVector.hpp"
@@ -132,7 +133,7 @@ TR_EscapeAnalysis::TR_EscapeAnalysis(TR::OptimizationManager *manager)
    _dememoizationSymRef = NULL;
 
    _createStackAllocations   = true;
-   _createLocalObjects       = TR::Compiler->target.cpu.isX86() || TR::Compiler->target.cpu.isPower() || TR::Compiler->target.cpu.isZ();
+   _createLocalObjects       = comp()->target().cpu.isX86() || comp()->target().cpu.isPower() || comp()->target().cpu.isZ();
    _desynchronizeCalls       = true;
 #if CHECK_MONITORS
    /* monitors */
@@ -169,6 +170,15 @@ char *TR_EscapeAnalysis::getClassName(TR::Node *classNode)
 
 bool TR_EscapeAnalysis::isImmutableObject(TR::Node *node)
    {
+   // For debugging issues with the special handling of immutable objects
+   // that allows them to be discontiguously allocated even if they escape
+   static char *disableImmutableObjectHandling = feGetEnv("TR_disableEAImmutableObjectHandling");
+
+   if (disableImmutableObjectHandling)
+      {
+      return false;
+      }
+
    if (node->getOpCodeValue() != TR::New)
       {
       return false;
@@ -247,6 +257,11 @@ int32_t TR_EscapeAnalysis::perform()
       _maxInlinedBytecodeSize = 4000 - nodeCount;
       }
 
+   // under HCR we can protect the top level sniff with an HCR guard
+   // nested sniffs are not currently supported
+   if (comp()->getHCRMode() != TR::none)
+      _maxSniffDepth = 1;
+
    TR_ASSERT_FATAL(_maxSniffDepth < 16, "The argToCall and nonThisArgToCall flags are 16 bits - a depth limit greater than 16 will not fit in these flags");
 
    if (getLastRun())
@@ -266,12 +281,16 @@ int32_t TR_EscapeAnalysis::perform()
       {
       //
       void *data = manager()->getOptData();
+      TR_BitVector *peekableCalls = NULL;
       if (data != NULL)
          {
+         peekableCalls = ((TR_EscapeAnalysis::PersistentData *)data)->_peekableCalls;
          delete ((TR_EscapeAnalysis::PersistentData *) data) ;
          manager()->setOptData(NULL);
          }
       manager()->setOptData(new (comp()->allocator()) TR_EscapeAnalysis::PersistentData(comp()));
+      if (peekableCalls != NULL)
+         ((TR_EscapeAnalysis::PersistentData *)manager()->getOptData())->_peekableCalls = peekableCalls;
       }
    else
       {
@@ -285,6 +304,7 @@ int32_t TR_EscapeAnalysis::perform()
 
    {
    TR::StackMemoryRegion stackMemoryRegion(*trMemory());
+   _callsToProtect = new (trStackMemory()) CallLoadMap(CallLoadMapComparator(), comp()->trMemory()->currentStackRegion());
 
 #if CHECK_MONITORS
    /* monitors */
@@ -298,6 +318,99 @@ int32_t TR_EscapeAnalysis::perform()
 #endif
 
    cost = performAnalysisOnce();
+
+   if (!_callsToProtect->empty() && manager()->numPassesCompleted() < _maxPassNumber)
+      {
+      TR::CFG *cfg = comp()->getFlowGraph();
+      TR::Block *block = NULL;
+      TR::TreeTop *lastTree = comp()->findLastTree();
+      TR_EscapeAnalysisTools tools(comp());
+      RemainingUseCountMap *remainingUseCount = new (comp()->trStackMemory()) RemainingUseCountMap(RemainingUseCountMapComparator(), comp()->trMemory()->currentStackRegion());
+      for (TR::TreeTop *tt = comp()->findLastTree(); tt != NULL; tt = tt->getPrevTreeTop())
+         {
+         TR::Node *node = tt->getNode();
+         if (node->getOpCodeValue() == TR::BBEnd)
+            block = node->getBlock();
+         else if (node->getStoreNode() && node->getStoreNode()->getOpCode().isStoreDirect())
+            node = node->getStoreNode()->getFirstChild();
+         else if (node->getOpCode().isCheck() || node->getOpCode().isAnchor() || node->getOpCodeValue() == TR::treetop)
+            node = node->getFirstChild();
+
+         auto nodeLookup = _callsToProtect->find(node);
+         if (nodeLookup == _callsToProtect->end()
+             || TR_EscapeAnalysisTools::isFakeEscape(node)
+             || node->getSymbol() == NULL
+             || node->getSymbol()->getResolvedMethodSymbol() == NULL
+             || node->getSymbol()->getResolvedMethodSymbol()->getResolvedMethod() == NULL)
+            continue;
+
+         if (node->getReferenceCount() > 1)
+            {
+            auto useCount = remainingUseCount->find(node);
+            if (useCount == remainingUseCount->end())
+               {
+               (*remainingUseCount)[node] = node->getReferenceCount() - 1;
+               continue;
+               }
+            if (useCount->second > 1)
+               {
+               useCount->second -= 1;
+               continue;
+               }
+            }
+
+         if (!performTransformation(comp(), "%sHCR CALL PEEKING: Protecting call [%p] n%dn with an HCR guard and escape helper\n", OPT_DETAILS, node, node->getGlobalIndex()))
+            continue;
+
+         ((TR_EscapeAnalysis::PersistentData*)manager()->getOptData())->_processedCalls->set(node->getGlobalIndex());
+
+         _repeatAnalysis = true;
+
+         optimizer()->setValueNumberInfo(NULL);
+         cfg->invalidateStructure();
+
+         TR::TreeTop *prevTT = tt->getPrevTreeTop();
+         TR::Block *callBlock = block->split(tt, comp()->getFlowGraph(), true, true);
+
+         // check uncommoned nodes for stores of the candidate - if so we need to add the new temp to the
+         // list of loads
+         for (TR::TreeTop *itr = block->getExit(); itr != prevTT; itr = itr->getPrevTreeTop())
+            {
+            TR::Node *storeNode = itr->getNode()->getStoreNode();
+            if (storeNode
+                && storeNode->getOpCodeValue() == TR::astore
+                && nodeLookup->second.first->get(storeNode->getFirstChild()->getGlobalIndex()))
+               nodeLookup->second.second->push_back(TR::Node::createWithSymRef(TR::aload, 0, storeNode->getSymbolReference()));
+            }
+
+         TR::Node *guard = TR_VirtualGuard::createHCRGuard(comp(),
+                              node->getByteCodeInfo().getCallerIndex(),
+                              node,
+                              NULL,
+                              node->getSymbol()->getResolvedMethodSymbol(),
+                              node->getSymbol()->getResolvedMethodSymbol()->getResolvedMethod()->classOfMethod());
+         block->getExit()->insertBefore(TR::TreeTop::create(comp(), guard));
+
+         TR::Block *heapificationBlock = TR::Block::createEmptyBlock(node, comp(), MAX_COLD_BLOCK_COUNT);
+         heapificationBlock->getExit()->join(lastTree->getNextTreeTop());
+         lastTree->join(heapificationBlock->getEntry());
+         lastTree = heapificationBlock->getExit();
+         heapificationBlock->setIsCold();
+
+         guard->setBranchDestination(heapificationBlock->getEntry());
+         cfg->addNode(heapificationBlock);
+         cfg->addEdge(block, heapificationBlock);
+         cfg->addEdge(heapificationBlock, callBlock);
+
+         heapificationBlock->getExit()->insertBefore(TR::TreeTop::create(comp(), TR::Node::create(node, TR::Goto, 0, callBlock->getEntry())));
+         tools.insertFakeEscapeForLoads(heapificationBlock, node, nodeLookup->second.second);
+         traceMsg(comp(), "Created heapification block_%d\n", heapificationBlock->getNumber());
+
+         ((TR_EscapeAnalysis::PersistentData*)manager()->getOptData())->_peekableCalls->set(node->getGlobalIndex());
+         _callsToProtect->erase(nodeLookup);
+         tt = prevTT->getNextTreeTop();
+         }
+      }
    } // scope of the stack memory region
 
    if (_repeatAnalysis && manager()->numPassesCompleted() < _maxPassNumber)
@@ -534,7 +647,7 @@ int32_t TR_EscapeAnalysis::performAnalysisOnce()
    _valueNumberInfo            = NULL;
    _otherDefsForLoopAllocation = NULL;
    _methodSymbol               = NULL;
-   _nodeUsesThroughAternary    = NULL;
+   _nodeUsesThroughAselect     = NULL;
    _repeatAnalysis             = false;
    _somethingChanged           = false;
    _inBigDecimalAdd            = false;
@@ -1177,7 +1290,7 @@ int32_t TR_EscapeAnalysis::performAnalysisOnce()
 
             if (candidate->escapesInColdBlocks())
                {
-               heapifyBeforeColdBlocks(candidate);
+               heapifyForColdBlocks(candidate);
                if (candidate->_fields)
                   {
                   int32_t i;
@@ -1644,7 +1757,7 @@ Candidate *TR_EscapeAnalysis::createCandidateIfValid(TR::Node *node, TR_OpaqueCl
 
    if (classInfo &&
        !TR::Compiler->cls.sameClassLoaders(comp(), classInfo, comp()->getJittedMethodSymbol()->getResolvedMethod()->containingClass()) &&
-       (((void *) comp()->fej9()->getSystemClassLoader()) != ((void *) comp()->fej9()->getClassLoader(classInfo))))
+       !comp()->fej9()->isClassLoadedBySystemClassLoader(classInfo))
       return NULL;
 
    if (size <= 0)
@@ -1749,7 +1862,7 @@ void TR_EscapeAnalysis::checkDefsAndUses()
    {
    Candidate *candidate, *next;
 
-   gatherUsesThroughAternary();
+   gatherUsesThroughAselect();
 
    for (candidate = _candidates.getFirst(); candidate; candidate = next)
       {
@@ -1840,8 +1953,8 @@ void TR_EscapeAnalysis::checkDefsAndUses()
 
             if ((baseChild && (baseChild->getOpCodeValue() == TR::loadaddr) &&
                 baseChild->getSymbolReference()->getSymbol()->isAuto() &&
-                baseChild->getSymbolReference()->getSymbol()->isLocalObject() &&
-                !baseChild->cannotTrackLocalUses()))
+                baseChild->getSymbolReference()->getSymbol()->isLocalObject())
+               )
                {
                baseChildVN = _valueNumberInfo->getValueNumber(baseChild);
                if (node->getOpCodeValue() == TR::arraycopy)
@@ -1854,10 +1967,19 @@ void TR_EscapeAnalysis::checkDefsAndUses()
                   }
                else
                   {
-                  storeOfObjectIntoField = true;
-                  storeIntoOtherLocalObject = true;
-                  if (trace())
-                     traceMsg(comp(), "Reached 1 with baseChild %p VN %d\n", baseChild, baseChildVN);
+                  if (!baseChild->cannotTrackLocalUses())
+                     {
+                     storeOfObjectIntoField = true;
+                     storeIntoOtherLocalObject = true;
+                     if (trace())
+                        traceMsg(comp(), "Reached 1 with baseChild %p VN %d\n", baseChild, baseChildVN);
+                     }
+                  else
+                     {
+                     _notOptimizableLocalObjectsValueNumbers->set(baseChildVN);
+                     _notOptimizableLocalStringObjectsValueNumbers->set(baseChildVN);
+                     storeOfObjectIntoField = false;
+                     }
                   }
                }
             else if (baseChild && _useDefInfo)
@@ -1994,15 +2116,15 @@ void TR_EscapeAnalysis::checkDefsAndUses()
       }
    }
 
-void TR_EscapeAnalysis::printUsesThroughAternary(void)
+void TR_EscapeAnalysis::printUsesThroughAselect(void)
    {
    if (trace())
       {
-      if (_nodeUsesThroughAternary)
+      if (_nodeUsesThroughAselect)
          {
-         traceMsg(comp(), "\nNodes used through aternary operations\n");
+         traceMsg(comp(), "\nNodes used through aselect operations\n");
 
-         for (auto mi = _nodeUsesThroughAternary->begin(); mi != _nodeUsesThroughAternary->end(); mi++)
+         for (auto mi = _nodeUsesThroughAselect->begin(); mi != _nodeUsesThroughAselect->end(); mi++)
             {
             TR::Node *key = mi->first;
             int32_t nodeIdx = key->getGlobalIndex();
@@ -2013,9 +2135,9 @@ void TR_EscapeAnalysis::printUsesThroughAternary(void)
 
             for (auto di = mi->second->begin(), end = mi->second->end(); di != end; di++)
                {
-               TR::Node *aternaryNode = *di;
-               traceMsg(comp(), "%s[%p] n%dn", (first ? "" : ", "), aternaryNode,
-                        aternaryNode->getGlobalIndex());
+               TR::Node *aselectNode = *di;
+               traceMsg(comp(), "%s[%p] n%dn", (first ? "" : ", "), aselectNode,
+                        aselectNode->getGlobalIndex());
                first = false;
                }
 
@@ -2024,12 +2146,12 @@ void TR_EscapeAnalysis::printUsesThroughAternary(void)
          }
       else
          {
-         traceMsg(comp(), "\nNo nodes used through aternary operations\n");
+         traceMsg(comp(), "\nNo nodes used through aselect operations\n");
          }
       }
    }
 
-void TR_EscapeAnalysis::gatherUsesThroughAternary(void)
+void TR_EscapeAnalysis::gatherUsesThroughAselect(void)
    {
    TR::NodeChecklist visited(comp());
    TR::TreeTop *tt = comp()->getStartTree();
@@ -2037,16 +2159,16 @@ void TR_EscapeAnalysis::gatherUsesThroughAternary(void)
    for (; tt; tt = tt->getNextTreeTop())
       {
       TR::Node *node = tt->getNode();
-      gatherUsesThroughAternaryImpl(node, visited);
+      gatherUsesThroughAselectImpl(node, visited);
       }
 
    if (trace())
       {
-      printUsesThroughAternary();
+      printUsesThroughAselect();
       }
    }
 
-void TR_EscapeAnalysis::gatherUsesThroughAternaryImpl(TR::Node *node, TR::NodeChecklist& visited)
+void TR_EscapeAnalysis::gatherUsesThroughAselectImpl(TR::Node *node, TR::NodeChecklist& visited)
    {
    if (visited.contains(node))
       {
@@ -2056,53 +2178,53 @@ void TR_EscapeAnalysis::gatherUsesThroughAternaryImpl(TR::Node *node, TR::NodeCh
 
    for (int32_t i=0; i<node->getNumChildren(); i++)
       {
-      gatherUsesThroughAternaryImpl(node->getChild(i), visited);
+      gatherUsesThroughAselectImpl(node->getChild(i), visited);
       }
 
-   // If this is an aternary operation, for each of its child operands (other than
-   // the condition) add the aternary node to the array of nodes that use that child
-   if (node->getOpCode().isTernary() && node->getDataType() == TR::Address)
+   // If this is an aselect operation, for each of its child operands (other than
+   // the condition) add the aselect node to the array of nodes that use that child
+   if (node->getOpCode().isSelect() && node->getDataType() == TR::Address)
       {
-      associateAternaryWithChild(node, 1);
-      associateAternaryWithChild(node, 2);
+      associateAselectWithChild(node, 1);
+      associateAselectWithChild(node, 2);
       }
    }
 
-void TR_EscapeAnalysis::associateAternaryWithChild(TR::Node *aternaryNode, int32_t idx)
+void TR_EscapeAnalysis::associateAselectWithChild(TR::Node *aselectNode, int32_t idx)
    {
    TR::Region &stackMemoryRegion = trMemory()->currentStackRegion();
-   TR::Node *child = aternaryNode->getChild(idx);
+   TR::Node *child = aselectNode->getChild(idx);
 
    NodeDeque *currChildUses;
 
-   if (NULL == _nodeUsesThroughAternary)
+   if (NULL == _nodeUsesThroughAselect)
       {
-      _nodeUsesThroughAternary =
+      _nodeUsesThroughAselect =
             new (trStackMemory()) NodeToNodeDequeMap((NodeComparator()),
                                                      NodeToNodeDequeMapAllocator(stackMemoryRegion));
       }
 
-   auto search = _nodeUsesThroughAternary->find(child);
-   bool nodeAlreadyMapsToAternary = false;
+   auto search = _nodeUsesThroughAselect->find(child);
+   bool nodeAlreadyMapsToAselect = false;
 
-   if (_nodeUsesThroughAternary->end() != search)
+   if (_nodeUsesThroughAselect->end() != search)
       {
       currChildUses = search->second;
 
-      // Does NodeDeque already contain this aternary node?
-      nodeAlreadyMapsToAternary =
+      // Does NodeDeque already contain this aselect node?
+      nodeAlreadyMapsToAselect =
             (std::find(search->second->begin(), search->second->end(),
-                       aternaryNode) != search->second->end());
+                       aselectNode) != search->second->end());
       }
    else
       {
       currChildUses = new (trStackMemory()) NodeDeque(stackMemoryRegion);
-      (*_nodeUsesThroughAternary)[child] = currChildUses;
+      (*_nodeUsesThroughAselect)[child] = currChildUses;
       }
 
-   if (!nodeAlreadyMapsToAternary)
+   if (!nodeAlreadyMapsToAselect)
       {
-      currChildUses->push_back(aternaryNode);
+      currChildUses->push_back(aselectNode);
       }
    }
 
@@ -2263,43 +2385,43 @@ bool TR_EscapeAnalysis::collectValueNumbersOfIndirectAccessesToObject(TR::Node *
    }
 
 
-bool TR_EscapeAnalysis::checkUsesThroughAternary(TR::Node *node, Candidate *candidate)
+bool TR_EscapeAnalysis::checkUsesThroughAselect(TR::Node *node, Candidate *candidate)
    {
    bool returnValue = true;
 
-   if (_nodeUsesThroughAternary)
+   if (_nodeUsesThroughAselect)
       {
-      auto search = _nodeUsesThroughAternary->find(node);
+      auto search = _nodeUsesThroughAselect->find(node);
 
-      // Is this node referenced directly by any aternary nodes?
-      if (_nodeUsesThroughAternary->end() != search)
+      // Is this node referenced directly by any aselect nodes?
+      if (_nodeUsesThroughAselect->end() != search)
          {
          for (auto di = search->second->begin(), end = search->second->end(); di != end; di++)
             {
-            TR::Node* aternaryNode = *di;
-            int32_t aternaryVN = _valueNumberInfo->getValueNumber(aternaryNode);
+            TR::Node* aselectNode = *di;
+            int32_t aselectVN = _valueNumberInfo->getValueNumber(aselectNode);
             int32_t i;
 
-            // Check whether this aternary has already been accounted for with this candidate
+            // Check whether this aselect has already been accounted for with this candidate
             for (i = candidate->_valueNumbers->size()-1; i >= 0; i--)
                {
-               if (candidate->_valueNumbers->element(i) == aternaryVN)
+               if (candidate->_valueNumbers->element(i) == aselectVN)
                   {
                   break;
                   }
                }
 
-            // If this aternary has not been accounted for with this candidate, check for its uses
+            // If this aselect has not been accounted for with this candidate, check for its uses
             if (i < 0)
                {
-               candidate->_valueNumbers->add(aternaryVN);
+               candidate->_valueNumbers->add(aselectVN);
 
                if (trace())
                   {
-                  traceMsg(comp(), "   Checking uses of node %p through aternary operation %p for candidate %p\n", node, aternaryNode, candidate->_node);
+                  traceMsg(comp(), "   Checking uses of node %p through aselect operation %p for candidate %p\n", node, aselectNode, candidate->_node);
                   }
 
-               if (!checkDefsAndUses(aternaryNode, candidate))
+               if (!checkDefsAndUses(aselectNode, candidate))
                   {
                   returnValue = false;
                   }
@@ -2318,7 +2440,7 @@ bool TR_EscapeAnalysis::checkDefsAndUses(TR::Node *node, Candidate *candidate)
    _useDefInfo->buildDefUseInfo();
    bool returnValue = true;
 
-   if (_nodeUsesThroughAternary && !checkUsesThroughAternary(node, candidate))
+   if (_nodeUsesThroughAselect && !checkUsesThroughAselect(node, candidate))
       {
       returnValue = false;
       }
@@ -2413,7 +2535,7 @@ bool TR_EscapeAnalysis::checkDefsAndUses(TR::Node *node, Candidate *candidate)
 
       if (_useDefInfo->isUseIndex(udIndex))
          {
-         if (_nodeUsesThroughAternary && !checkUsesThroughAternary(next, candidate))
+         if (_nodeUsesThroughAselect && !checkUsesThroughAselect(next, candidate))
             {
             returnValue = false;
             }
@@ -4005,7 +4127,7 @@ static bool isFinalizableInlineTest(TR::Compilation *comp, TR::Node *candidate, 
 
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
 
-   bool is64Bit = TR::Compiler->target.is64Bit();
+   bool is64Bit = comp->target().is64Bit();
 
    // root
    //   r1      - first child of root
@@ -4313,7 +4435,7 @@ void TR_EscapeAnalysis::checkEscapeViaNonCall(TR::Node *node, TR::NodeChecklist&
                if ((!_nonColdLocalObjectsValueNumbers ||
                     !_notOptimizableLocalObjectsValueNumbers ||
                     !resolvedBaseObject ||
-                    (comp()->useCompressedPointers() && (TR::Compiler->om.compressedReferenceShift() > 3) && !TR::Compiler->target.cpu.isX86() && !TR::Compiler->target.cpu.isPower() && !TR::Compiler->target.cpu.isZ()) ||
+                    (comp()->useCompressedPointers() && (TR::Compiler->om.compressedReferenceShift() > 3) && !comp()->target().cpu.isX86() && !comp()->target().cpu.isPower() && !comp()->target().cpu.isZ()) ||
                     !resolvedBaseObject->getOpCode().hasSymbolReference() ||
                     !_nonColdLocalObjectsValueNumbers->get(_valueNumberInfo->getValueNumber(resolvedBaseObject)) ||
                     (((node->getSymbolReference()->getSymbol()->getRecognizedField() != TR::Symbol::Java_lang_String_value) ||
@@ -4962,13 +5084,90 @@ int32_t TR_EscapeAnalysis::sniffCall(TR::Node *callNode, TR::ResolvedMethodSymbo
 
       dumpOptDetails(comp(), "O^O ESCAPE ANALYSIS: Peeking into the IL to check for escaping objects \n");
 
-      bool ilgenFailed = (NULL == methodSymbol->getResolvedMethod()->genMethodILForPeeking(methodSymbol, comp()));
+      bool ilgenFailed = false;
+      bool isPeekableCall = ((PersistentData *)manager()->getOptData())->_peekableCalls->get(callNode->getGlobalIndex());
+      if (isPeekableCall)
+         ilgenFailed = (NULL == methodSymbol->getResolvedMethod()->genMethodILForPeekingEvenUnderMethodRedefinition(methodSymbol, comp()));
+      else
+         ilgenFailed = (NULL == methodSymbol->getResolvedMethod()->genMethodILForPeeking(methodSymbol, comp()));
       //comp()->setVisitCount(visitCount);
 
+      /*
+       * Under HCR we cannot generally peek methods because the method could be
+       * redefined and any assumptions we made about the contents of the method
+       * would no longer hold. Peeking is only safe when we add a compensation
+       * path that would handle potential escape of candidates if a method were
+       * redefined.
+       *
+       * Under OSR we know the live locals from the OSR book keeping information
+       * so can construct a helper call which appears to make those calls escape.
+       * Such a call will force heapification of any candidates ahead of the
+       * helper call.
+       *
+       * We, therefore, queue this call node to be protected if we are in a mode
+       * where protection is possible (voluntary OSR, HCR on). The actual code
+       * transformation is delayed to the end of EA since it will disrupt value
+       * numbering. The transform will insert an HCR guard with an escape helper
+       * call as follows:
+       *
+       * |   ...  |      |      ...      |
+       * | call m |  =>  | hcr guard (m) |
+       * |   ...  |      +---------------+
+       *                         |        \
+       *                         |         +-(cold)-------------------+
+       *                         |         | call eaEscapeHelper      |
+       *                         |         |   <loads of live locals> |
+       *                         |         +--------------------------+
+       *                         V        /
+       *                 +---------------+
+       *                 | call m        |
+       *                 |      ...      |
+       *
+       * Once EA finishes the postEscapeAnalysis pass will clean-up all
+       * eaEscapeHelper calls. Code will only remain in the taken side of the
+       * guard if candidtes were stack allocated and required heapficiation.
+       *
+       * This code transformation is protected with a perform transformation at
+       * the site of tree manipulation at the end of this pass of EA.
+       * Protecting any call is considered a reason to enable another pass of
+       * EA if we have not yet reached the enable limit.
+       *
+       * Note that the result of the call can continue to participate in
+       * commoning with the above design. If we duplicated the call on both
+       * sides of the guard the result could not participate in commoning.
+       *
+       */
       if (ilgenFailed)
          {
-         if (trace())
-            traceMsg(comp(), "   (IL generation failed)\n");
+         traceMsg(comp(), "   (IL generation failed)\n");
+         static char *disableHCRCallPeeking = feGetEnv("TR_disableEAHCRCallPeeking");
+         if (!isPeekableCall
+             && disableHCRCallPeeking == NULL
+             && comp()->getOSRMode() == TR::voluntaryOSR
+             && comp()->getHCRMode() == TR::osr
+             && !_candidates.isEmpty()
+             && !((TR_EscapeAnalysis::PersistentData*)manager()->getOptData())->_processedCalls->get(callNode->getGlobalIndex()))
+            {
+            dumpOptDetails(comp(), "%sAdding call [%p] n%dn to list of calls to protect for peeking to increase opportunities for stack allocation\n", OPT_DETAILS, callNode, callNode->getGlobalIndex());
+            TR_BitVector *candidateNodes = new (comp()->trStackMemory()) TR_BitVector(0, trMemory(), stackAlloc);
+            NodeDeque *loads = new (comp()->trMemory()->currentStackRegion()) NodeDeque(NodeDequeAllocator(comp()->trMemory()->currentStackRegion()));
+            for (int32_t arg = callNode->getFirstArgumentIndex(); arg < callNode->getNumChildren(); ++arg)
+               {
+               TR::Node *child = callNode->getChild(arg);
+               int32_t valueNumber = _valueNumberInfo->getValueNumber(child);
+               for (Candidate *candidate = _candidates.getFirst(); candidate; candidate = candidate->getNext())
+                  {
+                  if (usesValueNumber(candidate, valueNumber))
+                     {
+                     candidateNodes->set(candidate->_node->getGlobalIndex());
+                     ListIterator<TR::SymbolReference> itr(candidate->getSymRefs());
+                     for (TR::SymbolReference *symRef = itr.getFirst(); symRef; symRef = itr.getNext())
+                        loads->push_back(TR::Node::createWithSymRef(TR::aload, 0, symRef));
+                     }
+                  }
+               }
+            (*_callsToProtect)[callNode] = std::make_pair(candidateNodes, loads);
+            }
          return 0;
          }
 
@@ -5391,12 +5590,18 @@ bool TR_EscapeAnalysis::fixupNode(TR::Node *node, TR::Node *parent, TR::NodeChec
 
             if (fieldIsPresentInObject)
                {
-               // Special case handling of non-contiguous immutable object:
-               // if it escapes in a cold block, need to ensure the temporary
-               // that replaces it is correctly initialized
+               // For a candidate that is escaping in a cold block, keep track
+               // of fields that are referenced so they can be initialized.
+               // Otherwise, rewrite field references (in else branch_.
+               // Special case handling of stores to fields of immutable objects
+               // that are not contiguously allocated - their field references
+               // are also rewritten (in else branch), but the original stores
+               // still preserved.
+               //
                if (candidate->escapesInColdBlock(_curBlock)
                       && (!isImmutableObject(candidate)
-                             || candidate->isContiguousAllocation()))
+                             || candidate->isContiguousAllocation()
+                             || node->getOpCode().isLoadVar()))
                   {
                   // Uh, why are we re-calculating the fieldOffset?  Didn't we just do that above?
                   //
@@ -5452,9 +5657,15 @@ bool TR_EscapeAnalysis::fixupNode(TR::Node *node, TR::Node *parent, TR::NodeChec
                         }
                      }
                   }
+
+               // For a candidate that is not escaping in a cold block, or that
+               // is an immutable object that is non-contiguously allocated,
+               // rewrite references
+               //
                else // if (!candidate->escapesInColdBlock(_curBlock))
                     //        || (isImmutableObject(candidate)
                     //               && !candidate->isContiguousAllocation()))
+                    //               && !node->getOpCode().isLoadVar()))
                   {
                   if (candidate->isContiguousAllocation())
                      removeThisNode |= fixupFieldAccessForContiguousAllocation(node, candidate);
@@ -6356,34 +6567,11 @@ void TR_EscapeAnalysis::makeLocalObject(Candidate *candidate)
       traceMsg(comp(), " }\n");
       }
 
-   //bool insertInitAtStart = false;
-   //if (referenceSlots)
-   //   {
-   //   for (i = 0; referenceSlots[i]; i++)
-   //      {
-   //      insertInitAtStart = true;
-   //      break;
-   //      }
-   //   }
-
-   TR::TreeTop *insertionPoint;
-   TR::Node *nodeToUseInInit;
-   //if (insertInitAtStart)
-   if (  referenceSlots
-      || (candidate->_kind != TR::New) // 174954: array size field must be initialized in the first block until we put a sumref on TR::arraylength
-      || candidate->isInsideALoop())
-      {
-      nodeToUseInInit = allocationNode->duplicateTree();
-      insertionPoint = comp()->getStartTree();
-      }
-   else
-      {
-      nodeToUseInInit = allocationNode;
-      insertionPoint = candidate->_treeTop;
-      }
-
    // Initialize the header of the local object
    //
+   TR::Node *nodeToUseInInit = allocationNode->duplicateTree();
+   TR::TreeTop *insertionPoint = comp()->getStartTree();
+
    if (candidate->_kind == TR::New)
       comp()->fej9()->initializeLocalObjectHeader(comp(), nodeToUseInInit, insertionPoint);
    else
@@ -6874,8 +7062,11 @@ void TR_EscapeAnalysis::makeNonContiguousLocalAllocation(Candidate *candidate)
 
 
 
-void TR_EscapeAnalysis::heapifyBeforeColdBlocks(Candidate *candidate)
+void TR_EscapeAnalysis::heapifyForColdBlocks(Candidate *candidate)
    {
+   static char *disableSelectOpForEA = feGetEnv("TR_disableSelectOpForEA");
+   bool useSelectOp = !disableSelectOpForEA && cg()->getSupportsSelect();
+
    if (comp()->suppressAllocationInlining())
       return;
 
@@ -7227,73 +7418,103 @@ void TR_EscapeAnalysis::heapifyBeforeColdBlocks(Candidate *candidate)
             }
         }
 
+      TR::TreeTop *insertSymRefStoresAfter = NULL;
+
+      // If using aselect to perform comparisons, all compares and stores are
+      // inserted directly at the start of the cold block
+      if (useSelectOp)
+         {
+         insertSymRefStoresAfter = coldBlock->getEntry();
+         }
+
       ListIterator<TR::SymbolReference> symRefsIt(candidate->getSymRefs());
       TR::SymbolReference *symRef;
+      bool generatedReusedOperations = false;
+      TR::Node *heapTempLoad = NULL;
+      TR::Node *candidateStackAddrLoad = NULL;
+
       for (symRef = symRefsIt.getFirst(); symRef; symRef = symRefsIt.getNext())
         {
         //
-        // Now create the compares (one for each node) and
-        // stores if required
+        // Now create the compares (one for each node) and stores
         //
-        TR::Node *comparisonNode = TR::Node::createif(TR::ifacmpne, TR::Node::createWithSymRef(candidate->_node, TR::aload, 0, symRef), candidate->_node->duplicateTree(), targetBlock->getEntry());
-        TR::TreeTop *comparisonTree = TR::TreeTop::create(comp(), comparisonNode, NULL, NULL);
-        TR::Block *comparisonBlock = toBlock(cfg->addNode(TR::Block::createEmptyBlock(comparisonNode, comp(), coldBlock->getFrequency())));
-        comparisonBlock->inheritBlockInfo(coldBlock, coldBlock->isCold());
-
-        TR::TreeTop *comparisonEntryTree = comparisonBlock->getEntry();
-        TR::TreeTop *comparisonExitTree = comparisonBlock->getExit();
-        comparisonEntryTree->join(comparisonTree);
-        comparisonTree->join(comparisonExitTree);
-
-        comparisonExitTree->join(insertionPoint);
-
-        if (treeBeforeInsertionPoint)
-           treeBeforeInsertionPoint->join(comparisonEntryTree);
-        else
-           comp()->setStartTree(comparisonEntryTree);
-
-        TR::Node *storeNode = TR::Node::createWithSymRef(TR::astore, 1, 1, TR::Node::createWithSymRef(comparisonNode, TR::aload, 0, heapSymRef), symRef);
-        if (symRef->getSymbol()->holdsMonitoredObject())
-           storeNode->setLiveMonitorInitStore(true);
-        storeNode->setHeapificationStore(true);
-        TR::TreeTop *storeTree = TR::TreeTop::create(comp(), storeNode, NULL, NULL);
-
-
-        if (!symRef->getSymbol()->isParm())
+        if (useSelectOp)
            {
-           TR::Node *initStoreNode = TR::Node::createWithSymRef(TR::astore, 1, 1, TR::Node::aconst(comparisonNode, 0), symRef);
-           if (symRef->getSymbol()->holdsMonitoredObject())
-              initStoreNode->setLiveMonitorInitStore(true);
-           TR::TreeTop *initStoreTree = TR::TreeTop::create(comp(), initStoreNode, NULL, NULL);
-           TR::TreeTop *startTree = comp()->getStartTree();
-           TR::TreeTop *nextToStart = startTree->getNextTreeTop();
-           startTree->join(initStoreTree);
-           initStoreTree->join(nextToStart);
+           // Reload address of object on heap just once for this block
+           if (!heapTempLoad)
+              {
+              heapTempLoad = TR::Node::createWithSymRef(candidate->_node, TR::aload, 0, heapSymRef);
+              candidateStackAddrLoad = candidate->_node->duplicateTree();
+              }
+
+           // If variable has address of the stack allocated object, replace
+           // with the value of the heap allocated object; otherwise, keep the
+           // current value
+           //
+           // astore <object-temp>
+           //   aselect
+           //     acmpeq
+           //       aload <object-temp>
+           //       loadaddr <stack-obj>
+           //     aload <heap-allocated-obj>
+           //     aload <object-temp>
+           //
+           TR::Node *symLoad = TR::Node::createWithSymRef(candidate->_node, TR::aload, 0, symRef);
+           TR::Node *addrCompareNode = TR::Node::create(candidate->_node, TR::acmpeq, 2, symLoad, candidateStackAddrLoad);
+           TR::Node *chooseAddrNode = TR::Node::create(TR::aselect, 3, addrCompareNode, heapTempLoad, symLoad);
+
+           TR::TreeTop *storeTree = storeHeapifiedToTemp(candidate, chooseAddrNode, symRef);
+
+           storeTree->join(insertSymRefStoresAfter->getNextTreeTop());
+           insertSymRefStoresAfter->join(storeTree);
            }
+        else
+           {
+           TR::Node *comparisonNode = TR::Node::createif(TR::ifacmpne, TR::Node::createWithSymRef(candidate->_node, TR::aload, 0, symRef), candidate->_node->duplicateTree(), targetBlock->getEntry());
+           TR::TreeTop *comparisonTree = TR::TreeTop::create(comp(), comparisonNode, NULL, NULL);
+           TR::Block *comparisonBlock = toBlock(cfg->addNode(TR::Block::createEmptyBlock(comparisonNode, comp(), coldBlock->getFrequency())));
+           comparisonBlock->inheritBlockInfo(coldBlock, coldBlock->isCold());
 
-        TR::Block *storeBlock = toBlock(cfg->addNode(TR::Block::createEmptyBlock(storeNode, comp(), coldBlock->getFrequency())));
-        storeBlock->inheritBlockInfo(coldBlock, coldBlock->isCold());
+           TR::TreeTop *comparisonEntryTree = comparisonBlock->getEntry();
+           TR::TreeTop *comparisonExitTree = comparisonBlock->getExit();
+           comparisonEntryTree->join(comparisonTree);
+           comparisonTree->join(comparisonExitTree);
 
-        cfg->addEdge(comparisonBlock, storeBlock);
-        cfg->addEdge(comparisonBlock, targetBlock);
-        cfg->addEdge(storeBlock, targetBlock);
-        if (targetBlock == coldBlock)
-          {
-          lastComparisonBlock = comparisonBlock;
-          lastStoreBlock = storeBlock;
-          }
+           comparisonExitTree->join(insertionPoint);
 
-        TR::TreeTop *storeEntryTree = storeBlock->getEntry();
-        TR::TreeTop *storeExitTree = storeBlock->getExit();
+           if (treeBeforeInsertionPoint)
+              treeBeforeInsertionPoint->join(comparisonEntryTree);
+           else
+              comp()->setStartTree(comparisonEntryTree);
 
-        comparisonExitTree->join(storeEntryTree);
-        storeEntryTree->join(storeTree);
-        storeTree->join(storeExitTree);
-        storeExitTree->join(insertionPoint);
+           TR::Node *heapifiedObjAddrLoad = TR::Node::createWithSymRef(comparisonNode, TR::aload, 0, heapSymRef);
 
-        insertionPoint = comparisonEntryTree;
-        treeBeforeInsertionPoint = insertionPoint->getPrevTreeTop();
-        targetBlock = comparisonBlock;
+           TR::TreeTop *storeTree = storeHeapifiedToTemp(candidate, heapifiedObjAddrLoad, symRef);
+
+           TR::Block *storeBlock = toBlock(cfg->addNode(TR::Block::createEmptyBlock(storeTree->getNode(), comp(), coldBlock->getFrequency())));
+           storeBlock->inheritBlockInfo(coldBlock, coldBlock->isCold());
+
+           cfg->addEdge(comparisonBlock, storeBlock);
+           cfg->addEdge(comparisonBlock, targetBlock);
+           cfg->addEdge(storeBlock, targetBlock);
+           if (targetBlock == coldBlock)
+             {
+             lastComparisonBlock = comparisonBlock;
+             lastStoreBlock = storeBlock;
+             }
+
+           TR::TreeTop *storeEntryTree = storeBlock->getEntry();
+           TR::TreeTop *storeExitTree = storeBlock->getExit();
+
+           comparisonExitTree->join(storeEntryTree);
+           storeEntryTree->join(storeTree);
+           storeTree->join(storeExitTree);
+           storeExitTree->join(insertionPoint);
+
+           insertionPoint = comparisonEntryTree;
+           treeBeforeInsertionPoint = insertionPoint->getPrevTreeTop();
+           targetBlock = comparisonBlock;
+           }
         }
 
       cfg->addEdge(heapAllocationBlock, targetBlock);
@@ -7305,9 +7526,11 @@ void TR_EscapeAnalysis::heapifyBeforeColdBlocks(Candidate *candidate)
          TR::CFGNode *predNode = (*pred)->getFrom();
          /* might be removed, keep reference to next object in list */
          pred++;
-         if (((predNode != lastComparisonBlock) &&
-              (predNode != lastStoreBlock)) ||
-             coldBlock->isCatchBlock())
+         if ((useSelectOp && (predNode != heapComparisonBlock)
+                 && (predNode != heapAllocationBlock))
+             || (!useSelectOp && (predNode != lastComparisonBlock)
+                 && (predNode != lastStoreBlock))
+             || coldBlock->isCatchBlock())
             {
             TR::Block *predBlock = toBlock(predNode);
             if (!coldBlock->isCatchBlock() &&
@@ -7428,6 +7651,31 @@ void TR_EscapeAnalysis::heapifyBeforeColdBlocks(Candidate *candidate)
    }
 
 
+TR::TreeTop *TR_EscapeAnalysis::storeHeapifiedToTemp(Candidate *candidate, TR::Node *value, TR::SymbolReference *symRef)
+   {
+   TR::Node *storeNode = TR::Node::createWithSymRef(TR::astore, 1, 1, value, symRef);
+   TR::TreeTop *storeTree = TR::TreeTop::create(comp(), storeNode, NULL, NULL);
+
+   if (symRef->getSymbol()->holdsMonitoredObject())
+      {
+      storeNode->setLiveMonitorInitStore(true);
+      }
+   storeNode->setHeapificationStore(true);
+
+   if (!symRef->getSymbol()->isParm())
+      {
+      TR::Node *initStoreNode = TR::Node::createWithSymRef(TR::astore, 1, 1, TR::Node::aconst(candidate->_node, 0), symRef);
+      if (symRef->getSymbol()->holdsMonitoredObject())
+         initStoreNode->setLiveMonitorInitStore(true);
+      TR::TreeTop *initStoreTree = TR::TreeTop::create(comp(), initStoreNode, NULL, NULL);
+      TR::TreeTop *startTree = comp()->getStartTree();
+      TR::TreeTop *nextToStart = startTree->getNextTreeTop();
+           startTree->join(initStoreTree);
+      initStoreTree->join(nextToStart);
+      }
+
+   return storeTree;
+   }
 
 
 bool TR_EscapeAnalysis::devirtualizeCallSites()

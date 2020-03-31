@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2018, 2019 IBM Corp. and others
+Copyright (c) 2018, 2020 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -365,7 +365,7 @@ The following instructions guide you through the process of building a Windows *
 :ledger:
 You must install a number of software dependencies to create a suitable build environment on your system:
 
-- [Cygwin](https://cygwin.com/install.html), which provides a Unix-style command line interface. Install all packages in the `Devel` category. Included in this package is mingw, a minimalist subset of GNU tools for Microsoft Windows. OpenJ9 uses the mingw/GCC compiler and is tested with version 6.4.0 of same. Other versions are expected to work also. In the `Archive` category, install the packages `zip` and `unzip`. In the `Utils` category, install the `cpio` package. Install any further package dependencies that are identified by the installer. More information about using Cygwin can be found [here](https://cygwin.com/docs.html).
+- [Cygwin](https://cygwin.com/install.html), which provides a Unix-style command line interface. Install all packages in the `Devel` category. In the `Archive` category, install the packages `zip` and `unzip`. In the `Utils` category, install the `cpio` package. Install any further package dependencies that are identified by the installer. More information about using Cygwin can be found [here](https://cygwin.com/docs.html).
 - [Windows JDK 10](https://adoptopenjdk.net/releases.html?variant=openjdk10#x64_win), which is used as the boot JDK.
 - [Microsoft Visual Studio 2017]( https://visualstudio.microsoft.com/thank-you-downloading-visual-studio/?sku=Community&rel=15), which is the default compiler level used by OpenJDK11; or [Microsoft Visual Studio 2013]( https://go.microsoft.com/fwlink/?LinkId=532495), which is chosen to compile if VS2017 isn't installed.
 - [Freemarker V2.3.8](https://sourceforge.net/projects/freemarker/files/freemarker/2.3.8/freemarker-2.3.8.tar.gz/download)
@@ -652,8 +652,6 @@ JCL      - 9da99f8b97 based on jdk-11+28)
 
 ## AArch64
 
-:construction: This section is still under construction.
-
 :penguin:
 The following instructions guide you through the process of building an **OpenJDK V11** binary that contains Eclipse OpenJ9 for AArch64 (ARMv8 64-bit) Linux.
 
@@ -727,7 +725,8 @@ bash configure --openjdk-target=${OPENJ9_CC_PREFIX} \
                --with-freemarker-jar=/root/freemarker.jar \
                --with-boot-jdk=/root/bootjdk11 \
                --with-build-jdk=/root/bootjdk11 \
-               --disable-warnings-as-errors
+               --disable-warnings-as-errors \
+               --disable-ddr
 ```
 
 :pencil: **Non-compressed references support:** If you require a heap size greater than 57GB, enable a noncompressedrefs build with the `--with-noncompressedrefs` option during this step.
@@ -739,6 +738,8 @@ bash configure --openjdk-target=${OPENJ9_CC_PREFIX} \
   - `system` uses the package installed OpenSSL library in the system.  Use this option when you build on your AArch64 Linux system.
   - `path_to_library` uses an OpenSSL v1.1.x library that's already built.  You can use `${OPENJ9_CC_DIR}/${OPENJ9_CC_PREFIX}/libc/usr` as `path_to_library` when you are configuring in the Docker container.
   - Using `--with-openssl=fetched` will fail during the build in the Docker environment.
+
+:pencil: **DDR support:** You can build DDR support only on AArch64 Linux.  If you are building in a cross-compilation environment, you need the `--disable-ddr` option.
 
 ### 6. Build
 :penguin:
@@ -764,21 +765,21 @@ cd jdk
 ```
 Run:
 ```
-bin/java -Xint -version
+bin/java -version
 ```
 
 Here is some sample output:
 
 ```
-openjdk version "11.0.2-internal" 2019-01-15
-OpenJDK Runtime Environment (build 11.0.2-internal+0-adhoc..openj9-openjdk-jdk11)
-Eclipse OpenJ9 VM (build master-03a061a, JRE 11 Linux aarch64-64-Bit 20190208_000000 (JIT disabled, AOT disabled)
-OpenJ9   - 03a061a
-OMR      - a8ca0e6
-JCL      - fd5cc89 based on jdk-11.0.2+7)
+openjdk version "11.0.6-internal" 2020-01-14
+OpenJDK Runtime Environment (build 11.0.6-internal+0-adhoc..openj9-openjdk-jdk11)
+Eclipse OpenJ9 VM (build master-83baf0b, JRE 11 Linux aarch64-64-Bit 20191204_000000 (JIT enabled, AOT enabled)
+OpenJ9   - 83baf0b
+OMR      - 7b2e5df
+JCL      - d247952 based on jdk-11.0.6+6)
 ```
 
-:pencil: The JIT compiler for AArch64 is not supported at the time of writing this.  If you don't disable the JIT compiler with the `-Xint` option, you will see a warning for `libj9jit29.so`.
+:construction: AArch64 JIT compiler is not fully optimized at the time of writing this, compared with other platforms.
 
 :pencil: **OpenSSL support:** If you built an OpenJDK with OpenJ9 that includes OpenSSL v1.1.x support, the following acknowledgements apply in accordance with the license terms:
 

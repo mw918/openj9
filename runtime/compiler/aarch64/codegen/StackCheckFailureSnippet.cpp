@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -27,7 +27,8 @@
 #include "codegen/GCStackAtlas.hpp"
 #include "codegen/Linkage.hpp"
 #include "codegen/Machine.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
+#include "il/ParameterSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
 
 uint8_t *
 TR::ARM64StackCheckFailureSnippet::emitSnippetBody()
@@ -35,6 +36,8 @@ TR::ARM64StackCheckFailureSnippet::emitSnippetBody()
    TR::ResolvedMethodSymbol *bodySymbol = cg()->comp()->getJittedMethodSymbol();
    TR::Machine *machine = cg()->machine();
    TR::SymbolReference *sofRef = cg()->comp()->getSymRefTab()->findOrCreateStackOverflowSymbolRef(bodySymbol);
+   ListIterator<TR::ParameterSymbol> paramIterator(&(bodySymbol->getParameterList()));
+   TR::ParameterSymbol  *paramCursor = paramIterator.getFirst();
 
    uint8_t *cursor = cg()->getBinaryBufferCursor();
    uint8_t *returnLocation;
@@ -95,10 +98,31 @@ TR::ARM64StackCheckFailureSnippet::emitSnippetBody()
    if (atlas)
       {
       // only the arg references are live at this point
-      TR_GCStackMap *map = atlas->getParameterMap();
+      uint32_t  numberOfParmSlots = atlas->getNumberOfParmSlotsMapped();
+      TR_GCStackMap *map = new (cg()->trHeapMemory(), numberOfParmSlots) TR_GCStackMap(numberOfParmSlots);
+
+      map->copy(atlas->getParameterMap());
+      while (paramCursor != NULL)
+         {
+         int32_t  intRegArgIndex = paramCursor->getLinkageRegisterIndex();
+         if (intRegArgIndex >= 0                   &&
+             paramCursor->isReferencedParameter()  &&
+             paramCursor->isCollectedReference())
+            {
+            // In full speed debug all the parameters are passed in the stack for this case
+            // but will also reside in the registers
+            if (!cg()->comp()->getOption(TR_FullSpeedDebug))
+               {
+               map->resetBit(paramCursor->getGCMapIndex());
+               }
+            map->setRegisterBits(1 << (linkage.getIntegerArgumentRegister(intRegArgIndex) - 1));
+            }
+         paramCursor = paramIterator.getNext();
+         }
 
       // set the GC map
       gcMap().setStackMap(map);
+      atlas->setParameterMap(map);
       }
    gcMap().registerStackMap(returnLocation, cg());
 
@@ -150,11 +174,11 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64StackCheckFailureSnippet * snippet)
    bufferPos += ARM64_INSTRUCTION_LENGTH;
 
    char *info = "";
-   intptrj_t target = (intptrj_t)(sofRef->getMethodAddress());
+   intptr_t target = (intptr_t)(sofRef->getMethodAddress());
    int32_t distance;
    if (isBranchToTrampoline(sofRef, bufferPos, distance))
       {
-      target = (intptrj_t)distance + (intptrj_t)bufferPos;
+      target = (intptr_t)distance + (intptr_t)bufferPos;
       info = " Through trampoline";
       }
    printPrefix(pOutFile, NULL, bufferPos, 4);
@@ -195,5 +219,6 @@ TR::ARM64StackCheckFailureSnippet::getLength(int32_t estimatedSnippetStart)
    else
       {
       TR_ASSERT(false, "Frame size too big.  Not supported yet");
+      return 0;
       }
    }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -53,7 +53,7 @@
 #include "runtime/RuntimeAssumptions.hpp"
 #include "runtime/J9Profiler.hpp"
 #include "OMR/Bytes.hpp"
-
+#include "il/ParameterSymbol.hpp"
 #include "j9.h"
 #include "j9cfg.h"
 
@@ -66,6 +66,8 @@
  */
 bool firstCompileStarted = false;
 
+// JITSERVER_TODO: disabled to allow for JITServer
+#if !defined(J9VM_OPT_JITSERVER)
 void *operator new(size_t size)
    {
 #if defined(DEBUG)
@@ -90,6 +92,7 @@ void operator delete(void *)
    {
    TR_ASSERT(0, "Invalid use of global operator delete");
    }
+#endif /* !defined(J9VM_OPT_JITSERVER) */
 
 
 
@@ -120,6 +123,9 @@ const char * callingContextNames[] = {
    "LAST_CONTEXT"
 };
 
+#if defined(J9VM_OPT_JITSERVER)
+bool J9::Compilation::_outOfProcessCompilation = false;
+#endif  /* defined(J9VM_OPT_JITSERVER) */
 
 J9::Compilation::Compilation(int32_t id,
       J9VMThread *j9vmThread,
@@ -171,6 +177,10 @@ J9::Compilation::Compilation(int32_t id,
    _profileInfo(NULL),
    _skippedJProfilingBlock(false),
    _reloRuntime(reloRuntime),
+#if defined(J9VM_OPT_JITSERVER)
+   _remoteCompilation(false),
+   _serializedRuntimeAssumptions(getTypedAllocator<SerializedRuntimeAssumption>(self()->allocator())),
+#endif /* defined(J9VM_OPT_JITSERVER) */
    _osrProhibitedOverRangeOfTrees(false)
    {
    _symbolValidationManager = new (self()->region()) TR::SymbolValidationManager(self()->region(), compilee);
@@ -189,6 +199,25 @@ J9::Compilation::Compilation(int32_t id,
 
    for (int i = 0; i < CACHED_CLASS_POINTER_COUNT; i++)
       _cachedClassPointers[i] = NULL;
+
+
+   // Add known object index to parm 0 so that other optmizations can be unlocked.
+   // It is safe to do so because method and method symbols of a archetype specimen
+   // are not shared other methods.
+   //
+   TR::KnownObjectTable *knot = self()->getOrCreateKnownObjectTable();
+   TR::IlGeneratorMethodDetails & details = ilGenRequest.details();
+   if (knot && details.isMethodHandleThunk())
+      {
+      J9::MethodHandleThunkDetails & thunkDetails = static_cast<J9::MethodHandleThunkDetails &>(details);
+      if (thunkDetails.isCustom())
+         {
+         TR::KnownObjectTable::Index index = knot->getOrCreateIndexAt(thunkDetails.getHandleRef());
+         ListIterator<TR::ParameterSymbol> parms(&_methodSymbol->getParameterList());
+         TR::ParameterSymbol* parm0 = parms.getFirst();
+         parm0->setKnownObjectIndex(index);
+         }
+      }
    }
 
 J9::Compilation::~Compilation()
@@ -444,7 +473,7 @@ bool
 J9::Compilation::useCompressedPointers()
    {
    //FIXME: probably have to query the GC as well
-   return (TR::Compiler->target.is64Bit() && TR::Options::useCompressedPointers());
+   return (self()->target().is64Bit() && TR::Options::useCompressedPointers());
    }
 
 
@@ -497,6 +526,12 @@ J9::Compilation::isShortRunningMethod(int32_t callerIndex)
 bool
 J9::Compilation::isRecompilationEnabled()
    {
+
+   if (!self()->cg()->getSupportsRecompilation())
+      {
+      return false;
+      }
+
    if (self()->isDLT())
       {
       return false;
@@ -536,15 +571,9 @@ J9::Compilation::canAllocateInlineOnStack(TR::Node* node, TR_OpaqueClassBlock* &
          return -1;
 
       // Can not inline the allocation on stack if the class is special
-      if (clazz->classDepthAndFlags & (J9AccClassReferenceWeak      |
-                                       J9AccClassReferenceSoft      |
-                                       J9AccClassFinalizeNeeded            |
-                                       J9AccClassOwnableSynchronizer))
-         {
+      if (TR::Compiler->cls.isClassSpecialForStackAllocation((TR_OpaqueClassBlock *)clazz))
          return -1;
-         }
       }
-
    return self()->canAllocateInline(node, classInfo);
    }
 
@@ -555,17 +584,7 @@ J9::Compilation::canAllocateInlineClass(TR_OpaqueClassBlock *block)
    if (block == NULL)
       return false;
 
-   J9Class* clazz = reinterpret_cast<J9Class*> (block);
-
-   // Can not inline the allocation if the class is not fully initialized
-   if (clazz->initializeStatus != 1)
-      return false;
-
-   // Can not inline the allocation if the class is an interface or abstract
-   if (clazz->romClass->modifiers & (J9AccAbstract | J9AccInterface))
-      return false;
-
-   return true;
+   return self()->fej9()->canAllocateInlineClass(block);
    }
 
 
@@ -623,8 +642,7 @@ J9::Compilation::canAllocateInline(TR::Node* node, TR_OpaqueClassBlock* &classIn
       TR_ASSERT(node->getSecondChild()->getOpCode().isLoadConst(), "Expecting const child \n");
 
       int32_t arrayClassIndex = node->getSecondChild()->getInt();
-      struct J9Class ** arrayClasses = &self()->fej9()->getJ9JITConfig()->javaVM->booleanArrayClass;
-      clazz = arrayClasses[arrayClassIndex - 4];
+      clazz = (J9Class *) self()->fej9()->getClassFromNewArrayTypeNonNull(arrayClassIndex);
 
       if (node->getFirstChild()->getOpCodeValue() != TR::iconst)
          {
@@ -661,7 +679,8 @@ J9::Compilation::canAllocateInline(TR::Node* node, TR_OpaqueClassBlock* &classIn
       if (clazz == NULL)
          return -1;
 
-      clazz = (J9Class *)self()->fej9vm()->getArrayClassFromComponentClass((TR_OpaqueClassBlock *)clazz);
+      auto classOffset = self()->fej9()->getArrayClassFromComponentClass(TR::Compiler->cls.convertClassPtrToClassOffset(clazz));
+      clazz = TR::Compiler->cls.convertClassOffsetToClassPtr(classOffset);
       if (!clazz)
          return -1;
 
@@ -751,14 +770,19 @@ J9::Compilation::freeKnownObjectTable()
    {
    if (_knownObjectTable)
       {
-      TR::VMAccessCriticalSection freeKnownObjectTable(self()->fej9());
+#if defined(J9VM_OPT_JITSERVER)
+      if (!isOutOfProcessCompilation())
+#endif /* defined(J9VM_OPT_JITSERVER) */
+         {
+         TR::VMAccessCriticalSection freeKnownObjectTable(self()->fej9());
 
-      J9VMThread *thread = self()->fej9()->vmThread();
-      TR_ASSERT(thread, "assertion failure");
+         J9VMThread *thread = self()->fej9()->vmThread();
+         TR_ASSERT(thread, "assertion failure");
 
-      TR_ArrayIterator<uintptrj_t> i(&_knownObjectTable->_references);
-      for (uintptrj_t *ref = i.getFirst(); !i.pastEnd(); ref = i.getNext())
-         thread->javaVM->internalVMFunctions->j9jni_deleteLocalRef((JNIEnv*)thread, (jobject)ref);
+         TR_ArrayIterator<uintptr_t> i(&_knownObjectTable->_references);
+         for (uintptr_t *ref = i.getFirst(); !i.pastEnd(); ref = i.getNext())
+            thread->javaVM->internalVMFunctions->j9jni_deleteLocalRef((JNIEnv*)thread, (jobject)ref);
+         }
       }
 
    _knownObjectTable = NULL;
@@ -1361,7 +1385,7 @@ J9::Compilation::notYetRunMeansCold()
 
    TR_ResolvedMethod *currentMethod = self()->getJittedMethodSymbol()->getResolvedMethod();
 
-   intptrj_t initialCount = currentMethod->hasBackwardBranches() ?
+   intptr_t initialCount = currentMethod->hasBackwardBranches() ?
                              self()->getOptions()->getInitialBCount() :
                              self()->getOptions()->getInitialCount();
 

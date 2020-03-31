@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -36,9 +36,10 @@
 #include "il/Block.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/ParameterSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "optimizer/CallInfo.hpp"
 #include "optimizer/J9CallGraph.hpp"
 #include "optimizer/PreExistence.hpp"
@@ -47,7 +48,6 @@
 #include "runtime/J9Profiler.hpp"
 #include "runtime/J9ValueProfiler.hpp"
 #include "codegen/CodeGenerator.hpp"
-#include "il/symbol/ParameterSymbol.hpp"
 
 #define OPT_DETAILS "O^O INLINER: "
 
@@ -56,13 +56,13 @@ extern int32_t          *InlinedSizes;       // Defined in Inliner.cpp
 
 
 //duplicated as long as there are two versions of findInlineTargets
-static uintptrj_t *failMCS(char *reason, TR_CallSite *callSite, TR_InlinerBase* inliner)
+static uintptr_t *failMCS(char *reason, TR_CallSite *callSite, TR_InlinerBase* inliner)
    {
    debugTrace(inliner->tracer(),"  Fail isMutableCallSiteTargetInvokeExact(%p): %s", callSite, reason);
    return NULL;
    }
 
-static uintptrj_t *isMutableCallSiteTargetInvokeExact(TR_CallSite *callSite, TR_InlinerBase *inliner)
+static uintptr_t *isMutableCallSiteTargetInvokeExact(TR_CallSite *callSite, TR_InlinerBase *inliner)
    {
    // Looking for either mcs.target.invokeExact(...) or mcs.getTarget().invokeExact(...)
    // on some known/fixed MutableCallSite object mcs.
@@ -118,13 +118,13 @@ static uintptrj_t *isMutableCallSiteTargetInvokeExact(TR_CallSite *callSite, TR_
 
    if (mcsNode->getSymbolReference()->hasKnownObjectIndex())
       {
-      uintptrj_t *result = mcsNode->getSymbolReference()->getKnownObjectReferenceLocation(inliner->comp());
+      uintptr_t *result = mcsNode->getSymbolReference()->getKnownObjectReferenceLocation(inliner->comp());
       heuristicTrace(inliner->tracer(), "  Success: isMutableCallSiteTargetInvokeExact(%p)=%p (obj%d)", callSite, result, mcsNode->getSymbolReference()->getKnownObjectIndex());
       return result;
       }
    else if (mcsNode->getSymbol()->isFixedObjectRef())
       {
-      uintptrj_t *result = (uintptrj_t*)mcsNode->getSymbol()->castToStaticSymbol()->getStaticAddress();
+      uintptr_t *result = (uintptr_t*)mcsNode->getSymbol()->castToStaticSymbol()->getStaticAddress();
       heuristicTrace(inliner->tracer(),"  Success: isMutableCallSiteTargetInvokeExact(%p)=%p (fixed object reference)", callSite, result);
       return result;
       }
@@ -171,7 +171,9 @@ TR_CallSite* TR_CallSite::create(TR::TreeTop* callNodeTreeTop,
                               callNode->getOpCode().isCallIndirect(),
                               calleeSymbol->isInterface(),
                               callNode->getByteCodeInfo(),
-                              comp);
+                              comp,
+                              depth,
+                              allConsts);
          }
       else
          {
@@ -192,7 +194,9 @@ TR_CallSite* TR_CallSite::create(TR::TreeTop* callNodeTreeTop,
                      callNode->getOpCode().isCallIndirect(),
                      calleeSymbol->isInterface(),
                      callNode->getByteCodeInfo(),
-                     comp) ;
+                     comp,
+                     depth,
+                     allConsts) ;
             }
 
          if (calleeSymbol->getResolvedMethodSymbol() && calleeSymbol->getResolvedMethodSymbol()->getRecognizedMethod() == TR::java_lang_invoke_MethodHandle_invokeExact)
@@ -210,7 +214,9 @@ TR_CallSite* TR_CallSite::create(TR::TreeTop* callNodeTreeTop,
                   callNode->getOpCode().isCallIndirect(),
                   calleeSymbol->isInterface(),
                   callNode->getByteCodeInfo(),
-                  comp) ;
+                  comp,
+                  depth,
+                  allConsts) ;
             }
 
          return new (trMemory, kind) TR_J9VirtualCallSite  (lCaller,
@@ -226,7 +232,9 @@ TR_CallSite* TR_CallSite::create(TR::TreeTop* callNodeTreeTop,
                               callNode->getOpCode().isCallIndirect(),
                               calleeSymbol->isInterface(),
                               callNode->getByteCodeInfo(),
-                              comp) ;
+                              comp,
+                              depth,
+                              allConsts) ;
 
          }
       }
@@ -236,7 +244,7 @@ TR_CallSite* TR_CallSite::create(TR::TreeTop* callNodeTreeTop,
                               parent,
                               callNode,
                               calleeSymbol->getMethod(),
-                              receiverClass,
+                              resolvedMethod && !resolvedMethod->isStatic() ? receiverClass : NULL,
                               (int32_t)symRef->getOffset(),
                               symRef->getCPIndex(),
                               resolvedMethod,
@@ -244,7 +252,9 @@ TR_CallSite* TR_CallSite::create(TR::TreeTop* callNodeTreeTop,
                               callNode->getOpCode().isCallIndirect(),
                               calleeSymbol->isInterface(),
                               callNode->getByteCodeInfo(),
-                              comp) ;
+                              comp,
+                              depth,
+                              allConsts) ;
 
    }
 
@@ -350,7 +360,7 @@ static void populateOSRCallSiteRematTable(TR::Optimizer* optimizer, TR_CallTarge
 
       // Storing failures, will search for a double store that occurs before
       //
-      else 
+      else
          {
          if (comp->trace(OMR::inlining))
             traceMsg(comp, "callSiteRemat: failed to find store for pending push #%d\n", store->getSymbolReference()->getReferenceNumber());
@@ -359,14 +369,14 @@ static void populateOSRCallSiteRematTable(TR::Optimizer* optimizer, TR_CallTarge
          }
       }
 
-   // Perform search for any double stores 
+   // Perform search for any double stores
    // This goes from the start of the block to the call, as PPs may store
    // duplicate values
    //
    if (failedPP.size() > 0)
       RematTools::walkTreeTopsCalculatingRematFailureAlternatives(comp,
          blockStart, call, failedPP, scanTargets, safetyInfo, verboseCallSiteRemat != NULL);
- 
+
    // Perform the safety check, to ensure symrefs haven't been
    // modified.
    //
@@ -664,8 +674,9 @@ bool TR_J9MethodHandleCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_
 
 bool TR_J9MutableCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_InlinerBase* inliner)
    {
-   uintptrj_t * mcsReferenceLocation = isMutableCallSiteTargetInvokeExact(this, inliner); // JSR292: Looking for calls through MutableCallSite
-   if (mcsReferenceLocation)
+   if (!_mcsReferenceLocation)
+      _mcsReferenceLocation = isMutableCallSiteTargetInvokeExact(this, inliner); // JSR292: Looking for calls through MutableCallSite
+   if (_mcsReferenceLocation)
       {
       // TODO:JSR292: This belongs behind the FE interface
       heuristicTrace(inliner->tracer(),"Call is MutableCallSite.target.invokeExact call.");
@@ -675,20 +686,44 @@ bool TR_J9MutableCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_Inlin
          return false;
          }
       TR_VirtualGuardSelection *vgs = new (comp()->trHeapMemory()) TR_VirtualGuardSelection(TR_MutableCallSiteTargetGuard, TR_DummyTest);
-      vgs->_mutableCallSiteObject = mcsReferenceLocation;
+      vgs->_mutableCallSiteObject = _mcsReferenceLocation;
       TR::KnownObjectTable *knot = comp()->getOrCreateKnownObjectTable();
 
+#if defined(J9VM_OPT_JITSERVER)
+      if (comp()->isOutOfProcessCompilation())
+         {
+         vgs->_mutableCallSiteEpoch = TR::KnownObjectTable::UNKNOWN;
+         bool knotEnabled = (knot != NULL);
+         auto stream = TR::CompilationInfo::getStream();
+         stream->write(JITServer::MessageType::KnownObjectTable_mutableCallSiteEpoch, _mcsReferenceLocation, knotEnabled);
 
+         auto recv = stream->read<uintptr_t, TR::KnownObjectTable::Index, uintptr_t*>();
+         uintptr_t mcsObject = std::get<0>(recv);
+         TR::KnownObjectTable::Index knotIndex = std::get<1>(recv);
+         uintptr_t *objectPointerReference = std::get<2>(recv);
+
+         if (mcsObject && knot && (knotIndex != TR::KnownObjectTable::UNKNOWN))
+            {
+            vgs->_mutableCallSiteEpoch = knotIndex;
+            knot->updateKnownObjectTableAtServer(knotIndex, objectPointerReference);
+            }
+         else
+            {
+            vgs->_mutableCallSiteObject = NULL;
+            }
+         }
+      else
+#endif /* defined(J9VM_OPT_JITSERVER) */
          {
          TR::VMAccessCriticalSection mutableCallSiteEpoch(comp()->fej9());
          vgs->_mutableCallSiteEpoch = TR::KnownObjectTable::UNKNOWN;
-         uintptrj_t mcsObject = comp()->fej9()->getStaticReferenceFieldAtAddress((uintptrj_t)mcsReferenceLocation);
-         if (mcsObject)
+         uintptr_t mcsObject = comp()->fej9()->getStaticReferenceFieldAtAddress((uintptr_t)_mcsReferenceLocation);
+         if (mcsObject && knot)
             {
             TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp()->fej9());
-            uintptrj_t currentEpoch = fej9->getVolatileReferenceField(mcsObject, "epoch", "Ljava/lang/invoke/MethodHandle;");
+            uintptr_t currentEpoch = fej9->getVolatileReferenceField(mcsObject, "epoch", "Ljava/lang/invoke/MethodHandle;");
             if (currentEpoch)
-               vgs->_mutableCallSiteEpoch = knot->getIndex(currentEpoch);
+               vgs->_mutableCallSiteEpoch = knot->getOrCreateIndex(currentEpoch);
             }
          else
             {
@@ -698,9 +733,8 @@ bool TR_J9MutableCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_Inlin
 
       if (vgs->_mutableCallSiteEpoch != TR::KnownObjectTable::UNKNOWN)
          {
-         TR::ResolvedMethodSymbol *owningMethod   = _callNode->getSymbolReference()->getOwningMethodSymbol(comp());
          TR_ResolvedMethod       *specimenMethod = comp()->fej9()->createMethodHandleArchetypeSpecimen(comp()->trMemory(),
-            knot->getPointerLocation(vgs->_mutableCallSiteEpoch), owningMethod->getResolvedMethod());
+            knot->getPointerLocation(vgs->_mutableCallSiteEpoch), _callerResolvedMethod);
          TR_CallTarget *target = addTarget(comp()->trMemory(), inliner, vgs,
             specimenMethod, _receiverClass, heapAlloc);
          TR_ASSERT(target , "There should be only one target for TR_MutableCallSite");
@@ -711,7 +745,7 @@ bool TR_J9MutableCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_Inlin
          //
          heuristicTrace(inliner->tracer(),"  addTarget: MutableCallSite.epoch is %p.obj%d (%p.%p)",
              vgs->_mutableCallSiteObject, vgs->_mutableCallSiteEpoch,
-            *vgs->_mutableCallSiteObject, *knot->getPointerLocation(vgs->_mutableCallSiteEpoch));
+            *vgs->_mutableCallSiteObject, knot->getPointer(vgs->_mutableCallSiteEpoch));
 
          return true;
          }
@@ -939,7 +973,7 @@ void TR_ProfileableCallSite::findSingleProfiledReceiver(ListIterator<TR_ExtraAdd
 
          heuristicTrace(inliner->tracer(),"Creating a profiled call. callee Symbol %p frequencyadjustment %f",_initialCalleeSymbol, val);
          addTarget(comp()->trMemory(),inliner,guard,targetMethod,tempreceiverClass,heapAlloc,val);
-         
+
          if (comp()->getOption(TR_DisableMultiTargetInlining))
             return;
          }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -119,7 +119,13 @@ protected:
 		U_32 slotsPerArrayletLeaf = (U_32)(J9VMTHREAD_JAVAVM(vmThread)->arrayletLeafSize / elementSize);
 		U_32 arrayletIndex = (U_32)index / slotsPerArrayletLeaf;
 		U_32 arrayletOffset = (U_32)index % slotsPerArrayletLeaf;
-		UDATA arrayletLeafBase = (UDATA)convertPointerFromToken(arrayoidPointer[arrayletIndex]);
+		UDATA arrayletLeafBase = 0;
+		fj9object_t *arrayletLeafSlot = GC_SlotObject::addToSlotAddress(arrayoidPointer, arrayletIndex, compressObjectReferences());
+		if (compressObjectReferences()) {
+			arrayletLeafBase = (UDATA)convertPointerFromToken(*(U_32*)arrayletLeafSlot);
+		} else {
+			arrayletLeafBase = *(UDATA*)arrayletLeafSlot;
+		}
 		return (void *)(arrayletLeafBase + (elementSize * (UDATA)arrayletOffset));
 	}
 	
@@ -193,8 +199,8 @@ public:
 	virtual void indexableStoreI32(J9VMThread *vmThread, J9IndexableObject *destObject, I_32 destIndex, I_32 value, bool isVolatile=false);
 	virtual void indexableStoreU64(J9VMThread *vmThread, J9IndexableObject *destObject, I_32 destIndex, U_64 value, bool isVolatile=false);
 	virtual void indexableStoreI64(J9VMThread *vmThread, J9IndexableObject *destObject, I_32 destIndex, I_64 value, bool isVolatile=false);
-	virtual void copyObjectFieldsToArrayElement(J9VMThread *vmThread, J9Class *arrayClazz, j9object_t srcObject, J9IndexableObject *arrayRef, I_32 index);
-	virtual void copyObjectFieldsFromArrayElement(J9VMThread *vmThread, J9Class *arrayClazz, j9object_t destObject, J9IndexableObject *arrayRef, I_32 index);
+	virtual void copyObjectFieldsToFlattenedArrayElement(J9VMThread *vmThread, J9ArrayClass *arrayClazz, j9object_t srcObject, J9IndexableObject *arrayRef, I_32 index);
+	virtual void copyObjectFieldsFromFlattenedArrayElement(J9VMThread *vmThread, J9ArrayClass *arrayClazz, j9object_t destObject, J9IndexableObject *arrayRef, I_32 index);
 
 	enum {
 		ARRAY_COPY_SUCCESSFUL = -1,
@@ -224,6 +230,7 @@ public:
 	virtual j9objectmonitor_t *getLockwordAddress(J9VMThread *vmThread, J9Object *object);
 	virtual void cloneObject(J9VMThread *vmThread, J9Object *srcObject, J9Object *destObject);
 	virtual void copyObjectFields(J9VMThread *vmThread, J9Class *valueClass, J9Object *srcObject, UDATA srcOffset, J9Object *destObject, UDATA destOffset);
+	virtual BOOLEAN structuralCompareFlattenedObjects(J9VMThread *vmThread, J9Class *valueClass, j9object_t lhsObject, j9object_t rhsObject, UDATA startOffset);
 	virtual void cloneIndexableObject(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject);
 	virtual J9Object* asConstantPoolObject(J9VMThread *vmThread, J9Object* toConvert, UDATA allocationFlags);
 	virtual void storeObjectToInternalVMSlot(J9VMThread *vmThread, J9Object** destSlot, J9Object *value);
@@ -396,7 +403,8 @@ public:
 	MMINLINE j9object_t getFinalizeLink(j9object_t object)
 	{
 		fj9object_t* finalizeLink = getFinalizeLinkAddress(object);
-		return convertPointerFromToken(*finalizeLink);
+		GC_SlotObject slot(_extensions->getOmrVM(), finalizeLink);		
+		return slot.readReferenceFromSlot();
 	}
 	
 	/**
@@ -408,7 +416,8 @@ public:
 	MMINLINE j9object_t getFinalizeLink(j9object_t object, J9Class *clazz)
 	{
 		fj9object_t* finalizeLink = getFinalizeLinkAddress(object, clazz);
-		return convertPointerFromToken(*finalizeLink);
+		GC_SlotObject slot(_extensions->getOmrVM(), finalizeLink);		
+		return slot.readReferenceFromSlot();
 	}
 
 	
@@ -428,7 +437,8 @@ public:
 	{
 		UDATA linkOffset = _referenceLinkOffset;
 		fj9object_t *referenceLink = (fj9object_t*)((UDATA)object + linkOffset);
-		return convertPointerFromToken(*referenceLink);
+		GC_SlotObject slot(_extensions->getOmrVM(), referenceLink);		
+		return slot.readReferenceFromSlot();
 	}
 
 	/**
@@ -448,7 +458,8 @@ public:
 	{
 		UDATA linkOffset = _ownableSynchronizerLinkOffset;
 		fj9object_t *ownableSynchronizerLink = (fj9object_t*)((UDATA)object + linkOffset);
-		j9object_t next = convertPointerFromToken(*ownableSynchronizerLink);
+		GC_SlotObject slot(_extensions->getOmrVM(), ownableSynchronizerLink);		
+		j9object_t next = slot.readReferenceFromSlot();
 		if (originalObject == next) {
 			/* reach end of list(last item points to itself), return NULL */
 			next = NULL;
@@ -465,7 +476,8 @@ public:
 	{
 		UDATA linkOffset = _ownableSynchronizerLinkOffset;
 		fj9object_t *ownableSynchronizerLink = (fj9object_t*)((UDATA)object + linkOffset);
-		j9object_t next = convertPointerFromToken(*ownableSynchronizerLink);
+		GC_SlotObject slot(_extensions->getOmrVM(), ownableSynchronizerLink);		
+		j9object_t next = slot.readReferenceFromSlot();
 		if (object == next) {
 			/* reach end of list(last item points to itself), return NULL */
 			next = NULL;
@@ -483,7 +495,8 @@ public:
 	{
 		UDATA linkOffset = _ownableSynchronizerLinkOffset;
 		fj9object_t *ownableSynchronizerLink = (fj9object_t*)((UDATA)object + linkOffset);
-		return convertPointerFromToken(*ownableSynchronizerLink);
+		GC_SlotObject slot(_extensions->getOmrVM(), ownableSynchronizerLink);		
+		return slot.readReferenceFromSlot();
 	}
 
 	/**

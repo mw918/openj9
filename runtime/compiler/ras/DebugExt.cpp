@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -30,6 +30,7 @@
 #include "j9.h"
 #include "j9cfg.h"
 #include "codegen/CodeGenerator.hpp"
+#include "codegen/PrivateLinkage.hpp"
 #include "codegen/Relocation.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/CompilationTypes.hpp"
@@ -45,20 +46,20 @@
 #include "env/PersistentInfo.hpp"
 #include "env/PersistentCHTable.hpp"
 #include "env/jittypes.h"
+#include "il/AutomaticSymbol.hpp"
 #include "il/Block.hpp"
 #include "il/DataTypes.hpp"
+#include "il/LabelSymbol.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/ParameterSymbol.hpp"
+#include "il/RegisterMappedSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
-#include "il/symbol/LabelSymbol.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/RegisterMappedSymbol.hpp"
-#include "il/symbol/ParameterSymbol.hpp"
-#include "il/symbol/AutomaticSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "ilgen/IlGeneratorMethodDetails_inlines.hpp"
 #include "infra/Cfg.hpp"
 #include "infra/MonitorTable.hpp"
@@ -90,7 +91,7 @@
 #endif
 
 #define DEFAULT_INDENT_INCREMENT   2
-#define IS_4_BYTE_ALIGNED(p) (!((uintptrj_t) p & 0x3))
+#define IS_4_BYTE_ALIGNED(p) (!((uintptr_t) p & 0x3))
 
 static bool isGoodPtr(void* p)
    {
@@ -106,9 +107,9 @@ TR_DebugExt::operator new (size_t s, TR_Malloc_t dbgjit_Malloc)
    }
 
 bool
-TR_DebugExt::dxReadMemory(void* remotePtr, void* localPtr, uintptrj_t size)
+TR_DebugExt::dxReadMemory(void* remotePtr, void* localPtr, uintptr_t size)
    {
-   uintptrj_t bytesRead;
+   uintptr_t bytesRead;
    assert(remotePtr != 0 && localPtr != 0 && size != 0);
    if (localPtr == remotePtr)
       {
@@ -117,7 +118,7 @@ TR_DebugExt::dxReadMemory(void* remotePtr, void* localPtr, uintptrj_t size)
       if (_memchk) assert(false);
       return true;   // try to be nice by not crashing the debugger
       }
-   _dbgReadMemory((uintptrj_t) remotePtr, localPtr, size, &bytesRead);
+   _dbgReadMemory((uintptr_t) remotePtr, localPtr, size, &bytesRead);
    if (bytesRead != size)
       {
       _dbgPrintf("\n*** JIT Error: could not read memory at 0x%x for %zu bytes\n", remotePtr, size);  // FIXME:: should use dbgError()
@@ -128,15 +129,15 @@ TR_DebugExt::dxReadMemory(void* remotePtr, void* localPtr, uintptrj_t size)
    }
 
 bool
-TR_DebugExt::dxReadField(void* classPtr, uintptrj_t fieldOffset, void* localPtr, uintptrj_t size)
+TR_DebugExt::dxReadField(void* classPtr, uintptr_t fieldOffset, void* localPtr, uintptr_t size)
    {
-   uintptrj_t remoteAddr = ((uintptrj_t)classPtr) + fieldOffset;
+   uintptr_t remoteAddr = ((uintptr_t)classPtr) + fieldOffset;
    bool rc = dxReadMemory((void*)remoteAddr, localPtr, size);
    return rc;
    }
 
 void*
-TR_DebugExt::dxMalloc(uintptrj_t size, void *remotePtr, bool dontAddToMap)
+TR_DebugExt::dxMalloc(uintptr_t size, void *remotePtr, bool dontAddToMap)
    {
    if (size == 0) return 0;
 
@@ -152,7 +153,7 @@ TR_DebugExt::dxMalloc(uintptrj_t size, void *remotePtr, bool dontAddToMap)
    }
 
 void*
-TR_DebugExt::dxMallocAndRead(uintptrj_t size, void *remotePtr, bool dontAddToMap)
+TR_DebugExt::dxMallocAndRead(uintptr_t size, void *remotePtr, bool dontAddToMap)
    {
    if (size == 0 || remotePtr == 0) return 0;
    void *localPtr = dxMalloc(size, remotePtr, dontAddToMap);
@@ -167,15 +168,15 @@ TR_DebugExt::dxMallocAndReadString(void* remotePtr, bool dontAddToMap)
    {
    char c;
    int sz = 0;
-   uintptrj_t bytesRead = 0;
+   uintptr_t bytesRead = 0;
    if (remotePtr == 0) return 0;
    do {
-      _dbgReadMemory(((uintptrj_t)remotePtr+sz), &c, 1, &bytesRead);
+      _dbgReadMemory(((uintptr_t)remotePtr+sz), &c, 1, &bytesRead);
       sz++;
    } while (bytesRead == 1 && c != '\0');
    if (bytesRead != 1) sz--;
    if (sz == 0) return 0;
-   return dxMallocAndRead((uintptrj_t)sz, remotePtr, dontAddToMap);
+   return dxMallocAndRead((uintptr_t)sz, remotePtr, dontAddToMap);
    }
 
 void
@@ -234,10 +235,10 @@ TR_DebugExt::TR_DebugExt(
    struct J9PortLibrary *dbgextPortLib,
    J9JavaVM *localVM,
    void (*dbgjit_Printf)(const char *s, ...),
-   void (*dbgjit_ReadMemory)(uintptrj_t remoteAddr, void *localPtr, uintptrj_t size, uintptrj_t *bytesRead),
-   void* (*dbgjit_Malloc)(uintptrj_t size, void *originalAddress),
+   void (*dbgjit_ReadMemory)(uintptr_t remoteAddr, void *localPtr, uintptr_t size, uintptr_t *bytesRead),
+   void* (*dbgjit_Malloc)(uintptr_t size, void *originalAddress),
    void (*dbgjit_Free)(void * addr),
-   uintptrj_t (*dbgGetExpression)(const char* args)
+   uintptr_t (*dbgGetExpression)(const char* args)
    ) :
    TR_Debug(NULL),
    _jit(f),
@@ -301,10 +302,10 @@ TR_DebugExt::compInfosPerThreadAvailable()
    {
    if (_localCompInfosPT == NULL)
       {
-      _localCompInfosPT = (TR::CompilationInfoPerThread **) dxMalloc(sizeof(TR::CompilationInfoPerThread *) * MAX_TOTAL_COMP_THREADS, NULL);
+      _localCompInfosPT = (TR::CompilationInfoPerThread **) dxMalloc(sizeof(TR::CompilationInfoPerThread *) * _localCompInfo->getNumTotalCompilationThreads(), NULL);
       if (_localCompInfosPT)
          {
-         for (size_t i = 0; i < MAX_TOTAL_COMP_THREADS; ++i)
+         for (size_t i = 0; i < _localCompInfo->getNumTotalCompilationThreads(); ++i)
             {
             _localCompInfosPT[i] = _localCompInfo->_arrayOfCompilationInfoPerThread[i] != NULL ?
                (TR::CompilationInfoPerThread *) dxMallocAndRead(sizeof(TR::CompilationInfoPerThread), _localCompInfo->_arrayOfCompilationInfoPerThread[i], true) :
@@ -321,10 +322,10 @@ TR_DebugExt::activeMethodsToBeCompiledAvailable()
    if (!compInfosPerThreadAvailable()) return false;
    if (_localActiveMethodsToBeCompiled == NULL)
       {
-      _localActiveMethodsToBeCompiled = (TR_MethodToBeCompiled **) dxMalloc(sizeof(TR_MethodToBeCompiled *) * MAX_TOTAL_COMP_THREADS, NULL);
+      _localActiveMethodsToBeCompiled = (TR_MethodToBeCompiled **) dxMalloc(sizeof(TR_MethodToBeCompiled *) * _localCompInfo->getNumTotalCompilationThreads(), NULL);
       if (_localActiveMethodsToBeCompiled)
          {
-         for (size_t i = 0; i < MAX_TOTAL_COMP_THREADS; ++i)
+         for (size_t i = 0; i < _localCompInfo->getNumTotalCompilationThreads(); ++i)
             {
             _localActiveMethodsToBeCompiled[i] = _localCompInfosPT[i] && _localCompInfosPT[i]->_methodBeingCompiled ?
                (TR_MethodToBeCompiled *) dxMallocAndRead(sizeof(TR_MethodToBeCompiled), _localCompInfosPT[i]->_methodBeingCompiled, true) :
@@ -341,7 +342,7 @@ TR_DebugExt::isAOTCompileRequested(TR::Compilation * remoteCompilation)
    if (!compInfosPerThreadAvailable()) return false;
    if (!activeMethodsToBeCompiledAvailable()) return false;
 
-   for (size_t i = 0; i < MAX_TOTAL_COMP_THREADS; ++i)
+   for (size_t i = 0; i < _localCompInfo->getNumTotalCompilationThreads(); ++i)
       {
       if (
          _localCompInfosPT[i]
@@ -397,16 +398,16 @@ TR_DebugExt::allocateLocalCompiler(TR::Compilation *remoteCompiler)
          _localCompiler->_knownObjectTable->setFe(_localCompiler->_fe);
          _localCompiler->_knownObjectTable->setComp(_localCompiler);
 
-         TR_Array<uintptrj_t*> &localReferences = ((J9::KnownObjectTable *)_localCompiler->_knownObjectTable)->_references;
-         uintptrj_t **array = localReferences._array;
+         TR_Array<uintptr_t*> &localReferences = ((J9::KnownObjectTable *)_localCompiler->_knownObjectTable)->_references;
+         uintptr_t **array = localReferences._array;
          uint32_t arraySize = localReferences.size();
-         uintptrj_t **localArray = (uintptrj_t **) dxMallocAndRead(sizeof(array[0])*arraySize, array);
+         uintptr_t **localArray = (uintptr_t **) dxMallocAndRead(sizeof(array[0])*arraySize, array);
          localReferences._array = localArray;
 
          for (int32_t i = 0; i < arraySize; i++)
             {
-            uintptrj_t *remotePointer = localArray[i];
-            uintptrj_t *localPointer = (uintptrj_t *)dxMallocAndRead(sizeof(uintptrj_t), remotePointer);
+            uintptr_t *remotePointer = localArray[i];
+            uintptr_t *localPointer = (uintptr_t *)dxMallocAndRead(sizeof(uintptr_t), remotePointer);
             localArray[i] = localPointer;
             }
          }
@@ -485,8 +486,8 @@ TR_DebugExt::freeLocalCompiler()
          dxFree(_localCompiler->_methodSymbol);
        if (_localCompiler->_knownObjectTable)
           {
-          TR_Array<uintptrj_t*> &localReferences = ((J9::KnownObjectTable *)_localCompiler->_knownObjectTable)->_references;
-          uintptrj_t **localArray = localReferences._array;
+          TR_Array<uintptr_t*> &localReferences = ((J9::KnownObjectTable *)_localCompiler->_knownObjectTable)->_references;
+          uintptr_t **localArray = localReferences._array;
           uint32_t arraySize = localReferences.size();
           if (localArray)
              {
@@ -675,8 +676,8 @@ TR_DebugExt::dxAllocateSymRefInternals(TR::SymbolReference *localSymRef, bool co
 
    if (localSym->isStatic())
       {
-      uintptrj_t *remoteStaticAddress = (uintptrj_t *)localSym->castToStaticSymbol()->getStaticAddress();
-      uintptrj_t *localStaticAddress = (uintptrj_t *)dxMallocAndRead(sizeof(uintptrj_t), remoteStaticAddress);
+      uintptr_t *remoteStaticAddress = (uintptr_t *)localSym->castToStaticSymbol()->getStaticAddress();
+      uintptr_t *localStaticAddress = (uintptr_t *)dxMallocAndRead(sizeof(uintptr_t), remoteStaticAddress);
       localSym->castToStaticSymbol()->setStaticAddress((void *)localStaticAddress);
       }
    }
@@ -1122,7 +1123,7 @@ TR_DebugExt::dxPrintUsage()
  * main entry for debugger extension print
  */
 void
-TR_DebugExt::dxTrPrint(const char* name1, void* addr2, uintptrj_t argCount, const char *args)
+TR_DebugExt::dxTrPrint(const char* name1, void* addr2, uintptr_t argCount, const char *args)
    {
    /*
     * Printing the default help page
@@ -1266,7 +1267,7 @@ TR_DebugExt::dxTrPrint(const char* name1, void* addr2, uintptrj_t argCount, cons
    else if (stricmp_ignore_locale(className, "arrayofcompilationinfoperthread") == 0)
       {
       TR::CompilationInfoPerThread ** arrayOfCompInfoPT = NULL;
-      uint8_t numThreads = MAX_TOTAL_COMP_THREADS;
+      uint8_t numThreads = _localCompInfo->getNumTotalCompilationThreads();
       bool allocated = false;
 
       if (argCount == 2 && addr != 0)
@@ -2174,7 +2175,7 @@ TR_DebugExt::dxPrintMethodsBeingCompiled(TR::CompilationInfo *remoteCompInfo)
       }
 
    TR::CompilationInfoPerThread ** arrayOfCompInfoPT = NULL;
-   uint8_t numThreads = MAX_TOTAL_COMP_THREADS;
+   uint8_t numThreads = remoteCompInfo->getNumTotalCompilationThreads();
 
    arrayOfCompInfoPT = dxMallocAndGetArrayOfCompilationInfoPerThread(numThreads, remoteCompInfo->_arrayOfCompilationInfoPerThread);
 
@@ -2266,7 +2267,7 @@ void TR_DebugExt::dxPrintCompilationInfo(TR::CompilationInfo *remoteCompInfo)
       _dbgPrintf("int32_t                               _samplingThreadLifetimeState     = %d\n", localCompInfo->_samplingThreadLifetimeState);
       _dbgPrintf("int32_t                               _numMethodsFoundInSharedCache    = %d\n", localCompInfo->_numMethodsFoundInSharedCache);
       _dbgPrintf("int32_t                               _numInvRequestsInCompQueue       = %d\n", localCompInfo->_numInvRequestsInCompQueue);
-      _dbgPrintf("int32_t                               _compThreadIndex                 = %d\n", localCompInfo->_compThreadIndex);
+      _dbgPrintf("int32_t                               _numCompThreads                  = %d\n", localCompInfo->_numCompThreads);
       _dbgPrintf("int32_t                               _numDiagnosticThreads            = %d\n", localCompInfo->_numDiagnosticThreads);
       _dbgPrintf("int32_t                               _numSeriousFailures              = %d\n", localCompInfo->_numSeriousFailures);
       _dbgPrintf("int32_t[numHotnessLevels]             _statsOptLevels                  = 0x%p\n", localCompInfo->_statsOptLevels);
@@ -2394,7 +2395,10 @@ void TR_DebugExt::dxPrintMethodToBeCompiled(TR_MethodToBeCompiled *remoteCompEnt
    _dbgPrintf("\tint16_t                       _index = %d\n",localCompEntry->_index);
    _dbgPrintf("\tbool                          _freeTag = %d\n",localCompEntry->_freeTag);
    _dbgPrintf("\tuint8_t                       _weight = %u\n",localCompEntry->_weight);
-   _dbgPrintf("\tbool                          _hasIncrementedNumCompThreadsCompilingHotterMethods = %d\n\n",localCompEntry->_hasIncrementedNumCompThreadsCompilingHotterMethods);
+   _dbgPrintf("\tbool                          _hasIncrementedNumCompThreadsCompilingHotterMethods = %d\n",localCompEntry->_hasIncrementedNumCompThreadsCompilingHotterMethods);
+#if defined(J9VM_OPT_JITSERVER)
+   _dbgPrintf("\tTR_Hotness                    _origOptLevel = 0x%p\n\n", localCompEntry->_origOptLevel);
+#endif
 
    struct J9Method *ramMethod = (struct J9Method *)dxGetJ9MethodFromMethodToBeCompiled(remoteCompEntry);
    if (ramMethod)
@@ -2780,8 +2784,8 @@ TR_DebugExt::dxPrintCodeCacheInfo(TR::CodeCache *cacheInfo)
    _dbgPrintf("  ->freeBlockList = (OMR::CodeCacheFreeCacheBlock*)0x%p\n", localCacheInfo->freeBlockList());
    _dbgPrintf("  ->mutex = (TR::Monitor*)0x%p\n", localCacheInfo->_mutex);
 #if defined(TR_TARGET_X86)
-   _dbgPrintf("  ->prefetchCodeSnippetAddress = (uintptrj_t)0x%p\n", localCacheInfo->_CCPreLoadedCode[TR_AllocPrefetch]);
-   _dbgPrintf("  ->noZeroPrefetchCodeSnippetAddress = (uintptrj_t)0x%p\n", localCacheInfo->_CCPreLoadedCode[TR_NonZeroAllocPrefetch]);
+   _dbgPrintf("  ->prefetchCodeSnippetAddress = (uintptr_t)0x%p\n", localCacheInfo->_CCPreLoadedCode[TR_AllocPrefetch]);
+   _dbgPrintf("  ->noZeroPrefetchCodeSnippetAddress = (uintptr_t)0x%p\n", localCacheInfo->_CCPreLoadedCode[TR_NonZeroAllocPrefetch]);
 #endif
    _dbgPrintf("  ->next = (TR::CodeCache*)0x%p\n", localCacheInfo->_next);
    _dbgPrintf("  ->reserved = (bool)%d\n", localCacheInfo->_reserved);
@@ -3225,7 +3229,7 @@ TR_DebugExt::dxPrintMethodName(char *p, int32_t searchLimit)
    if (hotness == -1)
       hotness = localMetadata->hotness;
 
-   TR_LinkageInfo *linkageInfo = (TR_LinkageInfo *) dxMallocAndRead(sizeof(TR_LinkageInfo), (void*)((char *)localMetadata->startPC - 4) );
+   J9::PrivateLinkage::LinkageInfo *linkageInfo = (J9::PrivateLinkage::LinkageInfo *) dxMallocAndRead(sizeof(J9::PrivateLinkage::LinkageInfo), (void*)((char *)localMetadata->startPC - 4) );
 
    _dbgPrintf("\n\nMethod:\t%s.%s%s\n\n", className, methodName, methodSignature);
    dxPrintJ9RamAndRomMethod(localMetadata->ramMethod);
@@ -3831,18 +3835,18 @@ TR_DebugExt::getMethodName(TR_OpaqueMethodBlock *mb)
    if (!localRomClass)
       return NULL;
 
-   intptrj_t localClassNameAddr = (intptrj_t)((intptrj_t)(localRamClass->romClass) + offsetof(J9ROMClass, className));
-   struct J9UTF8 *localClassName = (struct J9UTF8 *)(localClassNameAddr + (intptrj_t)localRomClass->className);
+   intptr_t localClassNameAddr = (intptr_t)((intptr_t)(localRamClass->romClass) + offsetof(J9ROMClass, className));
+   struct J9UTF8 *localClassName = (struct J9UTF8 *)(localClassNameAddr + (intptr_t)localRomClass->className);
 
-   intptrj_t romMethod = (intptrj_t)J9_ROM_METHOD_FROM_RAM_METHOD(localRamMethod);
-   intptrj_t localMethodNameSigAddr = (intptrj_t)(((J9ROMMethod *)romMethod) + offsetof(J9ROMMethod, nameAndSignature));
+   intptr_t romMethod = (intptr_t)J9_ROM_METHOD_FROM_RAM_METHOD(localRamMethod);
+   intptr_t localMethodNameSigAddr = (intptr_t)(((J9ROMMethod *)romMethod) + offsetof(J9ROMMethod, nameAndSignature));
 
    struct J9ROMNameAndSignature *localMethodNameAndSig = (J9ROMNameAndSignature *) dxMallocAndRead(sizeof(J9ROMNameAndSignature), (J9ROMNameAndSignature *)localMethodNameSigAddr);
    if (!localMethodNameAndSig)
       return NULL;
 
-   intptrj_t localMethodNameAddr = (intptrj_t)(localMethodNameSigAddr + localMethodNameAndSig->name + offsetof(J9ROMNameAndSignature, name));
-   intptrj_t localMethodSigAddr  = (intptrj_t)(localMethodNameSigAddr + localMethodNameAndSig->signature + offsetof(J9ROMNameAndSignature, signature));
+   intptr_t localMethodNameAddr = (intptr_t)(localMethodNameSigAddr + localMethodNameAndSig->name + offsetof(J9ROMNameAndSignature, name));
+   intptr_t localMethodSigAddr  = (intptr_t)(localMethodNameSigAddr + localMethodNameAndSig->signature + offsetof(J9ROMNameAndSignature, signature));
    struct J9UTF8 *localMethodName = (struct J9UTF8 *)(localMethodNameAddr);
    struct J9UTF8 *localMethodSig =  (struct J9UTF8 *)(localMethodSigAddr);
 

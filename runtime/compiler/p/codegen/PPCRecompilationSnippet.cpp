@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -30,14 +30,14 @@
 #include "env/IO.hpp"
 #include "env/jittypes.h"
 #include "env/VMJ9.h"
+#include "il/LabelSymbol.hpp"
+#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+#include "il/RegisterMappedSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
-#include "il/symbol/LabelSymbol.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/RegisterMappedSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 #include "p/codegen/PPCInstruction.hpp"
 #include "p/codegen/PPCRecompilation.hpp"
 #include "runtime/CodeCacheManager.hpp"
@@ -47,19 +47,19 @@ uint8_t *TR::PPCRecompilationSnippet::emitSnippetBody()
    uint8_t             *buffer = cg()->getBinaryBufferCursor();
    TR::Compilation *comp = cg()->comp();
    TR::SymbolReference  *countingRecompMethodSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_PPCcountingRecompileMethod, false, false, false);
-   bool                 longPrologue = (getBranchToSnippet()->getBinaryLength() > 4);
+   bool                 longPrologue = getBranchToSnippet()->getFarRelocation();
 
    getSnippetLabel()->setCodeLocation(buffer);
 
-   intptrj_t helperAddress = (intptrj_t)countingRecompMethodSymRef->getMethodAddress();
-   if (cg()->directCallRequiresTrampoline(helperAddress, (intptrj_t)buffer))
+   intptr_t helperAddress = (intptr_t)countingRecompMethodSymRef->getMethodAddress();
+   if (cg()->directCallRequiresTrampoline(helperAddress, (intptr_t)buffer))
       {
       helperAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(countingRecompMethodSymRef->getReferenceNumber(), (void *)buffer);
-      TR_ASSERT_FATAL(TR::Compiler->target.cpu.isTargetWithinIFormBranchRange(helperAddress, (intptrj_t)buffer), "Helper address is out of range");
+      TR_ASSERT_FATAL(cg()->comp()->target().cpu.isTargetWithinIFormBranchRange(helperAddress, (intptr_t)buffer), "Helper address is out of range");
       }
 
    // bl distance
-   *(int32_t *)buffer = 0x48000001 | ((helperAddress - (intptrj_t)buffer) & 0x03ffffff);
+   *(int32_t *)buffer = 0x48000001 | ((helperAddress - (intptr_t)buffer) & 0x03ffffff);
    cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer,(uint8_t *)countingRecompMethodSymRef,TR_HelperAddress, cg()),
                           __FILE__,
                           __LINE__,
@@ -68,16 +68,16 @@ uint8_t *TR::PPCRecompilationSnippet::emitSnippetBody()
    buffer += 4;
 
    // bodyinfo
-   uintptrj_t valueBits = (uintptrj_t)comp->getRecompilationInfo()->getJittedBodyInfo();
-   *(uintptrj_t *)buffer = valueBits;
+   uintptr_t valueBits = (uintptr_t)comp->getRecompilationInfo()->getJittedBodyInfo();
+   *(uintptr_t *)buffer = valueBits;
 
-   buffer += sizeof(uintptrj_t);
+   buffer += sizeof(uintptr_t);
 
    // startPC
-   valueBits = (uintptrj_t)cg()->getCodeStart() | (longPrologue?1:0);
-   *(uintptrj_t *)buffer = valueBits;
+   valueBits = (uintptr_t)cg()->getCodeStart() | (longPrologue?1:0);
+   *(uintptr_t *)buffer = valueBits;
 
-   return buffer + sizeof(uintptrj_t);
+   return buffer + sizeof(uintptr_t);
    }
 
 
@@ -96,7 +96,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::PPCRecompilationSnippet * snippet)
    printPrefix(pOutFile, NULL, cursor, 4);
    distance = *((int32_t *) cursor) & 0x03fffffc;
    distance = (distance << 6) >> 6;   // sign extend
-   trfprintf(pOutFile, "bl \t" POINTER_PRINTF_FORMAT "\t\t;%s", (intptrj_t)cursor + distance, info);
+   trfprintf(pOutFile, "bl \t" POINTER_PRINTF_FORMAT "\t\t;%s", (intptr_t)cursor + distance, info);
    cursor += 4;
 
    // methodInfo
@@ -112,5 +112,5 @@ TR_Debug::print(TR::FILE *pOutFile, TR::PPCRecompilationSnippet * snippet)
 
 uint32_t TR::PPCRecompilationSnippet::getLength(int32_t estimatedSnippetStart)
    {
-   return(TR::Compiler->target.is64Bit()? 20 : 12);
+   return(cg()->comp()->target().is64Bit()? 20 : 12);
    }

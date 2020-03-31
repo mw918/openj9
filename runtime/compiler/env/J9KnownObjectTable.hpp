@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2016 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -36,6 +36,11 @@ namespace J9 { typedef J9::KnownObjectTable KnownObjectTableConnector; }
 #include "infra/Annotations.hpp"
 #include "infra/Array.hpp"
 #include "infra/BitVector.hpp"
+#if defined(J9VM_OPT_JITSERVER)
+#include <tuple>
+#include <vector>
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
 namespace J9 { class Compilation; }
 namespace TR { class Compilation; }
 class TR_J9VMBase;
@@ -43,6 +48,25 @@ namespace J9 { class ObjectModel; }
 class TR_DebugExt;
 class TR_VMFieldsInfo;
 class TR_BitVector;
+
+#if defined(J9VM_OPT_JITSERVER)
+struct
+TR_KnownObjectTableDumpInfoStruct
+   {
+   uintptr_t  *ref;
+   uintptr_t   objectPointer;
+   int32_t     hashCode;
+
+   TR_KnownObjectTableDumpInfoStruct(uintptr_t *objRef, uintptr_t objPtr, int32_t code) :
+      ref(objRef),
+      objectPointer(objPtr),
+      hashCode(code) {}
+   };
+
+// <TR_KnownObjectTableDumpInfoStruct, std::string classNameStr>
+using TR_KnownObjectTableDumpInfo = std::tuple<TR_KnownObjectTableDumpInfoStruct, std::string>;
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
 
 namespace J9
 {
@@ -52,19 +76,37 @@ class OMR_EXTENSIBLE KnownObjectTable : public OMR::KnownObjectTableConnector
    friend class ::TR_J9VMBase;
    friend class Compilation;
    friend class ::TR_DebugExt;
-   TR_Array<uintptrj_t*> _references;
+   TR_Array<uintptr_t*> _references;
 
 public:
    TR_ALLOC(TR_Memory::FrontEnd);
 
    KnownObjectTable(TR::Compilation *comp);
 
-   virtual Index getEndIndex();
-   virtual Index getIndex(uintptrj_t objectPointer);
-   virtual uintptrj_t *getPointerLocation(Index index);
-   virtual bool isNull(Index index);
+   TR::KnownObjectTable *self();
 
-   virtual void dumpTo(TR::FILE *file, TR::Compilation *comp);
+   Index getEndIndex();
+   Index getIndex(uintptr_t objectPointer);
+   Index getIndex(uintptr_t objectPointer, bool isArrayWithConstantElements);
+   Index getOrCreateIndex(uintptr_t objectPointer);
+   Index getOrCreateIndex(uintptr_t objectPointer, bool isArrayWithConstantElements);
+   uintptr_t *getPointerLocation(Index index);
+   bool isNull(Index index);
+
+   void dumpTo(TR::FILE *file, TR::Compilation *comp);
+
+   Index getIndexAt(uintptr_t *objectReferenceLocation);
+   Index getIndexAt(uintptr_t *objectReferenceLocation, bool isArrayWithConstantElements);
+   Index getOrCreateIndexAt(uintptr_t *objectReferenceLocation);
+   Index getOrCreateIndexAt(uintptr_t *objectReferenceLocation, bool isArrayWithConstantElements);
+   Index getExistingIndexAt(uintptr_t *objectReferenceLocation);
+
+   uintptr_t getPointer(Index index);
+
+#if defined(J9VM_OPT_JITSERVER)
+   void updateKnownObjectTableAtServer(Index index, uintptr_t *objectReferenceLocation);
+   void getKnownObjectTableDumpInfo(std::vector<TR_KnownObjectTableDumpInfo> &knotDumpInfoList);
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 private:
 

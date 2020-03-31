@@ -1,4 +1,4 @@
-dnl Copyright (c) 2019, 2019 IBM Corp. and others
+dnl Copyright (c) 2019, 2020 IBM Corp. and others
 dnl
 dnl This program and the accompanying materials are made available under
 dnl the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,8 +17,6 @@ dnl [1] https://www.gnu.org/software/classpath/license.html
 dnl [2] http://openjdk.java.net/legal/assembly-exception.html
 dnl
 dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
-
-dnl **** NOT TESTED ****
 
 include(arm64helpers.m4)
 
@@ -248,6 +246,8 @@ END_PROC($1)
 
 dnl Runtime helpers
 
+NEW_DUAL_MODE_HELPER(jitNewValue,1)
+NEW_DUAL_MODE_HELPER(jitNewValueNoZeroInit,1)
 DUAL_MODE_HELPER(jitNewObject,1)
 DUAL_MODE_HELPER(jitNewObjectNoZeroInit,1)
 DUAL_MODE_HELPER(jitANewArray,2)
@@ -283,6 +283,7 @@ SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportInstanceFieldRead,2)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportInstanceFieldWrite,3)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportStaticFieldRead,1)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportStaticFieldWrite,2)
+FAST_PATH_ONLY_HELPER(jitAcmpHelper,2)
 
 dnl Trap handlers
 
@@ -729,35 +730,30 @@ END_PROC(jitDecompileAtExceptionCatch)
 
 START_PROC(jitDecompileAtCurrentPC)
 	SWITCH_TO_C_STACK
-	SAVE_PRESERVED_REGS
 	CALL_C_WITH_VMTHREAD(c_jitDecompileAtCurrentPC)
 	BRANCH_VIA_VMTHREAD(J9TR_VMThread_tempSlot)
 END_PROC(jitDecompileAtCurrentPC)
 
 START_PROC(jitDecompileBeforeReportMethodEnter)
 	SWITCH_TO_C_STACK
-	SAVE_PRESERVED_REGS
 	CALL_C_WITH_VMTHREAD(c_jitDecompileBeforeReportMethodEnter)
 	BRANCH_VIA_VMTHREAD(J9TR_VMThread_tempSlot)
 END_PROC(jitDecompileBeforeReportMethodEnter)
 
 START_PROC(jitDecompileBeforeMethodMonitorEnter)
 	SWITCH_TO_C_STACK
-	SAVE_PRESERVED_REGS
 	CALL_C_WITH_VMTHREAD(c_jitDecompileBeforeMethodMonitorEnter)
 	BRANCH_VIA_VMTHREAD(J9TR_VMThread_tempSlot)
 END_PROC(jitDecompileBeforeMethodMonitorEnter)
 
 START_PROC(jitDecompileAfterAllocation)
 	SWITCH_TO_C_STACK
-	SAVE_PRESERVED_REGS
 	CALL_C_WITH_VMTHREAD(c_jitDecompileAfterAllocation)
 	BRANCH_VIA_VMTHREAD(J9TR_VMThread_tempSlot)
 END_PROC(jitDecompileAfterAllocation)
 
 START_PROC(jitDecompileAfterMonitorEnter)
 	SWITCH_TO_C_STACK
-	SAVE_PRESERVED_REGS
 	CALL_C_WITH_VMTHREAD(c_jitDecompileAfterMonitorEnter)
 	BRANCH_VIA_VMTHREAD(J9TR_VMThread_tempSlot)
 END_PROC(jitDecompileAfterMonitorEnter)

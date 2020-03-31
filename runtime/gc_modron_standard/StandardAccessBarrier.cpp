@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -155,7 +155,8 @@ MM_StandardAccessBarrier::preObjectStoreImpl(J9VMThread *vmThread, J9Object *des
 
 			J9Object *oldObject = NULL;
 			protectIfVolatileBefore(vmThread, isVolatile, true, false);
-			oldObject = mmPointerFromToken(vmThread, *destAddress);
+			GC_SlotObject slotObject(vmThread->javaVM->omrVM, destAddress);
+			oldObject = slotObject.readReferenceFromSlot();
 			protectIfVolatileAfter(vmThread, isVolatile, true, false);
 			rememberObjectToRescan(env, oldObject);
 		}
@@ -609,14 +610,26 @@ MM_StandardAccessBarrier::doCopyContiguousBackwardWithReadBarrier(J9VMThread *vm
 	srcIndex += lengthInSlots;
 	destIndex += lengthInSlots;
 
-	fj9object_t *srcSlot = (fj9object_t *)indexableEffectiveAddress(vmThread, srcObject, srcIndex, sizeof(fj9object_t));
-	fj9object_t *destSlot = (fj9object_t *)indexableEffectiveAddress(vmThread, destObject, destIndex, sizeof(fj9object_t));
-	fj9object_t *srcEndSlot = srcSlot - lengthInSlots;
+	if (J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread)) {
+		uint32_t *srcSlot = (uint32_t *)indexableEffectiveAddress(vmThread, srcObject, srcIndex, sizeof(uint32_t));
+		uint32_t *destSlot = (uint32_t *)indexableEffectiveAddress(vmThread, destObject, destIndex, sizeof(uint32_t));
+		uint32_t *srcEndSlot = srcSlot - lengthInSlots;
 
-	while (srcSlot-- > srcEndSlot) {
-		preObjectRead(vmThread, (J9Object *)srcObject, srcSlot);
+		while (srcSlot-- > srcEndSlot) {
+			preObjectRead(vmThread, (J9Object *)srcObject, (fj9object_t*)srcSlot);
 
-		*--destSlot = *srcSlot;
+			*--destSlot = *srcSlot;
+		}
+	} else {
+		uintptr_t *srcSlot = (uintptr_t *)indexableEffectiveAddress(vmThread, srcObject, srcIndex, sizeof(uintptr_t));
+		uintptr_t *destSlot = (uintptr_t *)indexableEffectiveAddress(vmThread, destObject, destIndex, sizeof(uintptr_t));
+		uintptr_t *srcEndSlot = srcSlot - lengthInSlots;
+
+		while (srcSlot-- > srcEndSlot) {
+			preObjectRead(vmThread, (J9Object *)srcObject, (fj9object_t*)srcSlot);
+
+			*--destSlot = *srcSlot;
+		}	
 	}
 
 	return ARRAY_COPY_SUCCESSFUL;
@@ -625,14 +638,26 @@ MM_StandardAccessBarrier::doCopyContiguousBackwardWithReadBarrier(J9VMThread *vm
 I_32
 MM_StandardAccessBarrier::doCopyContiguousForwardWithReadBarrier(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject, I_32 srcIndex, I_32 destIndex, I_32 lengthInSlots)
 {
-	fj9object_t *srcSlot = (fj9object_t *)indexableEffectiveAddress(vmThread, srcObject, srcIndex, sizeof(fj9object_t));
-	fj9object_t *destSlot = (fj9object_t *)indexableEffectiveAddress(vmThread, destObject, destIndex, sizeof(fj9object_t));
-	fj9object_t *srcEndSlot = srcSlot + lengthInSlots;
+	if (J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread)) {
+		uint32_t *srcSlot = (uint32_t *)indexableEffectiveAddress(vmThread, srcObject, srcIndex, sizeof(uint32_t));
+		uint32_t *destSlot = (uint32_t *)indexableEffectiveAddress(vmThread, destObject, destIndex, sizeof(uint32_t));
+		uint32_t *srcEndSlot = srcSlot + lengthInSlots;
 
-	while (srcSlot < srcEndSlot) {
-		preObjectRead(vmThread, (J9Object *)srcObject, srcSlot);
+		while (srcSlot < srcEndSlot) {
+			preObjectRead(vmThread, (J9Object *)srcObject, (fj9object_t*)srcSlot);
+	
+			*destSlot++ = *srcSlot++;
+		}
+	} else {
+		uintptr_t *srcSlot = (uintptr_t *)indexableEffectiveAddress(vmThread, srcObject, srcIndex, sizeof(uintptr_t));
+		uintptr_t *destSlot = (uintptr_t *)indexableEffectiveAddress(vmThread, destObject, destIndex, sizeof(uintptr_t));
+		uintptr_t *srcEndSlot = srcSlot + lengthInSlots;
 
-		*destSlot++ = *srcSlot++;
+		while (srcSlot < srcEndSlot) {
+			preObjectRead(vmThread, (J9Object *)srcObject, (fj9object_t*)srcSlot);
+	
+			*destSlot++ = *srcSlot++;
+		}
 	}
 
 	return ARRAY_COPY_SUCCESSFUL;
@@ -745,32 +770,27 @@ bool
 MM_StandardAccessBarrier::preMonitorTableSlotRead(J9VMThread *vmThread, j9object_t *srcAddress)
 {
 	omrobjectptr_t object = (omrobjectptr_t)*srcAddress;
+	bool const compressed = compressObjectReferences();
 
 	if ((NULL != _extensions->scavenger) && _extensions->scavenger->isObjectInEvacuateMemory(object)) {
 		MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(vmThread->omrVMThread);
-		Assert_MM_true(_extensions->scavenger->isConcurrentInProgress());
+		Assert_MM_true(_extensions->scavenger->isConcurrentCycleInProgress());
 		Assert_MM_true(_extensions->scavenger->isMutatorThreadInSyncWithCycle(env));
 
-		MM_ForwardedHeader forwardHeader(object);
+		MM_ForwardedHeader forwardHeader(object, compressed);
 		omrobjectptr_t forwardPtr = forwardHeader.getForwardedObject();
 
 		if (NULL != forwardPtr) {
-			/* Object has been copied - ensure the object is fully copied before exposing it, update the slot and return.
+			/* Object has been or is being copied - ensure the object is fully copied before exposing it, update the slot and return.
 			 *  Slot update needs to be atomic, only if there is a mutator thread racing with a write operation to this same slot.
-			 *  ATM, this barrier is only used to update Monitor table entries, which should not be ever reinitialized by any mutator.
+			 *  The barrier is typically used to update Monitor table entries, which should not be ever reinitialized by any mutator.
 			 *  Updated can occur, but only by GC threads during STW clearing phase, thus no race with this barrier. */
 			forwardHeader.copyOrWait(forwardPtr);
 			*srcAddress = forwardPtr;
-		} else {
-			Assert_GC_true_with_message2(env, forwardHeader.isSelfForwardedPointer(),
-				"Monitor object, not forwarded, in Evacuate: slot %llx object %llx\n", srcAddress, object);
-			/* A typical usage of this barrier is to update monitor table slot for blocking object (blockingEnterObject).
-			 * Such object is a hard root, hence copied during initial roots scanning. We should never need to copy it via this barrier.
-			 * If this assert eventually triggers it means the barrier is used for some other objects that are not hard roots
-			 * (for example, iterating monitor table to dump info about all monitors). If so, try using the other API (that's using VM rather
-			 * than Thread argument) instead (since that API expects accessing even dead objects and does not impose the assert).
-			 */
 		}
+		/* Do nothing if the object is not copied already, since it might be dead.
+		 * This object is found without real reference to it,
+		 * for example by iterating monitor table to dump info about all monitors */
 	}
 
 	return true;
@@ -780,15 +800,16 @@ bool
 MM_StandardAccessBarrier::preMonitorTableSlotRead(J9JavaVM *vm, j9object_t *srcAddress)
 {
 	omrobjectptr_t object = (omrobjectptr_t)*srcAddress;
+	bool const compressed = compressObjectReferences();
 
 	if ((NULL != _extensions->scavenger) && _extensions->scavenger->isObjectInEvacuateMemory(object)) {
-		Assert_MM_true(_extensions->scavenger->isConcurrentInProgress());
+		Assert_MM_true(_extensions->scavenger->isConcurrentCycleInProgress());
 
-		MM_ForwardedHeader forwardHeader(object);
+		MM_ForwardedHeader forwardHeader(object, compressed);
 		omrobjectptr_t forwardPtr = forwardHeader.getForwardedObject();
 
 		if (NULL != forwardPtr) {
-			/* Object has been copied - ensure the object is fully copied before exposing it, update the slot and return */
+			/* Object has been or is being copied - ensure the object is fully copied before exposing it, update the slot and return */
 			forwardHeader.copyOrWait(forwardPtr);
 			*srcAddress = forwardPtr;
 		}
@@ -804,13 +825,14 @@ bool
 MM_StandardAccessBarrier::preObjectRead(J9VMThread *vmThread, J9Class *srcClass, j9object_t *srcAddress)
 {
 	omrobjectptr_t object = *(volatile omrobjectptr_t *)srcAddress;
+	bool const compressed = compressObjectReferences();
 
-	if ((NULL !=_extensions->scavenger) && _extensions->scavenger->isObjectInEvacuateMemory(object)) {
+	if ((NULL != _extensions->scavenger) && _extensions->scavenger->isObjectInEvacuateMemory(object)) {
 		MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(vmThread->omrVMThread);
-		Assert_MM_true(_extensions->scavenger->isConcurrentInProgress());
+		Assert_MM_true(_extensions->scavenger->isConcurrentCycleInProgress());
 		Assert_MM_true(_extensions->scavenger->isMutatorThreadInSyncWithCycle(env));
 
-		MM_ForwardedHeader forwardHeader(object);
+		MM_ForwardedHeader forwardHeader(object, compressed);
 		omrobjectptr_t forwardPtr = forwardHeader.getForwardedObject();
 
 		if (NULL != forwardPtr) {
@@ -825,7 +847,7 @@ MM_StandardAccessBarrier::preObjectRead(J9VMThread *vmThread, J9Class *srcClass,
 				if (forwardPtr != object) {
 					/* Another thread successfully copied the object. Re-fetch forwarding pointer,
 					 * and ensure the object is fully copied before exposing it. */
-					MM_ForwardedHeader(object).copyOrWait(forwardPtr);
+					MM_ForwardedHeader(object, compressed).copyOrWait(forwardPtr);
 					MM_AtomicOperations::lockCompareExchange((uintptr_t *)srcAddress, (uintptr_t)object, (uintptr_t)forwardPtr);
 				}
 			} else {
@@ -844,58 +866,60 @@ MM_StandardAccessBarrier::preObjectRead(J9VMThread *vmThread, J9Class *srcClass,
 bool
 MM_StandardAccessBarrier::preObjectRead(J9VMThread *vmThread, J9Object *srcObject, fj9object_t *srcAddress)
 {
-	MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(vmThread->omrVMThread);
-	Assert_GC_true_with_message(env, !_extensions->scavenger->isObjectInEvacuateMemory((omrobjectptr_t)srcAddress) || _extensions->isScavengerBackOutFlagRaised(), "readObject %llx in Evacuate\n", srcAddress);
-
 	/* with volatile cast, ensure that we are really getting a snapshot (instead of the slot being re-read at later points with possibly different values) */
-	fomrobject_t objectToken = *(volatile fomrobject_t *)srcAddress;
+	bool const compressed = compressObjectReferences();
+	fomrobject_t objectToken = (fomrobject_t)(compressed ? (uintptr_t)*(volatile uint32_t *)srcAddress: *(volatile uintptr_t *)srcAddress);
 	omrobjectptr_t object = convertPointerFromToken(objectToken);
-	if (_extensions->scavenger->isObjectInEvacuateMemory(object)) {
-		Assert_GC_true_with_message2(env, _extensions->scavenger->isConcurrentInProgress(),
-				"CS not in progress, found a object in Survivor: slot %llx object %llx\n", srcAddress, object);
-		Assert_MM_true(_extensions->scavenger->isMutatorThreadInSyncWithCycle(env));
-		/* since object is still in evacuate, srcObject has not been scanned yet => we cannot assert
-		 * if srcObject should (already) be remembered (even if it's old)
-		 */
 
-		env->_scavengerStats._readObjectBarrierUpdate += 1;
-		if (GLOBAL_READ_BARRIR_STATS_UPDATE_THRESHOLD == env->_scavengerStats._readObjectBarrierUpdate) {
-			MM_AtomicOperations::addU64(&_extensions->scavengerStats._readObjectBarrierUpdate, GLOBAL_READ_BARRIR_STATS_UPDATE_THRESHOLD);
-			env->_scavengerStats._readObjectBarrierUpdate = 0;
-		}
+	if (NULL != _extensions->scavenger) {
+		MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(vmThread->omrVMThread);
+		Assert_GC_true_with_message(env, !_extensions->scavenger->isObjectInEvacuateMemory((omrobjectptr_t)srcAddress) || _extensions->isScavengerBackOutFlagRaised(), "readObject %llx in Evacuate\n", srcAddress);
+		if (_extensions->scavenger->isObjectInEvacuateMemory(object)) {
+			Assert_GC_true_with_message2(env, _extensions->scavenger->isConcurrentCycleInProgress(),
+					"CS not in progress, found a object in Survivor: slot %llx object %llx\n", srcAddress, object);
+			Assert_MM_true(_extensions->scavenger->isMutatorThreadInSyncWithCycle(env));
+			/* since object is still in evacuate, srcObject has not been scanned yet => we cannot assert
+			 * if srcObject should (already) be remembered (even if it's old)
+			 */
 
-		GC_SlotObject slotObject(env->getOmrVM(), srcAddress);
-		MM_ForwardedHeader forwardHeader(object);
-		omrobjectptr_t forwardPtr = forwardHeader.getForwardedObject();
-		if (NULL != forwardPtr) {
-			/* Object has been strictly (remotely) forwarded. Ensure the object is fully copied before exposing it, update the slot and return. */
-			forwardHeader.copyOrWait(forwardPtr);
-			slotObject.atomicWriteReferenceToSlot(object, forwardPtr);
-		} else {
-			omrobjectptr_t destinationObjectPtr = _extensions->scavenger->copyObject(env, &forwardHeader);
-			if (NULL == destinationObjectPtr) {
-				/* We have no place to copy (or less likely, we lost to another thread forwarding it).
-				 * We are forced to return the original location of the object.
-				 * But we must prevent any other thread of making a copy of this object.
-				 * So we will attempt to atomically self forward it.  */
-				forwardPtr = forwardHeader.setSelfForwardedObject();
-				if (forwardPtr != object) {
-					/* Some other thread successfully copied this object. Re-fetch forwarding pointer,
-					 * and ensure the object is fully copied before exposing it. */
-					MM_ForwardedHeader(object).copyOrWait(forwardPtr);
-					slotObject.atomicWriteReferenceToSlot(object, forwardPtr);
-				}
-				/* ... else it's self-forwarded -> no need to update the src slot */
+			env->_scavengerStats._readObjectBarrierUpdate += 1;
+			if (GLOBAL_READ_BARRIR_STATS_UPDATE_THRESHOLD == env->_scavengerStats._readObjectBarrierUpdate) {
+				MM_AtomicOperations::addU64(&_extensions->scavengerStats._readObjectBarrierUpdate, GLOBAL_READ_BARRIR_STATS_UPDATE_THRESHOLD);
+				env->_scavengerStats._readObjectBarrierUpdate = 0;
+			}
+
+			GC_SlotObject slotObject(env->getOmrVM(), srcAddress);
+			MM_ForwardedHeader forwardHeader(object, compressed);
+			omrobjectptr_t forwardPtr = forwardHeader.getForwardedObject();
+			if (NULL != forwardPtr) {
+				/* Object has been strictly (remotely) forwarded. Ensure the object is fully copied before exposing it, update the slot and return. */
+				forwardHeader.copyOrWait(forwardPtr);
+				slotObject.atomicWriteReferenceToSlot(object, forwardPtr);
 			} else {
-				/* Successfully copied (or copied by another thread). copyObject() ensures that the object is fully copied. */
-				slotObject.atomicWriteReferenceToSlot(object, destinationObjectPtr);
+				omrobjectptr_t destinationObjectPtr = _extensions->scavenger->copyObject(env, &forwardHeader);
+				if (NULL == destinationObjectPtr) {
+					/* We have no place to copy (or less likely, we lost to another thread forwarding it).
+					 * We are forced to return the original location of the object.
+					 * But we must prevent any other thread of making a copy of this object.
+					 * So we will attempt to atomically self forward it.  */
+					forwardPtr = forwardHeader.setSelfForwardedObject();
+					if (forwardPtr != object) {
+						/* Some other thread successfully copied this object. Re-fetch forwarding pointer,
+						 * and ensure the object is fully copied before exposing it. */
+						MM_ForwardedHeader(object, compressed).copyOrWait(forwardPtr);
+						slotObject.atomicWriteReferenceToSlot(object, forwardPtr);
+					}
+					/* ... else it's self-forwarded -> no need to update the src slot */
+				} else {
+					/* Successfully copied (or copied by another thread). copyObject() ensures that the object is fully copied. */
+					slotObject.atomicWriteReferenceToSlot(object, destinationObjectPtr);
 
-				env->_scavengerStats._readObjectBarrierCopy += 1;
-				if (GLOBAL_READ_BARRIR_STATS_UPDATE_THRESHOLD == env->_scavengerStats._readObjectBarrierCopy) {
-					MM_AtomicOperations::addU64(&_extensions->scavengerStats._readObjectBarrierCopy, GLOBAL_READ_BARRIR_STATS_UPDATE_THRESHOLD);
-					env->_scavengerStats._readObjectBarrierCopy = 0;
+					env->_scavengerStats._readObjectBarrierCopy += 1;
+					if (GLOBAL_READ_BARRIR_STATS_UPDATE_THRESHOLD == env->_scavengerStats._readObjectBarrierCopy) {
+						MM_AtomicOperations::addU64(&_extensions->scavengerStats._readObjectBarrierCopy, GLOBAL_READ_BARRIR_STATS_UPDATE_THRESHOLD);
+						env->_scavengerStats._readObjectBarrierCopy = 0;
+					}
 				}
-
 			}
 		}
 	}

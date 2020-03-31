@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -303,7 +303,6 @@ enum INIT_STAGE {
 #define VMOPT_XDFPBD "-Xdfpbd"
 #define VMOPT_SHOWVERSION "-showversion"
 #define VMOPT_INTERNALVERSION "-Xinternalversion"
-#define VMOPT_HARMONY_PORT_LIBRARY "_org.apache.harmony.vmi.portlib"
 #define VMOPT_XXALLOWVMSHUTDOWN "-XXallowvmshutdown:true"
 #define VMOPT_XXDISABLEVMSHUTDOWN "-XXallowvmshutdown:false"
 #define VMOPT_XXVM_IGNOREUNRECOGNIZED "-XXvm:ignoreUnrecognized"
@@ -330,6 +329,8 @@ enum INIT_STAGE {
 #define VMOPT_XXHANDLESIGXFSZ "-XX:+HandleSIGXFSZ"
 #define VMOPT_XXHEAPDUMPONOOM "-XX:+HeapDumpOnOutOfMemoryError"
 #define VMOPT_XXNOHEAPDUMPONOOM "-XX:-HeapDumpOnOutOfMemoryError"
+#define VMOPT_XDUMP_EXIT_OUTOFMEMORYERROR "-Xdump:exit:events=systhrow,filter=java/lang/OutOfMemoryError"
+#define VMOPT_XDUMP_EXIT_OUTOFMEMORYERROR_DISABLE "-Xdump:exit:none:events=systhrow,filter=java/lang/OutOfMemoryError"
 
 #define VMOPT_XSOFTREFTHRESHOLD "-XSoftRefThreshold"
 #define VMOPT_XAGGRESSIVE "-Xaggressive"
@@ -339,6 +340,9 @@ enum INIT_STAGE {
 #define VMOPT_AGENTLIB_DGCOLLECTOR "-agentlib:dgcollector"
 #define VMOPT_AGENTLIB_DGCOLLECTOR_EQUALS "-agentlib:dgcollector="
 #define VMOPT_XLOCKWORD "-Xlockword:"
+#define VMOPT_XXGLOBALLOCKRESERVATION "-XX:+GlobalLockReservation"
+#define VMOPT_XXGLOBALLOCKRESERVATIONCOLON "-XX:+GlobalLockReservation:"
+#define VMOPT_XXNOGLOBALLOCKRESERVATION "-XX:-GlobalLockReservation"
 #define VMOPT_OBJECT_MONITOR_CACHE_BITS_EQUALS "-XmonitorLookupCacheBits="
 #define VMOPT_XXALWAYSCOPYJNICRITICAL "-XX:+AlwaysCopyJNICritical"
 #define VMOPT_XXNOALWAYSCOPYJNICRITICAL "-XX:-AlwaysCopyJNICritical"
@@ -373,6 +377,8 @@ enum INIT_STAGE {
 #define VMOPT_XXDISABLEALWAYSSPLITBYTECODES "-XX:-AlwaysSplitBytecodes"
 #define VMOPT_XXENABLEPOSITIVEHASHCODE "-XX:+PositiveIdentityHash"
 #define VMOPT_XXDISABLEPOSITIVEHASHCODE "-XX:-PositiveIdentityHash"
+#define VMOPT_XXENABLEORIGINALJDK8HEAPSIZECOMPATIBILITY "-XX:+OriginalJDK8HeapSizeCompatibilityMode"
+#define VMOPT_XXDISABLEORIGINALJDK8HEAPSIZECOMPATIBILITY "-XX:-OriginalJDK8HeapSizeCompatibilityMode"
 
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
 #define VMOPT_XXENABLEVALHALLA "-XX:+EnableValhalla"
@@ -402,6 +408,9 @@ enum INIT_STAGE {
 
 #define VMOPT_XXENABLESHAREANONYMOUSCLASSES "-XX:+ShareAnonymousClasses"
 #define VMOPT_XXDISABLESHAREANONYMOUSCLASSES "-XX:-ShareAnonymousClasses"
+
+#define VMOPT_XXENABLESHAREUNSAFECLASSES "-XX:+ShareUnsafeClasses"
+#define VMOPT_XXDISABLESHAREUNSAFECLASSES "-XX:-ShareUnsafeClasses"
 
 #define VMOPT_XXFORCECLASSFILEASINTERMEDIATEDATA "-XX:ForceClassfileAsIntermediateData"
 #define VMOPT_XXRECREATECLASSFILEONLOAD "-XX:RecreateClassfileOnload"
@@ -459,6 +468,12 @@ enum INIT_STAGE {
 #define VMOPT_XXDEEP_SCAN "-XX:+GCDeepStructurePriorityScan"
 #define VMOPT_XXNODEEP_SCAN "-XX:-GCDeepStructurePriorityScan"
 
+#define VMOPT_XXFORCE_FULL_HEAP_ADDRESS_RANGE_SEARCH "-XX:+ForceFullHeapAddressRangeSearch"
+#define VMOPT_XXNOFORCE_FULL_HEAP_ADDRESS_RANGE_SEARCH "-XX:-ForceFullHeapAddressRangeSearch"
+
+#define VMOPT_XXCLASSRELATIONSHIPVERIFIER "-XX:+ClassRelationshipVerifier"
+#define VMOPT_XXNOCLASSRELATIONSHIPVERIFIER "-XX:-ClassRelationshipVerifier"
+
 #define MAPOPT_AGENTLIB_JDWP_EQUALS "-agentlib:jdwp="
 
 #define MAPOPT_XCOMP "-Xcomp"
@@ -498,6 +513,11 @@ enum INIT_STAGE {
 #define MAPOPT_XXMAXHEAPSIZE_EQUALS "-XX:MaxHeapSize="
 #define MAPOPT_XXINITIALHEAPSIZE_EQUALS "-XX:InitialHeapSize="
 #define MAPOPT_XXONOUTOFMEMORYERROR_EQUALS "-XX:OnOutOfMemoryError="
+#define MAPOPT_XXENABLEEXITONOUTOFMEMORYERROR "-XX:+ExitOnOutOfMemoryError"
+#define MAPOPT_XXDISABLEEXITONOUTOFMEMORYERROR "-XX:-ExitOnOutOfMemoryError"
+#define MAPOPT_XXPARALLELCMSTHREADS_EQUALS "-XX:ParallelCMSThreads="
+#define MAPOPT_XXCONCGCTHREADS_EQUALS "-XX:ConcGCThreads="
+#define MAPOPT_XXPARALLELGCTHREADS_EQUALS "-XX:ParallelGCThreads="
 
 #define VMOPT_XXACTIVEPROCESSORCOUNT_EQUALS "-XX:ActiveProcessorCount="
 
@@ -511,6 +531,8 @@ enum INIT_STAGE {
 #define VMOPT_XXIDLETUNINGCOMPACTONIDLEENABLE "-XX:+IdleTuningCompactOnIdle"
 #define VMOPT_XXIDLETUNINGIGNOREUNRECOGNIZEDOPTIONSDISABLE "-XX:-IdleTuningIgnoreUnrecognizedOptions"
 #define VMOPT_XXIDLETUNINGIGNOREUNRECOGNIZEDOPTIONSENABLE "-XX:+IdleTuningIgnoreUnrecognizedOptions"
+#define VMOPT_XCONCURRENTBACKGROUND "-Xconcurrentbackground"
+#define VMOPT_XGCTHREADS "-Xgcthreads"
 
 /* Modularity command line options */
 #define VMOPT_MODULE_UPGRADE_PATH "--upgrade-module-path"

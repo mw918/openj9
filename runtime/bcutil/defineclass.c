@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -541,7 +541,9 @@ internalLoadROMClass(J9VMThread * vmThread, J9LoadROMClassData *loadData, J9Tran
 
 	/* Determine allowed class file version */
 #ifdef J9VM_OPT_SIDECAR
-	if (J2SE_VERSION(vm) >= J2SE_V14) {
+	if (J2SE_VERSION(vm) >= J2SE_V15) {
+		translationFlags |= BCT_Java15MajorVersionShifted;
+	} else if (J2SE_VERSION(vm) >= J2SE_V14) {
 		translationFlags |= BCT_Java14MajorVersionShifted;
 	} else if (J2SE_VERSION(vm) >= J2SE_V13) {
 		translationFlags |= BCT_Java13MajorVersionShifted;
@@ -759,20 +761,19 @@ callDynamicLoader(J9VMThread *vmThread, J9LoadROMClassData *loadData, U_8 * inte
 			FALSE, /* isIntermediateROMClass */
 			localBuffer);
 
-	/* The module of a class transformed by a JVMTI agent needs access to unnamed modules */
-	if ((J2SE_VERSION(vm) >= J2SE_V11)
-		&& (classFileBytesReplacedByRIA || classFileBytesReplacedByRCA)
-		&& (NULL != loadData->romClass)
-	) {
-		J9Module *module = J9_VM_FUNCTION(vmThread, findModuleForPackage)(vmThread, loadData->classLoader,
-				loadData->className, (U_32) packageNameLength(loadData->romClass));
-		if (NULL != module) {
-			module->isLoose = TRUE;
+	if (BCT_ERR_NO_ERROR == result) {
+		/* The module of a class transformed by a JVMTI agent needs access to unnamed modules */
+		if ((J2SE_VERSION(vm) >= J2SE_V11)
+			&& (classFileBytesReplacedByRIA || classFileBytesReplacedByRCA)
+		) {
+			J9Module *module = J9_VM_FUNCTION(vmThread, findModuleForPackage)(vmThread, loadData->classLoader,
+					J9UTF8_DATA(J9ROMCLASS_CLASSNAME(loadData->romClass)), (U_32) packageNameLength(loadData->romClass));
+			if (NULL != module) {
+				module->isLoose = TRUE;
+			}
 		}
-	}
 
-	if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_RECREATE_CLASSFILE_ONLOAD)) {
-		if (BCT_ERR_NO_ERROR == result) {
+		if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_RECREATE_CLASSFILE_ONLOAD)) {
 			U_8 * classFileBytes = NULL;
 			U_32 classFileBytesCount = 0;
 			U_8 * prevClassData = loadData->classData;
@@ -843,15 +844,6 @@ createROMClassFromClassFile(J9VMThread *currentThread, J9LoadROMClassData *loadD
 	Trc_BCU_Assert_True(NULL != vm->dynamicLoadBuffers);
 
 	switch (result) {
-		case BCT_ERR_CLASS_READ: {
-			J9CfrError * cfrError = (J9CfrError *) vm->dynamicLoadBuffers->classFileError;
-
-			errorUTF = (U_8 *) buildVerifyErrorString(vm, cfrError, className, classNameLength);
-			exceptionNumber = cfrError->errorAction;
-			/* We don't free vm->dynamicLoadBuffers->classFileError because it is also used as a classFileBuffer in ROMClassBuilder */
-			break;
-		}
-
 		case BCT_ERR_INVALID_BYTECODE:
 		case BCT_ERR_STACK_MAP_FAILED:
 		case BCT_ERR_VERIFY_ERROR_INLINING:
@@ -874,12 +866,32 @@ createROMClassFromClassFile(J9VMThread *currentThread, J9LoadROMClassData *loadD
 			exceptionNumber = J9VMCONSTANTPOOL_JAVALANGOUTOFMEMORYERROR;
 			break;
 
+		/*
+		 * Error messages are contents of vm->dynamicLoadBuffers->classFileError with class name appended.
+		 * 
+		 * We don't free vm->dynamicLoadBuffers->classFileError because it is also used as a classFileBuffer in ROMClassBuilder.
+		 */
+		case BCT_ERR_CLASS_READ:
+			exceptionNumber = ((J9CfrError *)vm->dynamicLoadBuffers->classFileError)->errorAction;
+			/* FALLTHROUGH */
+
+		case BCT_ERR_GENERIC_ERROR_CUSTOM_MSG: {
+			/* default value for exceptionNumber (J9VMCONSTANTPOOL_JAVALANGCLASSFORMATERROR) assigned before switch */		
+			errorUTF = (U_8 *)buildVerifyErrorString(vm, (J9CfrError *)vm->dynamicLoadBuffers->classFileError, className, classNameLength);
+			break;
+		}
+
+		/*
+		 * Error messages are contents of vm->dynamicLoadBuffers->classFileError if anything is assigned 
+		 * otherwise just the classname.
+		 */
 		case BCT_ERR_CLASS_NAME_MISMATCH:
 			exceptionNumber = J9VMCONSTANTPOOL_JAVALANGNOCLASSDEFFOUNDERROR;
 			/* FALLTHROUGH */
 			
 		default:
-			/* default value for exceptionNumber (J9VMCONSTANTPOOL_JAVALANGCLASSFORMATERROR) assigned before switch */
+			/* BCT_ERR_GENERIC_ERROR: default value for exceptionNumber (J9VMCONSTANTPOOL_JAVALANGCLASSFORMATERROR) 
+			 * assigned before switch */
 			errorUTF = vm->dynamicLoadBuffers->classFileError;
 			if (NULL == errorUTF) {
 				PORT_ACCESS_FROM_JAVAVM(vm);

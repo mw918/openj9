@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -52,6 +52,18 @@ public:
 */
 private:
 	void AssertBadElementSize();
+#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
+	void AssertNotEmptyArrayletLeaves(UDATA sizeInElements, UDATA arrayletLeafCount);
+	MMINLINE bool
+	isOneArrayletLeafWithNULL(J9IndexableObject *spine, UDATA arrayletLeafCount, UDATA sizeInElements)
+	{
+		UDATA arrayletLeafSize = _omrVM->_arrayletLeafSize;
+		UDATA dataSize = getDataSizeInBytes(spine);
+		AssertNotEmptyArrayletLeaves(sizeInElements, arrayletLeafCount);
+
+		return (2 == arrayletLeafCount) && (0 == (dataSize % arrayletLeafSize));
+	}
+#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
 protected:
 	/* forward declare methods from parent class to avoid namespace issues */
 	MMINLINE UDATA
@@ -255,6 +267,66 @@ public:
 		return getSpineSizeWithoutHeader(layout, numberArraylets, dataSize, alignData);
 	}
 
+#if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
+	/**
+	 * Checks if arraylet falls into corner case of discontigous data
+	 * Arraylet possible cases:
+	 * 0: Empty arraylets, in this case the array is represented as
+	 *		an arraylet however it does not contain any data, but it
+	 *		does contain an arrayoid (leaf pointer) that points to NULL.
+	 *		Even though this case is represented as a discontiguous arraylet
+	 *		internally due to its implementation, it is actually a contiguous
+	 *		array with length zero.
+	 * 1: The total data size in arraylet is between 0 and region
+	 *		size. Small enough to make the arraylet layout contiguous,
+	 *		in which case this function is unreachable.
+	 * 2: The total data size in arraylet is exacly the same size
+	 *		of a region, in which case the arraylet will contain an
+	 *		extra NULL arrayoid. In this case we do not need to double
+	 *		map since we already have a contiguous representation of the
+	 *		data at first leaf.
+	 * 3: Similar to first case, the data portion is slightly smaller than
+	 *		a region size, however not small enough to include header and data
+	 *		at the same region to make it contiguous. In which case we would
+	 *		have one leaf, where we also do not need to double map.
+	 * 4: The total data size in arraylet is stricly greater than one region;
+	 *		however, not multiple of region size. Since with enabled double map
+	 *		layout is always discontiguous, we would have 2 or more arraylet leaves
+	 *		therefore we always double map.
+	 * 5: The total data size in arraylet is stricly greater than one region and
+	 *		multiple of region size. Here we would have 2 or more arraylet leaves
+	 *		containing data and the last leaf pointing to NULL. Nonetheless, we
+	 *		always double map in this case
+	 *
+	 * @param spine Pointer to an array indexable object spine
+	 * @return false in case corner cases 0, 2 or 3 are valid. On the other hand,
+	 *		if cases 4 or 5 are true, the function returns true.
+	 */
+	MMINLINE bool
+	isArrayletDataDiscontiguous(J9IndexableObject *spine)
+	{
+		UDATA arrayletLeafCount = numArraylets(spine);
+		UDATA sizeInElements = getSizeInElements(spine);
+		return (arrayletLeafCount > 1) && !isOneArrayletLeafWithNULL(spine, arrayletLeafCount, sizeInElements);
+	}
+
+	/**
+	 * Checks if arraylet falls into corner case of contiguous data
+	 * 
+	 * @param spine Pointer to an array indexable object spine
+	 * @return true in case corner cases 2 or 3 are valid. On the other hand,
+	 * 		if cases 0, 4 or 5 are true, the function returns false.
+	 */
+	MMINLINE bool
+	isArrayletDataContiguous(J9IndexableObject *spine)
+	{
+		UDATA arrayletLeafCount = numArraylets(spine);
+		UDATA sizeInElements = getSizeInElements(spine);
+		return ((1 == arrayletLeafCount) || isOneArrayletLeafWithNULL(spine, arrayletLeafCount, sizeInElements))
+				&& (sizeInElements > 0);
+	}
+#endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
+
 	/**
 	 * We can't use memcpy because it may be not atomic for pointers, use this function instead
 	 * Copy data in UDATA words
@@ -387,12 +459,13 @@ public:
 			UDATA* destData = (UDATA*)getDataPointerForContiguous(destObject);
 			copyInWords(destData, srcData, sizeInBytes);
 		} else {
+			bool const compressed = compressObjectReferences();
 			UDATA arrayletCount = numArraylets(srcObject);
 			fj9object_t *srcArraylets = getArrayoidPointer(srcObject);
 			fj9object_t *destArraylets = getArrayoidPointer(destObject);
 			for (UDATA i = 0; i < arrayletCount; i++) {
-				GC_SlotObject srcSlotObject(_omrVM, &srcArraylets[i]);
-				GC_SlotObject destSlotObject(_omrVM, &destArraylets[i]);
+				GC_SlotObject srcSlotObject(_omrVM, GC_SlotObject::addToSlotAddress(srcArraylets, i, compressed));
+				GC_SlotObject destSlotObject(_omrVM, GC_SlotObject::addToSlotAddress(destArraylets, i, compressed));
 				void* srcLeafAddress = srcSlotObject.readReferenceFromSlot();
 				void* destLeafAddress = destSlotObject.readReferenceFromSlot();
 				
@@ -481,6 +554,7 @@ public:
 				break;
 			}
 		} else {
+			bool const compressed = compressObjectReferences();
 			fj9object_t *srcArraylets = getArrayoidPointer(srcObject);
 			void *outerDestCursor = destData;
 			U_32 outerCount = elementCount;
@@ -488,7 +562,7 @@ public:
 			UDATA arrayletIndex = elementIndex / arrayletLeafElements;
 			UDATA arrayletElementOffset = elementIndex % arrayletLeafElements;
 			while(outerCount > 0) {
-				GC_SlotObject srcSlotObject(_omrVM, &srcArraylets[arrayletIndex++]);
+				GC_SlotObject srcSlotObject(_omrVM, GC_SlotObject::addToSlotAddress(srcArraylets, arrayletIndex++, compressed));
 				void* srcLeafAddress = srcSlotObject.readReferenceFromSlot();
 				U_32 innerCount = outerCount;
 				// Can we fulfill the remainder of the copy from this page?
@@ -639,6 +713,7 @@ public:
 				break;
 			}
 		} else {
+			bool const compressed = compressObjectReferences();
 			fj9object_t *destArraylets = getArrayoidPointer(destObject);
 			void *outerSrcCursor = srcData;
 			U_32 outerCount = elementCount;
@@ -646,7 +721,7 @@ public:
 			UDATA arrayletIndex = elementIndex / arrayletLeafElements;
 			UDATA arrayletElementOffset = elementIndex % arrayletLeafElements;
 			while(outerCount > 0) {
-				GC_SlotObject destSlotObject(_omrVM, &destArraylets[arrayletIndex++]);
+				GC_SlotObject destSlotObject(_omrVM, GC_SlotObject::addToSlotAddress(destArraylets, arrayletIndex++, compressed));
 				void* destLeafAddress = destSlotObject.readReferenceFromSlot();
 				U_32 innerCount = outerCount;
 				// Can we fulfill the remainder of the copy from this page?

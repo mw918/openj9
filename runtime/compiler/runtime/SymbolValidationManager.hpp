@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -371,16 +371,24 @@ struct MethodValidationRecord : public SymbolValidationRecord
    {
    MethodValidationRecord(TR_ExternalRelocationTargetKind kind, TR_OpaqueMethodBlock *method)
       : SymbolValidationRecord(kind),
-        _method(method)
+        _method(method),
+        _definingClass(NULL)
       {}
 
    TR_OpaqueClassBlock *definingClass()
       {
-      return reinterpret_cast<TR_OpaqueClassBlock *>(
-         J9_CLASS_FROM_METHOD(reinterpret_cast<J9Method *>(_method)));
+      TR_ASSERT(_definingClass, "defining class must be already cached");
+      return _definingClass;
+      }
+
+   TR_OpaqueClassBlock *definingClass(TR_J9VM *fe)
+      {
+      _definingClass = fe->getClassOfMethod(_method);
+      return _definingClass;
       }
 
    TR_OpaqueMethodBlock *_method;
+   TR_OpaqueClassBlock *_definingClass;
    };
 
 struct MethodFromClassRecord : public MethodValidationRecord
@@ -628,7 +636,7 @@ public:
    SymbolValidationManager(TR::Region &region, TR_ResolvedMethod *compilee);
 
    void populateWellKnownClasses();
-   bool validateWellKnownClasses(const uintptrj_t *wellKnownClassChainOffsets);
+   bool validateWellKnownClasses(const uintptr_t *wellKnownClassChainOffsets);
    bool isWellKnownClass(TR_OpaqueClassBlock *clazz);
    bool classCanSeeWellKnownClasses(TR_OpaqueClassBlock *clazz);
    const void *wellKnownClassChainOffsets() { return _wellKnownClassChainOffsets; }
@@ -693,7 +701,7 @@ public:
 
 
 
-   bool validateClassByNameRecord(uint16_t classID, uint16_t beholderID, uintptrj_t *classChain);
+   bool validateClassByNameRecord(uint16_t classID, uint16_t beholderID, uintptr_t *classChain);
    bool validateProfiledClassRecord(uint16_t classID, void *classChainIdentifyingLoader, void *classChainForClassBeingValidated);
    bool validateClassFromCPRecord(uint16_t classID, uint16_t beholderID, uint32_t cpIndex);
    bool validateDefiningClassFromCPRecord(uint16_t classID, uint16_t beholderID, uint32_t cpIndex, bool isStatic);
@@ -701,7 +709,7 @@ public:
    bool validateArrayClassFromComponentClassRecord(uint16_t arrayClassID, uint16_t componentClassID);
    bool validateSuperClassFromClassRecord(uint16_t superClassID, uint16_t childClassID);
    bool validateClassInstanceOfClassRecord(uint16_t classOneID, uint16_t classTwoID, bool objectTypeIsFixed, bool castTypeIsFixed, bool wasInstanceOf);
-   bool validateSystemClassByNameRecord(uint16_t systemClassID, uintptrj_t *classChain);
+   bool validateSystemClassByNameRecord(uint16_t systemClassID, uintptr_t *classChain);
    bool validateClassFromITableIndexCPRecord(uint16_t classID, uint16_t beholderID, uint32_t cpIndex);
    bool validateDeclaringClassFromFieldOrStaticRecord(uint16_t definingClassID, uint16_t beholderID, int32_t cpIndex);
    bool validateConcreteSubClassFromClassRecord(uint16_t childClassID, uint16_t superClassID);
@@ -748,6 +756,11 @@ public:
    bool inHeuristicRegion() { return (_heuristicRegion > 0); }
 
    static bool assertionsAreFatal();
+
+#if defined(J9VM_OPT_JITSERVER)
+   std::string serializeSymbolToIDMap();
+   void deserializeSymbolToIDMap(const std::string &symbolToIdStr);
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 private:
 

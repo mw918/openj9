@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -236,7 +236,6 @@ J9InternalVMFunctions J9InternalFunctions = {
 	compareStrings,
 	compareStringToUTF8,
 	prepareForExceptionThrow,
-	copyUTF8ToUnicode,
 	verifyQualifiedName,
 	copyStringToUTF8Helper,
 	sendCompleteInitialization,
@@ -269,7 +268,6 @@ J9InternalVMFunctions J9InternalFunctions = {
 	initJVMRI,
 	shutdownJVMRI,
 	getOwnedObjectMonitors,
-	fixUnsafeMethods,
 #if !defined(J9VM_SIZE_SMALL_CODE)
 	fieldIndexTableRemove,
 #endif /* J9VM_SIZE_SMALL_CODE */
@@ -307,7 +305,6 @@ J9InternalVMFunctions J9InternalFunctions = {
 	clearHaltFlag,
 	setHeapOutOfMemoryError,
 	initializeHeapOOMMessage,
-	copyUTF8ToCompressedUnicode,
 	threadAboutToStart,
 	mustHaveVMAccess,
 #if defined(J9VM_PORT_ZOS_CEEHDLRSUPPORT)
@@ -372,4 +369,10 @@ J9InternalVMFunctions J9InternalFunctions = {
 	setNestmatesError,
 #endif
 	areValueTypesEnabled,
+	peekClassHashTable,
+#if defined(J9VM_OPT_JITSERVER)
+	isJITServerEnabled,
+#endif /* J9VM_OPT_JITSERVER */
+	createJoinableThreadWithCategory,
+	valueTypeCapableAcmp,
 };

@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2017, 2019 IBM Corp. and others
+Copyright (c) 2017, 2020 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -39,12 +39,24 @@ This folder contains Jenkins pipeline scripts that are used in the OpenJ9 Jenkin
     - Linux on x86-64 with CMake
         - Spec: x86-64_linux_cm
         - Shortname: xlinuxcm or xlinuxcmake
+    - Linux on x86-64 with JITServer
+        - Spec x86-64_linux_jit
+        - Shortname: xlinuxjit
+    - Linux on s390x largeheap/non-compressed references
+        - Spec: s390x_linux_xl
+        - Shortname: zlinuxlargeheap or zlinuxxl
     - Linux on s390x
         - Spec: s390x_linux
         - Shortname: zlinux
     - Linux on ppc64le
         - Spec: ppc64le_linux
         - Shortname: plinux
+    - Linux on ppc64le largeheap/non-compressed references
+        - Spec: ppc64le_linux_xl
+        - Shortname: plinuxlargeheap or plinuxxl
+    - Linux on ppc64le with CMake
+        - Spec: ppc64le_linux_cm
+        - Shortname: plinuxcm or plinuxcmake
     - Linux on aarch64
         - Spec: aarch64_linux
         - Shortname: alinux64
@@ -71,7 +83,7 @@ This folder contains Jenkins pipeline scripts that are used in the OpenJ9 Jenkin
         - Shortname: osxlargeheap or osxxl
     - ALL
         - Launches a subset of 'all' platforms
-        - ppc64le_linux, s390x_linux, x86-64_linux, x86-64_linux_xl, ppc64_aix, x86-64_windows, x86-32_windows, x86-64_mac
+        - ppc64le_linux, ppc64le_linux_xl, s390x_linux, s390x_linux_xl, x86-64_linux, x86-64_linux_xl, ppc64_aix, x86-64_windows, x86-32_windows, x86-64_mac
 
 - OpenJ9 committers can request builds by commenting in a pull request
     - Format: `Jenkins <build type> <level>.<group>[+<test_flag>] <platform>[,<platform>,...,<platform>] jdk<version>[,jdk<version>,...,jdk<version>]`
@@ -79,11 +91,11 @@ This folder contains Jenkins pipeline scripts that are used in the OpenJ9 Jenkin
     - `<level>` is sanity | extended (required only for "test" `<build type>`)
     - `<group>` is functional | system
     - `<test_flag>` Optional: any TEST_FLAG is supported. See notes below.
-    - `<platform>` is one of the platform shorthands above
+    - `<platform>` is one of the (short or full) platform names above
     - `<version>` is the number of the supported release, e.g. 8 | 11 | next
 - Note: You can use keyword `all` for platform but not for test level/type or JDK versions.
 - Note: For backward compatibility `<level>.<test type>` equal to `sanity` or `extended` is acceptable and will map to `sanity.functional` and `extended.functional` respectively.
-- Note: TEST_FLAG is an optional argument to the test target. It is recommended to only launch 1 test target with 1 TEST_FLAG per comment/build. At the time of writing, the two supported test flags are `+jitaas` and `+aot`. Ex. `Jenkins test sanity.functional+jitaas xlinux jdk8`.
+- Note: TEST_FLAG is an optional argument to the test target. It is recommended to only launch 1 test target with 1 TEST_FLAG per comment/build. At the time of writing, the two supported test flags are `+jitaas` and `+aot`. Ex. `Jenkins test sanity.functional+jitaas xlinux jdk8`. Also note JITServer specs set the TEST_FLAG via the variable file so it is unnecessary to add it to the test target.
 
 ###### Examples
 - Request a Compile-only build on all platforms and multiple versions by commenting in a PR
@@ -128,13 +140,13 @@ You can request a Pull Request build from the Eclipse OpenJ9 repository - [openj
 ##### Other Pull Requests builds
 
 - To trigger a Line Endings Check
-   - `Jenkins line endings check`
+    - `Jenkins line endings check`
 
 - To trigger a Copyright Check
-   - `Jenkins copyright check`
+    - `Jenkins copyright check`
 
 - To trigger a SignedOffBy Check (Only applicable to the Extensions repos)
-   - `Jenkins signed off by check`
+    - `Jenkins signed off by check`
 
 ### Jenkins Pipelines
 
@@ -200,7 +212,6 @@ Pipelines for all platforms and versions are available [**here**](https://ci.ecl
             - `Promote_OMR` once all testing is passed
     - Trigger: Triggered by `Mirror-OMR-to-OpenJ9-OMR`
 
-
 #### Build
 
 Build pipelines for all platforms and versions are available [**here**](https://ci.eclipse.org/openj9/view/Build/).
@@ -214,7 +225,6 @@ Build pipelines for all platforms and versions are available [**here**](https://
         - This job is used in other pipelines but can be launched manually
 
 **Note:** Windows 32 is available only for JDK8. Thus the only available build for win_x86 platform (Windows 32bits) is [Build-JDK8-win_x86](https://ci.eclipse.org/openj9/view/Build/job/Build-JDK8-win_x86/).
-
 
 #### Test
 
@@ -238,7 +248,7 @@ Infrastructure pipelines are available [**here**](https://ci.eclipse.org/openj9/
     - [![Build Status](https://ci.eclipse.org/openj9/buildStatus/icon?job=Mirror-OMR-to-OpenJ9-OMR)](https://ci.eclipse.org/openj9/job/Mirror-OMR-to-OpenJ9-OMR)
     - Description:
         - Mirrors [eclipse/omr/master](https://github.com/eclipse/omr/tree/master) to [eclipse/openj9-omr/master](https://github.com/eclipse/openj9-omr/tree/master)
-        - Triggers `Pipeline-OMR-Acceptance` when there is new content        
+        - Triggers `Pipeline-OMR-Acceptance` when there is new content
     - Trigger:
         - Build periodically, 15 minutes
 
@@ -246,7 +256,6 @@ Infrastructure pipelines are available [**here**](https://ci.eclipse.org/openj9/
     - [![Build Status](https://ci.eclipse.org/openj9/buildStatus/icon?job=Promote_OMR)](https://ci.eclipse.org/openj9/job/Promote_OMR)
     - Description:
         - Promotes eclipse/openj9-omr branch master to branch openj9
-        - Lays a tag down on the promoted SHA in the format `promote_merge_YYYYMMDD_HHMMSS` with annotations including the current OpenJ9 and OpenJDK SHAs
     - Trigger:
         - Last step of `Pipeline-OMR-Acceptance`
 
@@ -256,7 +265,6 @@ Infrastructure pipelines are available [**here**](https://ci.eclipse.org/openj9/
         - Mirrors [github.com/eclipse/openj9-website](https://github.com/eclipse/openj9-website/tree/master) to the Eclipse.org repo
     - Trigger:
         - Poll Github repo for changes
-
 
 ### Adding Builds
 - Always add pipeline style jobs so the code can be committed to the repo once it is ready

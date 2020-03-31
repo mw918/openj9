@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -32,12 +32,17 @@ namespace J9 { class ClassEnv; }
 namespace J9 { typedef J9::ClassEnv ClassEnvConnector; }
 #endif
 
+#if defined(J9VM_OPT_JITSERVER)
+#include <vector>
+#endif /* defined(J9VM_OPT_JITSERVER) */
+#include "env/jittypes.h"
 #include "env/OMRClassEnv.hpp"
 #include "infra/Annotations.hpp"
-#include "env/jittypes.h"
 #include "j9.h"
 
 namespace TR { class SymbolReference; }
+namespace TR { class TypeLayout; }
+namespace TR { class Region; }
 
 namespace J9
 {
@@ -46,29 +51,44 @@ class OMR_EXTENSIBLE ClassEnv : public OMR::ClassEnvConnector
    {
 public:
 
+   TR::ClassEnv *self();
+
    bool classesOnHeap() { return true; }
 
    bool classObjectsMayBeCollected() { return false; }
 
    bool romClassObjectsMayBeCollected() { return false; }
 
-   TR_OpaqueClassBlock *getClassFromJavaLangClass(uintptrj_t objectPointer);
+   TR_OpaqueClassBlock *getClassFromJavaLangClass(uintptr_t objectPointer);
 
    J9Class *convertClassOffsetToClassPtr(TR_OpaqueClassBlock *clazzOffset);
+   TR_OpaqueClassBlock *convertClassPtrToClassOffset(J9Class *clazzPtr);
 
-   uintptrj_t classFlagsValue(TR_OpaqueClassBlock * classPointer);
-   uintptrj_t classDepthOf(TR_OpaqueClassBlock *clazzPointer);
-   uintptrj_t classInstanceSize(TR_OpaqueClassBlock * clazzPointer);
+   uintptr_t classFlagsValue(TR_OpaqueClassBlock * classPointer);
+   uintptr_t classFlagReservableWordInitValue(TR_OpaqueClassBlock * classPointer);
+   uintptr_t classDepthOf(TR_OpaqueClassBlock *clazzPointer);
+   uintptr_t classInstanceSize(TR_OpaqueClassBlock * clazzPointer);
 
    J9ROMClass *romClassOf(TR_OpaqueClassBlock * clazz);
+   J9ROMClass *romClassOfSuperClass(TR_OpaqueClassBlock * clazz, size_t index);
+
+   J9ITable *iTableOf(TR_OpaqueClassBlock * clazz);
+   J9ITable *iTableNext(J9ITable *current);
+   J9ROMClass *iTableRomClass(J9ITable *current);
+#if defined(J9VM_OPT_JITSERVER)
+   std::vector<TR_OpaqueClassBlock *> getITable(TR_OpaqueClassBlock *clazz);
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+   J9Class **superClassesOf(TR_OpaqueClassBlock * clazz);
 
    bool isStringClass(TR_OpaqueClassBlock *clazz);
 
-   bool isStringClass(uintptrj_t objectPointer);
+   bool isStringClass(uintptr_t objectPointer);
 
    bool classHasIllegalStaticFinalFieldModification(TR_OpaqueClassBlock * clazzPointer);
    bool isAbstractClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazzPointer);
    bool isInterfaceClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazzPointer);
+   bool isValueTypeClass(TR_OpaqueClassBlock *);
    bool isEnumClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazzPointer, TR_ResolvedMethod *method);
    bool isPrimitiveClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazz);
    bool isAnonymousClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazz);
@@ -81,17 +101,31 @@ public:
    bool hasFinalFieldsInClass(TR::Compilation *comp, TR_OpaqueClassBlock *classPointer);
    bool sameClassLoaders(TR::Compilation *comp, TR_OpaqueClassBlock *, TR_OpaqueClassBlock *);
    bool isString(TR::Compilation *comp, TR_OpaqueClassBlock *clazz);
-   bool isString(TR::Compilation *comp, uintptrj_t objectPointer);
+   bool isString(TR::Compilation *comp, uintptr_t objectPointer);
    bool jitStaticsAreSame(TR::Compilation *comp, TR_ResolvedMethod * method1, int32_t cpIndex1, TR_ResolvedMethod * method2, int32_t cpIndex2);
    bool jitFieldsAreSame(TR::Compilation *comp, TR_ResolvedMethod * method1, int32_t cpIndex1, TR_ResolvedMethod * method2, int32_t cpIndex2, int32_t isStatic);
 
-   uintptrj_t getArrayElementWidthInBytes(TR::Compilation *comp, TR_OpaqueClassBlock* arrayClass);
+   /** \brief
+    *	    Populates a TypeLayout object.
+    *
+    *  \param region
+    *     The region used to allocate TypeLayout.
+    * 
+    *  \param opaqueClazz
+    *     Class of the type whose layout needs to be populated.
+    * 
+    *  \return
+    *     Returns a pointer to the TypeLayout object populated.
+    */
+   const TR::TypeLayout* enumerateFields(TR::Region& region, TR_OpaqueClassBlock * clazz, TR::Compilation *comp);
 
-   uintptrj_t persistentClassPointerFromClassPointer(TR::Compilation *comp, TR_OpaqueClassBlock *clazz);
-   TR_OpaqueClassBlock *objectClass(TR::Compilation *comp, uintptrj_t objectPointer);
-   TR_OpaqueClassBlock *classFromJavaLangClass(TR::Compilation *comp, uintptrj_t objectPointer);
+   uintptr_t getArrayElementWidthInBytes(TR::Compilation *comp, TR_OpaqueClassBlock* arrayClass);
 
-   uint16_t getStringCharacter(TR::Compilation *comp, uintptrj_t objectPointer, int32_t index);
+   uintptr_t persistentClassPointerFromClassPointer(TR::Compilation *comp, TR_OpaqueClassBlock *clazz);
+   TR_OpaqueClassBlock *objectClass(TR::Compilation *comp, uintptr_t objectPointer);
+   TR_OpaqueClassBlock *classFromJavaLangClass(TR::Compilation *comp, uintptr_t objectPointer);
+
+   uint16_t getStringCharacter(TR::Compilation *comp, uintptr_t objectPointer, int32_t index);
    bool getStringFieldByName(TR::Compilation *, TR::SymbolReference *stringRef, TR::SymbolReference *fieldRef, void* &pResult);
 
    using OMR::ClassEnv::classNameChars;
@@ -105,6 +139,18 @@ public:
    int32_t flagValueForPrimitiveTypeCheck(TR::Compilation *comp);
    int32_t flagValueForArrayCheck(TR::Compilation *comp);
    int32_t flagValueForFinalizerCheck(TR::Compilation *comp);
+
+   bool isClassSpecialForStackAllocation(TR_OpaqueClassBlock * classPointer);
+   /**
+    * Get the virtual function table entry at a specific offset from the class
+    *
+    * @param clazz The RAM class pointer to read from
+    * @param offset An offset into the virtual function table (VFT) of clazz
+    * @return The entry point of the method at the given offset
+    */
+   intptr_t getVFTEntry(TR::Compilation *comp, TR_OpaqueClassBlock* clazz, int32_t offset);
+   uint8_t *getROMClassRefName(TR::Compilation *comp, TR_OpaqueClassBlock *clazz, uint32_t cpIndex, int &classRefLen);
+   J9ROMConstantPoolItem *getROMConstantPool(TR::Compilation *comp, TR_OpaqueClassBlock *clazz);
    };
 
 }

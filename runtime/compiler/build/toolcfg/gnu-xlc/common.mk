@@ -1,4 +1,4 @@
-# Copyright (c) 2000, 2019 IBM Corp. and others
+# Copyright (c) 2000, 2020 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -32,6 +32,7 @@ SOSUFF=.so
 EXESUFF=
 LIBPREFIX=lib
 DEPSUFF=.depend.mk
+DBGSUFF=.debuginfo
 
 #
 # Paths for default programs on the platform
@@ -44,6 +45,7 @@ DEPSUFF=.depend.mk
 # Use default AS=as
 SED?=sed
 PERL?=perl
+OBJCOPY?=objcopy
 
 ifeq (default,$(origin CC))
     CC=xlc_r
@@ -85,7 +87,10 @@ CX_FLAGS_DEBUG+=-g -qfullpath
 
 CX_DEFAULTOPT=-O3
 CX_OPTFLAG?=$(CX_DEFAULTOPT)
-CX_FLAGS_PROD+=$(CX_OPTFLAG) -qdebug=nscrep
+CX_FLAGS_PROD+=$(CX_OPTFLAG)
+ifneq (,$(findstring ppc64le,$(PLATFORM)))
+   CX_FLAGS_PROD+=-qdebug=nscrep
+endif
 
 ifdef ENABLE_SIMD_LIB
     CX_DEFINES+=ENABLE_SPMD_SIMD
@@ -109,6 +114,13 @@ endif
 ifeq ($(BUILD_CONFIG),prod)
     CX_DEFINES+=$(CX_DEFINES_PROD)
     CX_FLAGS+=$(CX_FLAGS_PROD)
+    ifeq (,$(findstring ppc64le,$(PLATFORM)))
+        # big endian
+        C_FLAGS+=-qdebug=nscrep
+        # work-around for XL C/C++ 13.1 compiler bug
+        # related to multiple inheritance
+        CXX_FLAGS+=-qdebug=NETHUNK
+    endif
 endif
 
 C_CMD?=$(CC)

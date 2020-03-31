@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -254,8 +254,12 @@ VM_MHInterpreter::dispatchLoop(j9object_t methodHandle)
 		}
 		case J9_METHOD_HANDLE_KIND_INVOKE_GENERIC: {
 			methodHandle = doInvokeGeneric(methodHandle);
+
 			if (VM_VMHelpers::exceptionPending(_currentThread)) {
 				goto throwCurrentException;
+			} else if (NULL == methodHandle) {
+				nextAction = THROW_NPE;
+				goto done;
 			}
 			break;
 		}
@@ -551,6 +555,18 @@ VM_MHInterpreter::dispatchLoop(j9object_t methodHandle)
 			/* Get MethodHandle for this operation from the VarHandle's handleTable */
 			j9object_t handleTable = J9VMJAVALANGINVOKEVARHANDLE_HANDLETABLE(_currentThread, varHandle);
 			j9object_t methodHandleFromTable = J9JAVAARRAYOFOBJECT_LOAD(_currentThread, handleTable, operation);
+
+			if (NULL == methodHandleFromTable) {
+				/* Building a method type (MT) frame makes the stack walkable since looking up the class below may
+				 * cause a GC or another exception. Also, the MT frame will make it easier to debug and service the
+				 * error as the VarHandle will be on the stack and findable with DDR. The MT frame does not need to
+				 * be restored since throwing the exception will handle it appropriately.
+				 */
+				buildMethodTypeFrame(_currentThread, type);
+				prepareExceptionUsingClassName(_currentThread, "java/lang/UnsupportedOperationException");
+				goto throwCurrentException;
+			}
+
 			j9object_t handleTypeFromTable = J9VMJAVALANGINVOKEMETHODHANDLE_TYPE(_currentThread, methodHandleFromTable);
 			j9object_t accessModeType = J9VMJAVALANGINVOKEVARHANDLEINVOKEHANDLE_ACCESSMODETYPE(_currentThread, methodHandle);
 
@@ -988,6 +1004,12 @@ VM_MHInterpreter::doInvokeGeneric(j9object_t methodHandle)
 	U_32 currentArgSlots = (U_32)J9VMJAVALANGINVOKEMETHODTYPE_ARGSLOTS(_currentThread, currentType);
 	const U_32 slotsOffsetToTargetHandle = currentArgSlots - 1;
 	j9object_t targetHandle = *(j9object_t*)(_currentThread->sp + slotsOffsetToTargetHandle);
+
+	/* If receiver handle is null, return directly and a NPE will be thrown by the caller */
+	if (targetHandle == NULL) {
+		return targetHandle;
+	}
+
 	j9object_t targetType = J9VMJAVALANGINVOKEMETHODHANDLE_TYPE(_currentThread, targetHandle);
 
 	/* There are three cases here:
@@ -1090,7 +1112,11 @@ VM_MHInterpreter::spreadForAsSpreader(j9object_t methodHandle)
 		if (0 != spreadCount) {
 			/* Build a frame so we can throw an exception */
 			buildMethodTypeFrame(_currentThread, currentType);
+#if JAVA_SPEC_VERSION >= 11
+			setCurrentException(_currentThread, J9VMCONSTANTPOOL_JAVALANGNULLPOINTEREXCEPTION, NULL);
+#else
 			setCurrentException(_currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALARGUMENTEXCEPTION, NULL);
+#endif /* JAVA_SPEC_VERSION >= 11 */
 			goto exitSpreadForAsSpreader;
 		}
 	} else {

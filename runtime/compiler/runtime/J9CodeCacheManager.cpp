@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -34,7 +34,7 @@
 #include "infra/Monitor.hpp"
 #include "control/Recompilation.hpp"
 #include "control/RecompilationInfo.hpp"
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "env/ut_j9jit.h"
 #include "infra/CriticalSection.hpp"
 #include "runtime/CodeCacheManager.hpp"
@@ -362,12 +362,12 @@ J9::CodeCacheManager::allocateCodeCacheSegment(size_t segmentSize,
       if (someJitLibraryAddress > MAX_DISTANCE_NEAR_JITLIBRARY_TO_AVOID_TRAMPOLINE)
          {
          // align the startAddress to page boundary
-         vmemParams.startAddress = (void *)align((uint8_t *)(someJitLibraryAddress - MAX_DISTANCE_NEAR_JITLIBRARY_TO_AVOID_TRAMPOLINE), alignment - 1);
+         vmemParams.startAddress = (void *)OMR::align((size_t)(someJitLibraryAddress - MAX_DISTANCE_NEAR_JITLIBRARY_TO_AVOID_TRAMPOLINE), alignment);
          vmemParams.endAddress = preferredStartAddress;
          }
       else
          {
-         vmemParams.startAddress = (void *)align((uint8_t *)(someJitLibraryAddress + SAFE_DISTANCE_REPOSITORY_JITLIBRARY), alignment -1);
+         vmemParams.startAddress = (void *)OMR::align((size_t)(someJitLibraryAddress + SAFE_DISTANCE_REPOSITORY_JITLIBRARY), alignment);
          vmemParams.endAddress = (void *)(someJitLibraryAddress + MAX_DISTANCE_NEAR_JITLIBRARY_TO_AVOID_TRAMPOLINE);
          }
       // unset STRICT_ADDRESS and ADDRESS_HINT
@@ -540,7 +540,7 @@ J9::CodeCacheManager::chooseCacheStartAddress(size_t repositorySize)
             // otherwise move back some space larger than the VM DLL footprint
             startAddress = (void *)(((uint8_t *)someFunctionPointer) - safeDistance);
             // align so that port library returns exactly what we wanted
-            startAddress = (void *) align((uint8_t *)startAddress, alignment - 1);
+            startAddress = (void *)OMR::align((size_t)startAddress, alignment);
             }
          }
       }
@@ -706,7 +706,7 @@ J9::CodeCacheManager::printRemainingSpaceInCodeCaches()
    CacheListCriticalSection scanCacheList(self());
    for (TR::CodeCache *codeCache = self()->getFirstCodeCache(); codeCache; codeCache = codeCache->next())
       {
-      fprintf(stderr, "cache %p has %u bytes empty\n", codeCache, codeCache->getFreeContiguousSpace());
+      fprintf(stderr, "cache %p has %lu bytes empty\n", codeCache, codeCache->getFreeContiguousSpace());
       if (codeCache->isReserved())
          fprintf(stderr, "Above cache is reserved by compThread %d\n", codeCache->getReservingCompThreadID());
       }

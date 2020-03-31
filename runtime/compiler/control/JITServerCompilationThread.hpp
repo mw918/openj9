@@ -24,17 +24,18 @@
 #define JITSERVER_COMPILATION_THREAD_H
 
 #include "control/CompilationThread.hpp"
+#include "env/j9methodServer.hpp"
 #include "runtime/JITClientSession.hpp"
 
 class TR_IPBytecodeHashTableEntry;
-class TR_ResolvedMethodInfoCache;
-class TR_IsUnresolvedString;
 
 using IPTableHeapEntry = UnorderedMap<uint32_t, TR_IPBytecodeHashTableEntry*>;
 using IPTableHeap_t = UnorderedMap<J9Method *, IPTableHeapEntry *>;
 using ResolvedMirrorMethodsPersistIP_t = Vector<TR_ResolvedJ9Method *>;
 using ClassOfStatic_t = UnorderedMap<std::pair<TR_OpaqueClassBlock *, int32_t>, TR_OpaqueClassBlock *>;
 using FieldOrStaticAttrTable_t = UnorderedMap<std::pair<TR_OpaqueClassBlock *, int32_t>, TR_J9MethodFieldAttributes>;
+
+void outOfProcessCompilationEnd(TR_MethodToBeCompiled *entry, TR::Compilation *comp);
 
 namespace TR
 {
@@ -44,8 +45,40 @@ class CompilationInfoPerThreadRemote : public TR::CompilationInfoPerThread
    public:
    friend class TR::CompilationInfo;
    CompilationInfoPerThreadRemote(TR::CompilationInfo &compInfo, J9JITConfig *jitConfig, int32_t id, bool isDiagnosticThread);
+
+   virtual void processEntry(TR_MethodToBeCompiled &entry, J9::J9SegmentProvider &scratchSegmentProvider) override;
+   TR_PersistentMethodInfo *getRecompilationMethodInfo() const { return _recompilationMethodInfo; }
+
+   uint32_t getSeqNo() const { return _seqNo; }; // For ordering requests at the server
+   void setSeqNo(uint32_t seqNo) { _seqNo = seqNo; }
+   void updateSeqNo(ClientSessionData *clientSession);
+
+   void waitForMyTurn(ClientSessionData *clientSession, TR_MethodToBeCompiled &entry); // Return false if timeout
+   bool getWaitToBeNotified() const { return _waitToBeNotified; }
+   void setWaitToBeNotified(bool b) { _waitToBeNotified = b; }
+
    bool cacheIProfilerInfo(TR_OpaqueMethodBlock *method, uint32_t byteCodeIndex, TR_IPBytecodeHashTableEntry *entry);
    TR_IPBytecodeHashTableEntry *getCachedIProfilerInfo(TR_OpaqueMethodBlock *method, uint32_t byteCodeIndex, bool *methodInfoPresent);
+
+   void cacheResolvedMethod(TR_ResolvedMethodKey key, TR_OpaqueMethodBlock *method, uint32_t vTableSlot, const TR_ResolvedJ9JITServerMethodInfo &methodInfo);
+   bool getCachedResolvedMethod(TR_ResolvedMethodKey key, TR_ResolvedJ9JITServerMethod *owningMethod, TR_ResolvedMethod **resolvedMethod, bool *unresolvedInCP = NULL);
+   TR_ResolvedMethodKey getResolvedMethodKey(TR_ResolvedMethodType type, TR_OpaqueClassBlock *ramClass, int32_t cpIndex, TR_OpaqueClassBlock *classObject = NULL);
+
+   void cacheResolvedMirrorMethodsPersistIPInfo(TR_ResolvedJ9Method *resolvedMethod);
+   ResolvedMirrorMethodsPersistIP_t *getCachedResolvedMirrorMethodsPersistIPInfo() const { return _resolvedMirrorMethodsPersistIPInfo; }
+
+   void cacheNullClassOfStatic(TR_OpaqueClassBlock *ramClass, int32_t cpIndex);
+   bool getCachedNullClassOfStatic(TR_OpaqueClassBlock *ramClass, int32_t cpIndex);
+
+   void cacheFieldOrStaticAttributes(TR_OpaqueClassBlock *ramClass, int32_t cpIndex, const TR_J9MethodFieldAttributes &attrs, bool isStatic);
+   bool getCachedFieldOrStaticAttributes(TR_OpaqueClassBlock *ramClass, int32_t cpIndex, TR_J9MethodFieldAttributes &attrs, bool isStatic);
+
+   void cacheIsUnresolvedStr(TR_OpaqueClassBlock *ramClass, int32_t cpIndex, const TR_IsUnresolvedString &stringAttrs);
+   bool getCachedIsUnresolvedStr(TR_OpaqueClassBlock *ramClass, int32_t cpIndex, TR_IsUnresolvedString &stringAttrs);
+
+   void clearPerCompilationCaches();
+   void deleteClientSessionData(uint64_t clientId, TR::CompilationInfo* compInfo, J9VMThread* compThread);
+   virtual void freeAllResources() override;
 
    private:
    /* Template method for allocating a cache of type T on the heap.
@@ -60,6 +93,7 @@ class CompilationInfoPerThreadRemote : public TR::CompilationInfoPerThread
       cache = new (trMemory->trHeapMemory()) T(typename T::allocator_type(trMemory->heapMemoryRegion()));
       return cache != NULL;
       }
+
    /* Template method for storing key-value pairs (of types K and V respectively)
     * to a heap-allocated unordered map.
     * If a map is NULL, will allocate it.
@@ -101,6 +135,7 @@ class CompilationInfoPerThreadRemote : public TR::CompilationInfoPerThread
       // memory will be released automatically at the end of the compilation
       cache = NULL;
       }
+
    TR_PersistentMethodInfo *_recompilationMethodInfo;
    uint32_t _seqNo;
    bool _waitToBeNotified; // accessed with clientSession->_sequencingMonitor in hand

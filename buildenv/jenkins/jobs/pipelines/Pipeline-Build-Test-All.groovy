@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -33,7 +33,9 @@
  *              aix_ppc-64_cmprssptrs,
  *              linux_x86-64,
  *              linux_x86-64_cmprssptrs,
+ *              linux_ppc-64,
  *              linux_ppc-64_cmprssptrs_le,
+ *              linux_390-64,
  *              linux_390-64_cmprssptrs,
  *              win_x86-64_cmprssptrs,
  *              win_x86 (Java 8 support only),
@@ -75,17 +77,26 @@
  *   OPENJDK<version>_REPO_<platform>: String - the OpenJDK<version> repository URL for <platform>
  *   OPENJDK<version>_BRANCH_<platform>: String - the branch to clone from
  *   OPENJDK<version>_SHA_<platform>: String - the last commit SHA
+ *   SUMMARY_AUTO_REFRESH_TIME: String - the downstream summary badge auto-refresh time [in minutes], default: 5
+ *   ENABLE_SUMMARY_AUTO_REFRESH: Boolean - flag to enable the downstream summary auto-refresh, default: false
  */
 
-CURRENT_RELEASES = ['8', '11', '12', '13', 'next']
+CURRENT_RELEASES = ['8', '11', '14', 'next']
 
 SPECS = ['ppc64_aix'      : CURRENT_RELEASES,
          'ppc64le_linux'  : CURRENT_RELEASES,
+         'ppc64le_linux_cm' : ['8', '11', 'next'],
+         'ppc64le_linux_jit' : ['8', '11'],
+         'ppc64le_linux_xl' : CURRENT_RELEASES,
          's390x_linux'    : CURRENT_RELEASES,
+         's390x_linux_jit' : ['8', '11'],
+         's390x_linux_xl' : CURRENT_RELEASES,
          's390x_zos'      : ['11'],
          'x86-64_linux_xl': CURRENT_RELEASES,
          'x86-64_linux'   : CURRENT_RELEASES,
-         'x86-64_linux_cm': ['8', '11'],
+         'x86-64_linux_cm': ['8', '11', 'next'],
+         'x86-64_linux_jit' : ['8', '11'],
+         'x86-64_linux_valhalla'   : ['next'],
          'x86-64_mac_xl'  : CURRENT_RELEASES,
          'x86-64_mac'     : CURRENT_RELEASES,
          'x86-32_windows' : ['8'],
@@ -96,15 +107,25 @@ SPECS = ['ppc64_aix'      : CURRENT_RELEASES,
 
 // SHORT_NAMES is used for PullRequest triggers
 // TODO Combine SHORT_NAMES and SPECS
-SHORT_NAMES = ['all' : ['ppc64le_linux','s390x_linux','x86-64_linux','x86-64_linux_xl','ppc64_aix','x86-64_windows','x86-32_windows','x86-64_mac'],
+SHORT_NAMES = ['all' : ['ppc64le_linux','ppc64le_linux_xl','s390x_linux','s390x_linux_xl','x86-64_linux','x86-64_linux_xl','ppc64_aix','x86-64_windows','x86-32_windows','x86-64_mac'],
             'aix' : ['ppc64_aix'],
             'zlinux' : ['s390x_linux'],
+            'zlinuxjit' : ['s390x_linux_jit'],
+            'zlinuxlargeheap' : ['s390x_linux_xl'],
+            'zlinuxxl' : ['s390x_linux_xl'],
             'plinux' : ['ppc64le_linux'],
+            'plinuxcmake' : ['ppc64le_linux_cm'],
+            'plinuxcm' : ['ppc64le_linux_cm'],
+            'plinuxjit' : ['ppc64le_linux_jit'],
+            'plinuxlargeheap' : ['ppc64le_linux_xl'],
+            'plinuxxl' : ['ppc64le_linux_xl'],
             'xlinuxlargeheap' : ['x86-64_linux_xl'],
             'xlinuxxl' : ['x86-64_linux_xl'],
             'xlinux' : ['x86-64_linux'],
             'xlinuxcmake' : ['x86-64_linux_cm'],
             'xlinuxcm' : ['x86-64_linux_cm'],
+            'xlinuxjit' : ['x86-64_linux_jit'],
+            'xlinuxval' : ['x86-64_linux_valhalla'],
             'win32' : ['x86-32_windows'],
             'win' : ['x86-64_windows'],
             'winlargeheap' : ['x86-64_windows_xl'],
@@ -159,6 +180,34 @@ echo "ghprbTargetBranch:'${ghprbTargetBranch}'"
 ghprbActualCommit = (params.ghprbActualCommit) ? params.ghprbActualCommit : ""
 echo "ghprbActualCommit:'${ghprbActualCommit}'"
 
+// If custom repo/branch/refspec is passed, use it,
+// elif build is OpenJ9 PR, use pr merge-ref/refspec,
+// else use eclipse/master/blank for defaults respectively.
+SCM_REPO = 'https://github.com/eclipse/openj9.git'
+if (params.SCM_REPO) {
+    SCM_REPO = params.SCM_REPO
+}
+echo "SCM_REPO:'${SCM_REPO}'"
+SCM_BRANCH = 'refs/heads/master'
+if (params.SCM_BRANCH) {
+    SCM_BRANCH = params.SCM_BRANCH
+} else if (ghprbPullId && ghprbGhRepository == 'eclipse/openj9') {
+    SCM_BRANCH = sha1
+}
+echo "SCM_BRANCH:'${SCM_BRANCH}'"
+SCM_REFSPEC = ''
+if (params.SCM_REFSPEC) {
+    SCM_REFSPEC = params.SCM_REFSPEC
+} else if (ghprbPullId && ghprbGhRepository == 'eclipse/openj9') {
+    SCM_REFSPEC = "+refs/pull/${ghprbPullId}/merge:refs/remotes/origin/pr/${ghprbPullId}/merge"
+}
+echo "SCM_REFSPEC:'${SCM_REFSPEC}'"
+
+SUMMARY_AUTO_REFRESH_TIME = (params.SUMMARY_AUTO_REFRESH_TIME) ? params.SUMMARY_AUTO_REFRESH_TIME : '5'
+echo "SUMMARY_AUTO_REFRESH_TIME:'${SUMMARY_AUTO_REFRESH_TIME}' [minutes]"
+ENABLE_SUMMARY_AUTO_REFRESH = (params.keySet().contains('ENABLE_SUMMARY_AUTO_REFRESH')) ? params.ENABLE_SUMMARY_AUTO_REFRESH : false
+echo "ENABLE_SUMMARY_AUTO_REFRESH:'${ENABLE_SUMMARY_AUTO_REFRESH}'"
+
 RELEASES = []
 
 OPENJDK_REPO = [:]
@@ -168,6 +217,8 @@ OPENJDK_SHA = [:]
 BUILD_SPECS = [:]
 builds = [:]
 pipelineNames = []
+pipelinesStatus = [:]
+buildFile = ''
 
 try {
     timeout(time: TIMEOUT_TIME.toInteger(), unit: TIMEOUT_UNIT) {
@@ -176,12 +227,7 @@ try {
                 try {
                     def gitConfig = scm.getUserRemoteConfigs().get(0)
                     def remoteConfigParameters = [url: "${gitConfig.getUrl()}"]
-                    def scmBranch = scm.branches[0].name
-                    if (ghprbGhRepository == 'eclipse/openj9') {
-                        // OpenJ9 PR build
-                        scmBranch = params.sha1
-                        remoteConfigParameters.put("refspec", "+refs/pull/${ghprbPullId}/merge:refs/remotes/origin/pr/${ghprbPullId}/merge")
-                    }
+                    remoteConfigParameters.put("refspec", SCM_REFSPEC)
 
                     if (gitConfig.getCredentialsId()) {
                         remoteConfigParameters.put("credentialsId", "${gitConfig.getCredentialsId()}")
@@ -190,11 +236,11 @@ try {
                     checkout changelog: false,
                             poll: false,
                             scm: [$class: 'GitSCM',
-                            branches: [[name: "${scmBranch}"]],
+                            branches: [[name: SCM_BRANCH]],
                             doGenerateSubmoduleConfigurations: false,
                             extensions: [[$class: 'CloneOption',
-                                          reference: "${HOME}/openjdk_cache"]],
-                            submoduleCfg: [],
+                                          reference: "${HOME}/openjdk_cache"],
+                                        [$class: 'SparseCheckoutPaths', sparseCheckoutPaths: [[path: 'buildenv/jenkins']]]],
                             userRemoteConfigs: [remoteConfigParameters]]
 
                     variableFile = load 'buildenv/jenkins/common/variables-functions.groovy'
@@ -264,7 +310,8 @@ try {
                                             variableFile.create_job(job_name, SDK_VERSION, SPEC, 'pipeline', 'Pipeline')
                                         }
                                     }
-                                    build(job_name, REPO, BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION)
+                                    pipelinesStatus[job_name] = 'RUNNING'
+                                    build(job_name, REPO, BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION, ARCHIVE_JAVADOC)
                                 }
                             }
                         }
@@ -273,6 +320,10 @@ try {
                     // disableDeferredWipeout also requires deleteDirs. See https://issues.jenkins-ci.org/browse/JENKINS-54225
                     cleanWs notFailBuild: true, disableDeferredWipeout: true, deleteDirs: true
                 }
+            }
+
+            if (ENABLE_SUMMARY_AUTO_REFRESH) {
+                builds["downstream_jobs_summary"] = { refresh_summary_table() }
             }
 
             // launch all pipeline builds
@@ -291,9 +342,7 @@ try {
                             PROMOTE_JOB = buildFile.build_with_slack('Promote_OMR', ghprbGhRepository, ghprbActualCommit, GITHUB_SERVER,
                                                                     [string(name: 'REPO', value: OMR_REPO),
                                                                     string(name: 'TARGET_BRANCH', value: 'openj9'),
-                                                                    string(name: 'COMMIT', value: "${SHAS['OMR']}"),
-                                                                    string(name: 'TAG_DESCRIPTION', value: "OpenJ9: ${SHAS['OPENJ9']}"),
-                                                                    booleanParam(name: 'TAG', value: 'true')])
+                                                                    string(name: 'COMMIT', value: "${SHAS['OMR']}")])
                             break
                         case 'OpenJDK':
                             def SDK_VERSION = ''
@@ -317,21 +366,18 @@ try {
                     }
                 }
             }
+            if (params.SLACK_ON_SUCCESS && SLACK_CHANNEL) {
+                slackSend channel: SLACK_CHANNEL, color: 'good', message: "Build Passed: ${JOB_NAME} #${BUILD_NUMBER} (<${BUILD_URL}|Open>)"
+            }
         }
     }
 } finally {
-    // add summary badge
-    table = get_summary_table(BUILD_IDENTIFIER)
-    if (table) {
-        manager.createSummary("plugin.png").appendText(table)
-    }
+    draw_summary_table()
 }
 
 
-def build(JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION) {
+def build(JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION, ARCHIVE_JAVADOC) {
     stage ("${JOB_NAME}") {
-        SCM_BRANCH = (ghprbPullId && ghprbGhRepository == GHPRB_REPO_OPENJ9) ? "origin/pr/${ghprbPullId}/merge" : 'refs/heads/master'
-        SCM_REFSPEC = (ghprbPullId && ghprbGhRepository == GHPRB_REPO_OPENJ9) ? "+refs/pull/${ghprbPullId}/merge:refs/remotes/origin/pr/${ghprbPullId}/merge" : ''
         JOB = build job: JOB_NAME,
                 parameters: [
                     string(name: 'OPENJDK_REPO', value: OPENJDK_REPO),
@@ -370,7 +416,9 @@ def build(JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRAN
                     string(name: 'ghprbTargetBranch', value: ghprbTargetBranch),
                     string(name: 'ghprbActualCommit', value: ghprbActualCommit),
                     string(name: 'SCM_BRANCH', value: SCM_BRANCH),
-                    string(name: 'SCM_REFSPEC', value: SCM_REFSPEC)]
+                    string(name: 'SCM_REFSPEC', value: SCM_REFSPEC),
+                    string(name: 'SCM_REPO', value: SCM_REPO),
+                    booleanParam(name: 'ARCHIVE_JAVADOC', value: ARCHIVE_JAVADOC)]
         return JOB
     }
 }
@@ -432,14 +480,13 @@ def get_pipeline_name(spec, version) {
 */
 def get_summary_table(identifier) {
     // fetch the downstream builds of the current build
+    if (!buildFile) {
+        echo 'buildFile not loaded. Cannot create summary table.'
+        return ''
+    }
     def pipelineBuilds = buildFile.get_downstream_builds(currentBuild, currentBuild.projectName, pipelineNames)
     if (pipelineBuilds.isEmpty()) {
         return ''
-    }
-
-    if (!TESTS_TARGETS) {
-        // default to value set in variables file
-        TESTS_TARGETS = variableFile.get_default_test_targets()
     }
 
     def buildReleases = get_sorted_releases()
@@ -489,6 +536,11 @@ def get_summary_table(identifier) {
                     pipelineLink = buildFile.get_build_embedded_status_link(build)
                     downstreamBuilds.putAll(buildFile.get_downstream_builds(build, pipelineName, downstreamJobNames.values()))
                     pipelineDuration = build.getDurationString()
+
+                    if (build.getResult()) {
+                        // pipeline finished, cache its status
+                        pipelinesStatus[pipelineName] = build.getResult()
+                    }
                 }
             }
 
@@ -513,7 +565,6 @@ def get_summary_table(identifier) {
 
                 innerTable += "<tr style=\"vertical-align: bottom;\"><td>${aLabel}</td><td style=\"text-align: right\">${link}</td><td style=\"text-align: right\">${duration}</td></tr>"
             }
- 
 
             innerTable += "</tbody></table>"
             summaryText += "<td>${innerTable}</td>"
@@ -546,4 +597,29 @@ def get_sorted_releases() {
     }
 
     return sortedReleases
+}
+
+def draw_summary_table() {
+    def table = get_summary_table(BUILD_IDENTIFIER)
+
+    if (table) {
+        if (ENABLE_SUMMARY_AUTO_REFRESH) {
+            def actions = manager.build.actions
+            for (int i = 0; i < actions.size(); i++) {
+                 def action = actions.get(i)
+                 if (action.metaClass && action.metaClass.hasProperty(action, "text") && action.text.contains("Downstream Jobs Status")) {
+                     actions.remove(action)
+                 }
+            }
+        }
+
+        manager.createSummary('plugin.png').appendText(table)
+    }
+}
+
+def refresh_summary_table() {
+    while(pipelinesStatus.values().isEmpty() || pipelinesStatus.values().contains('RUNNING')) {
+        sleep(time: SUMMARY_AUTO_REFRESH_TIME.toInteger(), unit: 'MINUTES')
+        draw_summary_table()
+    }
 }

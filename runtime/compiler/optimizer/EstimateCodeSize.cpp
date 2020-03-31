@@ -23,9 +23,9 @@
 #include "env/StackMemoryRegion.hpp"
 #include "optimizer/EstimateCodeSize.hpp"
 
-#include "codegen/FrontEnd.hpp"
+#include "env/FrontEnd.hpp"
 #include "compile/Compilation.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
 #include "infra/Assert.hpp"
 #include "optimizer/CallInfo.hpp"
 #include "ras/LogTracer.hpp"
@@ -73,14 +73,6 @@ TR_EstimateCodeSize::release(TR_EstimateCodeSize *estimator)
    comp->fej9()->releaseCodeEstimator(comp, estimator);
    }
 
-
-void
-TR_EstimateCodeSize::markIsCold(flags8_t * flags, int32_t i)
-   {
-   _isLeaf = false;
-   flags[i].set(isCold);
-   }
-
 bool
 TR_EstimateCodeSize::calculateCodeSize(TR_CallTarget *calltarget, TR_CallStack *callStack, bool recurseDown)
    {
@@ -120,6 +112,12 @@ TR_EstimateCodeSize::isInlineable(TR_CallStack * prevCallStack, TR_CallSite *cal
 
    heuristicTrace(tracer(),"Depth %d: Created Call Site %p for call found at bc index %d. Signature %s  Looking for call targets.",
                              _recursionDepth, callsite, callsite->_byteCodeIndex, tracer()->traceSignature(callsite));
+
+   if (_inliner->getPolicy()->supressInliningRecognizedInitialCallee(callsite, _inliner->comp()))
+      {
+      heuristicTrace(tracer(),"Skip looking for call targets because supressInliningRecognizedInitialCallee is true for this call site %p\n", callsite);
+      return false;
+      }
 
    callsite->findCallSiteTarget(prevCallStack, _inliner);
    _inliner->applyPolicyToTargets(prevCallStack, callsite);

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -113,6 +113,19 @@
 
 class MM_AllocationContext;
 
+#if defined(OMR_GC_CONCURRENT_SCAVENGER)
+extern "C" {
+
+void
+concurrentScavengerAsyncCallbackHandlerDelegate(J9VMThread *vmThread, IDATA handlerKey, void *userData)
+{
+	concurrentScavengerAsyncCallbackHandler(vmThread->omrVMThread);
+}
+
+} /* extern "C" */
+#endif /* OMR_GC_CONCURRENT_SCAVENGER */
+
+
 /**
  * Initialize the collector's internal structures and values.
  * @return true if initialization completed, false otherwise
@@ -120,6 +133,12 @@ class MM_AllocationContext;
 bool
 MM_ScavengerDelegate::initialize(MM_EnvironmentBase *env)
 {
+#if defined(OMR_GC_CONCURRENT_SCAVENGER)
+	if (_extensions->isConcurrentScavengerEnabled()) {
+		_flushCachesAsyncCallbackKey = _javaVM->internalVMFunctions->J9RegisterAsyncEvent(_javaVM, concurrentScavengerAsyncCallbackHandlerDelegate, NULL);
+	}
+#endif /* OMR_GC_CONCURRENT_SCAVENGER */
+
 	return true;
 }
 
@@ -174,7 +193,8 @@ MM_ScavengerDelegate::workerSetupForGC_clearEnvironmentLangStats(MM_EnvironmentB
 void
 MM_ScavengerDelegate::reportScavengeEnd(MM_EnvironmentBase * envBase, bool scavengeSuccessful)
 {
-	Assert_GC_true_with_message2(envBase, _extensions->scavengerJavaStats._ownableSynchronizerCandidates >= _extensions->scavengerJavaStats._ownableSynchronizerTotalSurvived,
+	/* This assert is not valid for concurrent scavenger - given mutator allocation during concurrent phase, it's possible to have more total survived than candidates*/
+	Assert_GC_true_with_message2(envBase, _extensions->isConcurrentScavengerEnabled() || _extensions->scavengerJavaStats._ownableSynchronizerCandidates >= _extensions->scavengerJavaStats._ownableSynchronizerTotalSurvived,
 			"[MM_ScavengerDelegate::reportScavengeEnd]: _extensions->scavengerJavaStats: _ownableSynchronizerCandidates=%zu < _ownableSynchronizerTotalSurvived=%zu\n", _extensions->scavengerJavaStats._ownableSynchronizerCandidates, _extensions->scavengerJavaStats._ownableSynchronizerTotalSurvived);
 
 	if (!scavengeSuccessful) {
@@ -203,6 +223,8 @@ MM_ScavengerDelegate::mergeGCStats_mergeLangStats(MM_EnvironmentBase * envBase)
 	finalGCJavaStats->_weakReferenceStats.merge(&scavJavaStats->_weakReferenceStats);
 	finalGCJavaStats->_softReferenceStats.merge(&scavJavaStats->_softReferenceStats);
 	finalGCJavaStats->_phantomReferenceStats.merge(&scavJavaStats->_phantomReferenceStats);
+
+	scavJavaStats->clear();
 }
 
 void
@@ -314,7 +336,7 @@ MM_ScavengerDelegate::getObjectScanner(MM_EnvironmentStandard *env, omrobjectptr
 				Assert_MM_unreachable();
 			}
 
-			GC_SlotObject referentPtr(env->getOmrVM(), &J9GC_J9VMJAVALANGREFERENCE_REFERENT(env, objectPtr));
+			GC_SlotObject referentPtr(env->getOmrVM(), J9GC_J9VMJAVALANGREFERENCE_REFERENT_ADDRESS(env, objectPtr));
 			if (referentMustBeCleared) {
 				/* Discovering this object at this stage in the GC indicates that it is being resurrected. Clear its referent slot. */
 				referentPtr.writeReferenceToSlot(NULL);
@@ -333,10 +355,8 @@ MM_ScavengerDelegate::getObjectScanner(MM_EnvironmentStandard *env, omrobjectptr
 		}
 		break;
 	case GC_ObjectModel::SCAN_OWNABLESYNCHRONIZER_OBJECT:
-		if (!_extensions->isConcurrentScavengerEnabled()) {
-			if (GC_ObjectScanner::isHeapScan(flags)) {
-				private_addOwnableSynchronizerObjectInList(env, objectPtr);
-			}
+		if (GC_ObjectScanner::isHeapScan(flags)) {
+			private_addOwnableSynchronizerObjectInList(env, objectPtr);
 		}
 		objectScanner = GC_MixedObjectScanner::newInstance(env, objectPtr, allocSpace, flags);
 		break;
@@ -347,6 +367,12 @@ MM_ScavengerDelegate::getObjectScanner(MM_EnvironmentStandard *env, omrobjectptr
 				splitAmount = _extensions->scavenger->getArraySplitAmount(env, _extensions->indexableObjectModel.getSizeInElements((omrarrayptr_t)objectPtr));
 			}
 			objectScanner = GC_PointerArrayObjectScanner::newInstance(env, objectPtr, allocSpace, flags, splitAmount);
+		}
+		break;
+		case GC_ObjectModel::SCAN_FLATTENED_ARRAY_OBJECT:
+		{
+			Assert_MM_true(J9_IS_J9CLASS_FLATTENED(clazzPtr));
+			Assert_MM_unimplemented();
 		}
 		break;
 	case GC_ObjectModel::SCAN_PRIMITIVE_ARRAY_OBJECT:
@@ -373,12 +399,9 @@ MM_ScavengerDelegate::scavengeIndirectObjectSlots(MM_EnvironmentStandard *env, o
 	J9Class *classToScan = classPtr;
 	do {
 		volatile omrobjectptr_t *slotPtr = NULL;
-		GC_ClassStaticsIterator classStaticsIterator(env, classToScan);
-		while((slotPtr = classStaticsIterator.nextSlot()) != NULL) {
-			shouldBeRemembered = _extensions->scavenger->copyObjectSlot(env, slotPtr) || shouldBeRemembered;
-		}
-		GC_ConstantPoolObjectSlotIterator constantPoolObjectSlotIterator((J9JavaVM*)_omrVM->_language_vm, classToScan, true);
-		while ((slotPtr = constantPoolObjectSlotIterator.nextSlot()) != NULL) {
+
+		GC_ClassIterator classIterator(env, classToScan);
+		while((slotPtr = classIterator.nextSlot()) != NULL) {
 			shouldBeRemembered = _extensions->scavenger->copyObjectSlot(env, slotPtr) || shouldBeRemembered;
 		}
 		shouldBeRemembered = _extensions->scavenger->copyObjectSlot(env, (omrobjectptr_t *)&(classToScan->classObject)) || shouldBeRemembered;
@@ -402,23 +425,13 @@ MM_ScavengerDelegate::hasIndirectReferentsInNewSpace(MM_EnvironmentStandard *env
 		 return true;
 	}
 
-	/* Iterate though Class Statics and Constant Dynamics*/
+	/* Iterate over all slots in a class which contain an object reference */
 	do {
 		omrobjectptr_t *slotPtr = NULL;
-		GC_ClassStaticsIterator classStaticsIterator(env, classToScan);
-		while(NULL != (slotPtr = (omrobjectptr_t*)classStaticsIterator.nextSlot())) {
+		GC_ClassIterator classIterator(env, classToScan);
+		while(NULL != (slotPtr = (omrobjectptr_t*)classIterator.nextSlot())) {
 			omrobjectptr_t objectPtr = *slotPtr;
 			if (NULL != objectPtr){
-				if (_extensions->scavenger->isObjectInNewSpace(objectPtr)){
-					Assert_MM_false(_extensions->scavenger->isObjectInEvacuateMemory(objectPtr));
-					return true;
-				}
-			}
-		}
-		GC_ConstantPoolObjectSlotIterator constantPoolObjectSlotIterator((J9JavaVM*)_omrVM->_language_vm, classToScan, true);
-		while (NULL != (slotPtr = (omrobjectptr_t*)constantPoolObjectSlotIterator.nextSlot())) {
-			omrobjectptr_t objectPtr = *slotPtr;
-			if (NULL != objectPtr) {
 				if (_extensions->scavenger->isObjectInNewSpace(objectPtr)){
 					Assert_MM_false(_extensions->scavenger->isObjectInEvacuateMemory(objectPtr));
 					return true;
@@ -440,12 +453,8 @@ MM_ScavengerDelegate::fixupIndirectObjectSlots(MM_EnvironmentStandard *env, omro
 	J9Class *classToScan = clazz;
 	do {
 		volatile omrobjectptr_t *slotPtr = NULL;
-		GC_ClassStaticsIterator classStaticsIterator(env, classToScan);
-		while((slotPtr = classStaticsIterator.nextSlot()) != NULL) {
-			_extensions->scavenger->fixupSlotWithoutCompression(slotPtr);
-		}
-		GC_ConstantPoolObjectSlotIterator constantPoolObjectSlotIterator((J9JavaVM*)_omrVM->_language_vm, classToScan, true);
-		while ((slotPtr = constantPoolObjectSlotIterator.nextSlot()) != NULL) {
+		GC_ClassIterator classIterator(env, classToScan);
+		while((slotPtr = classIterator.nextSlot()) != NULL) {
 			_extensions->scavenger->fixupSlotWithoutCompression(slotPtr);
 		}
 		_extensions->scavenger->fixupSlotWithoutCompression((omrobjectptr_t *)&(classToScan->classObject));
@@ -462,12 +471,8 @@ MM_ScavengerDelegate::backOutIndirectObjectSlots(MM_EnvironmentStandard *env, om
 	J9Class *classToScan = clazz;
 	do {
 		volatile omrobjectptr_t *slotPtr = NULL;
-		GC_ClassStaticsIterator classStaticsIterator(env, classToScan);
-		while((slotPtr = classStaticsIterator.nextSlot()) != NULL) {
-			_extensions->scavenger->backOutFixSlotWithoutCompression(slotPtr);
-		}
-		GC_ConstantPoolObjectSlotIterator constantPoolObjectSlotIterator((J9JavaVM*)_omrVM->_language_vm, classToScan, true);
-		while ((slotPtr = constantPoolObjectSlotIterator.nextSlot()) != NULL) {
+		GC_ClassIterator classIterator(env, classToScan);
+		while((slotPtr = classIterator.nextSlot()) != NULL) {
 			_extensions->scavenger->backOutFixSlotWithoutCompression(slotPtr);
 		}
 		_extensions->scavenger->backOutFixSlotWithoutCompression((omrobjectptr_t *)&(classToScan->classObject));
@@ -535,9 +540,9 @@ MM_ScavengerDelegate::reverseForwardedObject(MM_EnvironmentBase *env, MM_Forward
 		if ((J9CLASS_FLAGS(forwardedClass) & J9AccClassReferenceMask)) {
 			I_32 forwadedReferenceState = J9GC_J9VMJAVALANGREFERENCE_STATE(env, fwdObjectPtr);
 			J9GC_J9VMJAVALANGREFERENCE_STATE(env, objectPtr) = forwadedReferenceState;
-			GC_SlotObject referentSlotObject(_omrVM, &J9GC_J9VMJAVALANGREFERENCE_REFERENT(env, fwdObjectPtr));
+			GC_SlotObject referentSlotObject(_omrVM, J9GC_J9VMJAVALANGREFERENCE_REFERENT_ADDRESS(env, fwdObjectPtr));
 			if (NULL == referentSlotObject.readReferenceFromSlot()) {
-				GC_SlotObject slotObject(_omrVM, &J9GC_J9VMJAVALANGREFERENCE_REFERENT(env, objectPtr));
+				GC_SlotObject slotObject(_omrVM, J9GC_J9VMJAVALANGREFERENCE_REFERENT_ADDRESS(env, objectPtr));
 				slotObject.writeReferenceToSlot(NULL);
 			}
 			/* Copy back the reference link */
@@ -547,7 +552,7 @@ MM_ScavengerDelegate::reverseForwardedObject(MM_EnvironmentBase *env, MM_Forward
 		/* Copy back the finalize link */
 		fomrobject_t *finalizeLinkAddress = barrier->getFinalizeLinkAddress(fwdObjectPtr);
 		if (NULL != finalizeLinkAddress) {
-			barrier->setFinalizeLink(objectPtr, barrier->convertPointerFromToken(*finalizeLinkAddress));
+			barrier->setFinalizeLink(objectPtr, barrier->getFinalizeLink(fwdObjectPtr));
 		}
 	}
 }
@@ -571,6 +576,7 @@ MM_ScavengerDelegate::fixupDestroyedSlot(MM_EnvironmentBase *env, MM_ForwardedHe
 		}
 
 		if (isObjectSlot) {
+			bool const compressed = _extensions->compressObjectReferences();
 			/* Get the uncompressed reference from the slot */
 			MM_ObjectAccessBarrier* barrier = _extensions->accessBarrier;
 			omrobjectptr_t survivingCopyAddress = barrier->convertPointerFromToken(originalForwardedHeader->getPreservedOverlap());
@@ -580,7 +586,7 @@ MM_ScavengerDelegate::fixupDestroyedSlot(MM_EnvironmentBase *env, MM_ForwardedHe
 				void *topOfObject = (void *)((uintptr_t *)survivingCopyAddress + 1);
 				if (subSpaceNew->isObjectInNewSpace(survivingCopyAddress, topOfObject) || _extensions->isOld(survivingCopyAddress, topOfObject)) {
 					/* if the slot points to a reverse-forwarded object, restore the original location (in evacuate space) */
-					MM_ForwardedHeader reverseForwardedHeader(survivingCopyAddress);
+					MM_ForwardedHeader reverseForwardedHeader(survivingCopyAddress, compressed);
 					if (reverseForwardedHeader.isReverseForwardedPointer()) {
 						/* first slot must be fixed up */
 						originalForwardedHeader->restoreDestroyedOverlap((uint32_t)barrier->convertTokenFromPointer(reverseForwardedHeader.getReverseForwardedPointer()));
@@ -597,8 +603,10 @@ MM_ScavengerDelegate::private_addOwnableSynchronizerObjectInList(MM_EnvironmentS
 {
 	omrobjectptr_t link = MM_GCExtensions::getExtensions(_extensions)->accessBarrier->isObjectInOwnableSynchronizerList(object);
 	/* if isObjectInOwnableSynchronizerList() return NULL, it means the object isn't in OwnableSynchronizerList,
-	 * it could be the constructing object which would be added in the list after the construction finish later. ignore the object to avoid duplicated reference in the list. */
-	if (NULL != link) {
+	 * it could be the constructing object which would be added in the list after the construction finish later. ignore the object to avoid duplicated reference in the list.
+	 * For concurrent scavenger, an object that doesn't finish constructing before the start of the STW phase will be added to the list after, during the concurrent phase.
+	 * In this case, the object may already be added to the list. */
+	if (NULL != link && (!_extensions->isConcurrentScavengerEnabled() || (_extensions->isConcurrentScavengerEnabled() && !_extensions->scavenger->isObjectInNewSpace(link)))) {
 		/* this method expects the caller (scanObject) never pass the same object twice, which could cause circular loop when walk through the list.
 		 * the assertion partially could detect duplication case */
 		Assert_MM_false(_extensions->scavenger->isObjectInNewSpace(link));
@@ -725,6 +733,43 @@ MM_ScavengerDelegate::switchConcurrentForThread(MM_EnvironmentBase *env)
 #endif
     }
 }
+
+void
+MM_ScavengerDelegate::signalThreadsToFlushCaches(MM_EnvironmentBase *currentEnvBase)
+{
+	MM_EnvironmentStandard *currentEnv = MM_EnvironmentStandard::getEnvironment(currentEnvBase);
+	J9InternalVMFunctions const * const vmFuncs = _javaVM->internalVMFunctions;
+	J9VMThread *walkThread = NULL;
+
+	/* We will be abandoning TLH remainders on behalf of other threads. Let's do it for us first to clear up the pointers. */
+	_extensions->scavenger->abandonSurvivorTLHRemainder(currentEnv);
+	_extensions->scavenger->abandonTenureTLHRemainder(currentEnv, false);
+
+	GC_VMThreadListIterator vmThreadListIterator(_javaVM);
+
+	GC_VMInterface::lockVMThreadList(_extensions);
+
+	while((walkThread = vmThreadListIterator.nextVMThread()) != NULL) {
+		vmFuncs->J9SignalAsyncEvent(_javaVM, walkThread, _flushCachesAsyncCallbackKey);
+		/* For threads that blocked, do not hold VM access, run native etc, we cannot wait but must flush on their behalf.
+		 * Hold public mutex to prevent acquiring VM access and racing with our flush
+		 */
+		MM_EnvironmentStandard *walkEnv = MM_EnvironmentStandard::getEnvironment(walkThread->omrVMThread);
+		omrthread_monitor_enter(walkThread->publicFlagsMutex);
+		walkEnv->flushGCCaches(false);
+		omrthread_monitor_exit(walkThread->publicFlagsMutex);
+	}
+
+	GC_VMInterface::unlockVMThreadList(_extensions);
+}
+
+void
+MM_ScavengerDelegate::cancelSignalToFlushCaches(MM_EnvironmentBase *env)
+{
+	_javaVM->internalVMFunctions->J9CancelAsyncEvent(_javaVM, NULL, _flushCachesAsyncCallbackKey);
+}
+
+
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
 
 #if defined(OMR_ENV_DATA64) && defined(OMR_GC_FULL_POINTERS)
@@ -745,6 +790,9 @@ MM_ScavengerDelegate::MM_ScavengerDelegate(MM_EnvironmentBase* env)
 	: _omrVM(MM_GCExtensions::getExtensions(env)->getOmrVM())
 	, _javaVM(MM_GCExtensions::getExtensions(env)->getJavaVM())
 	, _extensions(MM_GCExtensions::getExtensions(env))
+#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
+	, _compressObjectReferences(env->compressObjectReferences())
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
 	, _shouldScavengeFinalizableObjects(false)
 	, _shouldScavengeUnfinalizedObjects(false)
 	, _shouldScavengeSoftReferenceObjects(false)
@@ -753,6 +801,9 @@ MM_ScavengerDelegate::MM_ScavengerDelegate(MM_EnvironmentBase* env)
 #if defined(J9VM_GC_FINALIZATION)
 	, _finalizationRequired(false)
 #endif /* J9VM_GC_FINALIZATION */
+#if defined(OMR_GC_CONCURRENT_SCAVENGER)
+	, _flushCachesAsyncCallbackKey(-1)
+#endif /* OMR_GC_CONCURRENT_SCAVENGER */
 {
 	_typeId = __FUNCTION__;
 }

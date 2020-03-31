@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -27,12 +27,12 @@
 #include "codegen/CodeGenerator.hpp"
 #include "env/CompilerEnv.hpp"
 #include "env/jittypes.h"
+#include "il/LabelSymbol.hpp"
+#include "il/MethodSymbol.hpp"
+#include "il/RegisterMappedSymbol.hpp"
+#include "il/ResolvedMethodSymbol.hpp"
+#include "il/StaticSymbol.hpp"
 #include "il/Symbol.hpp"
-#include "il/symbol/LabelSymbol.hpp"
-#include "il/symbol/MethodSymbol.hpp"
-#include "il/symbol/RegisterMappedSymbol.hpp"
-#include "il/symbol/ResolvedMethodSymbol.hpp"
-#include "il/symbol/StaticSymbol.hpp"
 
 uint8_t *TR::ARMRecompilationSnippet::emitSnippetBody()
    {
@@ -51,10 +51,10 @@ uint8_t *TR::ARMRecompilationSnippet::emitSnippetBody()
    *(int32_t *)buffer = encodeHelperBranchAndLink(countingRecompMethodSymRef, buffer, getNode(), cg());  // BL resolve
    buffer += 4;
 
-   *(int32_t *)buffer = (int32_t)(intptrj_t)cg()->comp()->getRecompilationInfo()->getJittedBodyInfo();
+   *(int32_t *)buffer = (int32_t)(intptr_t)cg()->comp()->getRecompilationInfo()->getJittedBodyInfo();
    buffer += 4;
 
-   *(int32_t *)buffer = ((int32_t)(intptrj_t)cg()->getCodeStart());
+   *(int32_t *)buffer = ((int32_t)(intptr_t)cg()->getCodeStart());
    buffer += 4;
 
    return buffer;
