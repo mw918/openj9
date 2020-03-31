@@ -91,34 +91,6 @@ void releaseVPMutex();
 bool acquireVMaccessIfNeeded(J9VMThread *vmThread, TR_YesNoMaybe isCompThread);
 void releaseVMaccessIfNeeded(J9VMThread *vmThread, bool haveAcquiredVMAccess);
 
-// To be given official J9VMThread fields in the future.  For now, re-using the
-// debug fields should suffice.
-//
-// All fields below are used to EXPERIMENT with the phase profiling infrastructure
-// at this point.
-//
-// <PHASE PROFILER>
-#define J9VMTHREAD_HOOK_FIELD                      debugEventData7
-#define J9VMTHREAD_UNHOOK_FIELD                    debugEventData8
-#define J9VMTHREAD_PHASE_PROFILING_ACTION_FIELD    debugEventData2
-
-#define J9VMTHREAD_TRACINGBUFFER_SIZE_FIELD        debugEventData6
-#define J9VMTHREAD_TRACINGBUFFER_CURSOR_FIELD      debugEventData5
-#define J9VMTHREAD_TRACINGBUFFER_TOP_FIELD         debugEventData4
-#define J9VMTHREAD_TRACINGBUFFER_FH_FIELD          debugEventData3
-
-#define VMTHREAD_SOM_HOOK(x)                       (x->J9VMTHREAD_HOOK_FIELD)
-#define VMTHREAD_SOM_UNHOOK(x)                     (x->J9VMTHREAD_UNHOOK_FIELD)
-#define VMTHREAD_PHASE_PROFILING_ACTION(x)         (x->J9VMTHREAD_PHASE_PROFILING_ACTION_FIELD)
-
-#define VMTHREAD_TRACINGBUFFER_FH(x)               (x->J9VMTHREAD_TRACINGBUFFER_FH_FIELD)
-#define VMTHREAD_TRACINGBUFFER_SIZE(x)             (x->J9VMTHREAD_TRACINGBUFFER_SIZE_FIELD)
-#define VMTHREAD_TRACINGBUFFER_TOP(x)              (x->J9VMTHREAD_TRACINGBUFFER_TOP_FIELD)
-#define VMTHREAD_TRACINGBUFFER_CURSOR(x)           (x->J9VMTHREAD_TRACINGBUFFER_CURSOR_FIELD)
-
-#define VMTHREAD_TRACINGBUFFER_START_MARKER        -1
-
-#define J9_PUBLIC_FLAGS_PATCH_HOOKS_IN_JITTED_METHODS 0x8000000
 // </PHASE PROFILER>
 
 #define J9VMTHREAD_TLH_PREFETCH_COUNT              tlhPrefetchFTA
